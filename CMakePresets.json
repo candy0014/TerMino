@@ -1,0 +1,116 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "chatgpt-options-off",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build-${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "OFF",
+        "TETR_CHATGPT_P2_A": "OFF",
+        "TETR_CHATGPT_P2_B": "OFF",
+        "TETR_CHATGPT_P3_A": "OFF",
+        "TETR_CHATGPT_P3_B": "OFF",
+        "TETR_CHATGPT_P5_A": "OFF",
+        "TETR_CHATGPT_TERRAIN_V1": "OFF",
+        "TETR_CHATGPT_TERRAIN_V2": "OFF",
+        "TETR_CHATGPT_LEARNED_TERRAIN": "OFF",
+        "TETR_CHATGPT_LOCAL_PATTERN": "OFF",
+        "TETR_CHATGPT_TIME_B2B": "OFF",
+        "TETR_CHATGPT_KNOWN_BAG": "OFF",
+        "TETR_CHATGPT_O_ROOF": "OFF",
+        "TETR_CHATGPT_MOCH_MULTI_STEP": "OFF",
+        "TETR_CHATGPT_RISE_HORIZON": "OFF",
+        "TETR_CHATGPT_TRANSPOSITION": "OFF",
+        "TETR_CHATGPT_GARBAGE_ROLLOUT": "OFF",
+        "TETR_CHATGPT_ROOT_COVERAGE": "OFF",
+        "TETR_CHATGPT_GARBAGE_BEAM": "OFF",
+        "TETR_CHATGPT_SETTLED_RISK": "OFF",
+        "TETR_CHATGPT_FAST_TERRAIN": "OFF",
+        "TETR_CHATGPT_CLEAR_STALL_RISK": "OFF",
+        "TETR_CHATGPT_CLEAR_BURST": "OFF",
+        "TETR_CHATGPT_CLEAR_RECOVERY": "OFF",
+        "TETR_CHATGPT_SETUP_RECOVERY": "OFF",
+        "TETR_CHATGPT_CHARGE_RESERVE": "OFF",
+        "TETR_CHATGPT_CHARGE_BURST": "OFF",
+        "TETR_CHATGPT_SPAWN_COLUMNS": "OFF",
+        "TETR_CHATGPT_FLAT_ATTACK": "OFF",
+        "TETR_CHATGPT_BURST_WINDOW": "OFF",
+        "TETR_CHATGPT_VISIBLE_PATH_RISK": "OFF",
+        "TETR_CHATGPT_RECOVERED_PATH_RISK": "OFF",
+        "TETR_CHATGPT_RELEASE_CHOICE": "OFF",
+        "TETR_CHATGPT_BAG_TAIL": "OFF",
+        "TETR_CHATGPT_MATERIAL_RESERVE": "OFF",
+        "TETR_CHATGPT_OWN_MATERIAL": "OFF",
+        "TETR_CHATGPT_RELATIVE_COVER": "OFF",
+        "TETR_CHATGPT_KEY_QUAD": "OFF",
+        "TETR_CHATGPT_KEY_PIECE": "OFF"
+      }
+    },
+    {
+      "name": "chatgpt-stable",
+      "displayName": "bot_chatgpt v0.3.2-rc1 F: retained versus baseline",
+      "inherits": "chatgpt-options-off",
+      "binaryDir": "${sourceDir}/build"
+    },
+    {
+      "name": "chatgpt-key-piece",
+      "inherits": "chatgpt-options-off",
+      "cacheVariables": { "TETR_CHATGPT_KEY_PIECE": "ON" }
+    },
+    {
+      "name": "chatgpt-coverage",
+      "inherits": "chatgpt-options-off",
+      "cacheVariables": { "TETR_CHATGPT_P5_A": "ON" }
+    },
+    {
+      "name": "chatgpt-transposition",
+      "inherits": "chatgpt-options-off",
+      "cacheVariables": { "TETR_CHATGPT_TRANSPOSITION": "ON" }
+    },
+    {
+      "name": "chatgpt-fast-terrain",
+      "inherits": "chatgpt-options-off",
+      "cacheVariables": { "TETR_CHATGPT_FAST_TERRAIN": "ON" }
+    },
+    {
+      "name": "chatgpt-charge-reserve",
+      "inherits": "chatgpt-options-off",
+      "cacheVariables": { "TETR_CHATGPT_CHARGE_RESERVE": "ON" }
+    },
+    {
+      "name": "chatgpt-release-choice",
+      "inherits": "chatgpt-options-off",
+      "cacheVariables": { "TETR_CHATGPT_RELEASE_CHOICE": "ON" }
+    },
+    {
+      "name": "chatgpt-bag-tail",
+      "inherits": "chatgpt-options-off",
+      "cacheVariables": { "TETR_CHATGPT_BAG_TAIL": "ON" }
+    },
+    {
+      "name": "chatgpt-material-reserve",
+      "inherits": "chatgpt-options-off",
+      "cacheVariables": { "TETR_CHATGPT_MATERIAL_RESERVE": "ON" }
+    },
+    {
+      "name": "chatgpt-own-material",
+      "inherits": "chatgpt-options-off",
+      "cacheVariables": { "TETR_CHATGPT_OWN_MATERIAL": "ON" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "chatgpt-stable", "configurePreset": "chatgpt-stable", "configuration": "Release", "targets": ["tetr"] },
+    { "name": "chatgpt-key-piece", "configurePreset": "chatgpt-key-piece", "configuration": "Release", "targets": ["tetr"] },
+    { "name": "chatgpt-coverage", "configurePreset": "chatgpt-coverage", "configuration": "Release", "targets": ["tetr"] },
+    { "name": "chatgpt-transposition", "configurePreset": "chatgpt-transposition", "configuration": "Release", "targets": ["tetr"] },
+    { "name": "chatgpt-fast-terrain", "configurePreset": "chatgpt-fast-terrain", "configuration": "Release", "targets": ["tetr"] },
+    { "name": "chatgpt-charge-reserve", "configurePreset": "chatgpt-charge-reserve", "configuration": "Release", "targets": ["tetr"] },
+    { "name": "chatgpt-release-choice", "configurePreset": "chatgpt-release-choice", "configuration": "Release", "targets": ["tetr"] },
+    { "name": "chatgpt-bag-tail", "configurePreset": "chatgpt-bag-tail", "configuration": "Release", "targets": ["tetr"] },
+    { "name": "chatgpt-material-reserve", "configurePreset": "chatgpt-material-reserve", "configuration": "Release", "targets": ["tetr"] },
+    { "name": "chatgpt-own-material", "configurePreset": "chatgpt-own-material", "configuration": "Release", "targets": ["tetr"] }
+  ]
+}

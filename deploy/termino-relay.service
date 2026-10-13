@@ -1,0 +1,17 @@
+[Unit]
+Description=TerMino UDP multiplayer relay
+StartLimitIntervalSec=30
+StartLimitBurst=5
+
+[Service]
+Type=exec
+ExecStart=%h/termino-server/current/tetr_server
+WorkingDirectory=%h/termino-server/current
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=5s
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

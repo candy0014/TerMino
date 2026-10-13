@@ -1,0 +1,19 @@
+[Unit]
+Description=TerMino Cloudflare Tunnel
+Wants=termino-websocket.service
+After=termino-websocket.service
+StartLimitIntervalSec=60
+StartLimitBurst=10
+ConditionPathExists=%h/.config/termino-cloudflare/token
+
+[Service]
+Type=exec
+ExecStart=%h/termino-cloudflare/current/cloudflared tunnel --no-autoupdate --protocol http2 --metrics 127.0.0.1:20241 run --token-file %h/.config/termino-cloudflare/token
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

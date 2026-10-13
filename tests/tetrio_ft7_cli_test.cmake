@@ -1,0 +1,21 @@
+function(check expected_code expected_text)
+    execute_process(COMMAND "${PROGRAM}" ${ARGN}
+        RESULT_VARIABLE code OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr TIMEOUT 5)
+    if(NOT "${code}" STREQUAL "${expected_code}" OR
+       NOT "${stdout}${stderr}" MATCHES "${expected_text}")
+        message(FATAL_ERROR "Unexpected CLI result ${code}: ${stdout}${stderr}")
+    endif()
+endfunction()
+
+unset(ENV{TETR_TEST_CLOCK_SCALE})
+check(0 "first to 7" --help)
+check(0 "i_kicks" --rotation-profile)
+check(1 "Unknown/incomplete argument" --invalid-option)
+check(1 "Unknown/incomplete argument" --output)
+check(1 "uint32" --seed -1)
+check(1 "uint32" --seed 4294967296)
+check(1 "uint32" --seed 1junk)
+check(1 "Output directory must be new" --output "${EXISTING_DIRECTORY}")
+set(ENV{TETR_TEST_CLOCK_SCALE} 100)
+check(1 "Unset TETR_TEST_CLOCK_SCALE")
+check(0 "first to 7" --help)
