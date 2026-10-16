@@ -51,7 +51,11 @@ inline fs::path normalized(const fs::path& path) {
         else if (part != "." && !part.empty()) tail /= part;
     }
     auto root = fs::path(path.native().substr(0, rootLength));
-    return tail.empty() ? root : root / tail;
+    auto result = tail.empty() ? root : root / tail;
+#ifdef _WIN32
+    result.make_preferred();
+#endif
+    return result;
 }
 
 inline fs::path absolute(const fs::path& path, std::error_code& error) {

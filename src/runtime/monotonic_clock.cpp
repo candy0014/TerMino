@@ -1,4 +1,5 @@
 #include "tetr/runtime/monotonic_clock.h"
+#include "tetr/util/timer_resolution.h"
 #include <cstdlib>
 #include <cmath>
 #include <thread>
@@ -14,6 +15,7 @@
 namespace Runtime {
 
 MonotonicClock::MonotonicClock():start_(std::chrono::steady_clock::now()){
+    Util::enable_precise_waits();
     if (const char* value = std::getenv("TETR_TEST_CLOCK_SCALE")) {
         char* end = nullptr;
         const double parsed = std::strtod(value, &end);

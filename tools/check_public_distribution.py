@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import zipfile
 
 
@@ -45,7 +46,8 @@ def smoke(folder, windows):
     proc = subprocess.Popen([str(server)], cwd=folder, env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
-        for _ in range(150):
+        ready_until = time.monotonic() + 10
+        while time.monotonic() < ready_until:
             if proc.poll() is not None:
                 raise RuntimeError(proc.stderr.read().decode(errors='replace'))
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
@@ -53,8 +55,9 @@ def smoke(folder, windows):
                 try:
                     if probe.recv(100) == b'!probe-ok':
                         break
-                except TimeoutError:
+                except (TimeoutError, ConnectionResetError):
                     pass
+            time.sleep(.01)
         else:
             raise RuntimeError('Packaged relay did not answer')
         assert history.is_file()

@@ -96,6 +96,7 @@ struct Script {
     std::vector<Press> presses;
     std::ostringstream& output;
     std::size_t index=0, offset=0;
+    std::size_t initialOutput=output.str().size();
     bool releasing=true, sampled=false, releaseFinal=false, releasedPrevious=false;
     Clock::time_point phaseStart=Clock::now();
     mutable Test::TerminalScreen screen;
@@ -121,7 +122,10 @@ struct Script {
             // another press. A timed pulse can disappear between polls when
             // terminal rendering or other parallel tests occupy the CPU.
             if (index>0 && key==presses[index-1].key) releasedPrevious=true;
-            const bool releaseObserved=index==0 || !presses[index-1].mustBeRead || releasedPrevious;
+            // Do not press while NavigationInput is still sampling initially
+            // held keys. Wait for this invocation's first rendered screen.
+            const bool releaseObserved=index==0 ? output.str().size()>initialOutput :
+                !presses[index-1].mustBeRead || releasedPrevious;
             if (releaseObserved && elapsed>std::chrono::milliseconds(index==0 ? 30 : 5)) {
                 releasing=false;
                 phaseStart=Clock::now();

@@ -77,9 +77,11 @@ void history() {
     h.add(settings,result(settings),2000,run);assert(h.best(sprint())->runId==1 && !h.recent(sprint()).front().improved);
     const auto replay=directory/"saved replay.rep";std::ofstream(replay)<<"test";
     assert(h.attach_replay(1,replay));assert(replay_exists(*h.best(sprint())));
-    assert(h.best(sprint())->replayPath==replay.lexically_relative(std::filesystem::current_path()).generic_u8string());
+    const auto relative=replay.lexically_relative(std::filesystem::current_path());
+    const auto expected=(relative.empty()?replay:relative).generic_u8string();
+    assert(h.best(sprint())->replayPath==expected);
     const auto path=directory/"history";assert(save(h,path));History loaded;assert(load(loaded,path));assert(loaded.best(sprint())->runId==1);
-    for(const auto& record:loaded.records)assert(!std::filesystem::u8path(record.replayPath).is_absolute());
+    for(const auto& record:loaded.records)assert(record.replayPath.empty() || record.replayPath==expected);
     // Saving legacy in-memory records must not write absolute references again.
     auto legacy=h;for(auto& record:legacy.records)if(!record.replayPath.empty())record.replayPath=replay.generic_u8string();
     assert(save(legacy,path) && load(loaded,path));

@@ -809,6 +809,11 @@ if(BUILD_TESTING)
     add_test(NAME bot_quick_play_attack_small COMMAND bot_quick_play_mods_test --attack-benchmark 150 123 0 12)
     set_tests_properties(bot_quick_play_attack bot_quick_play_attack_seed
         bot_quick_play_attack_pressure bot_quick_play_attack_small PROPERTIES TIMEOUT 300)
+    if(MSVC)
+        # The unchanged 160-piece, width-300 trajectory exercises all bots;
+        # the scalar MSVC build takes longer on hosted Windows runners.
+        set_tests_properties(bot_quick_play_attack_pressure PROPERTIES TIMEOUT 900)
+    endif()
 
     add_executable(bot_coldclear_test tests/bot_coldclear_test.cpp)
     target_link_libraries(bot_coldclear_test PRIVATE tetr_bot_coldclear tetr_bot_legacy tetr_rules)

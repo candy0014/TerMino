@@ -186,14 +186,15 @@ async def run(binary, relay, room_binary=None, view_binary=None):
     proc = subprocess.Popen([relay], stdout=subprocess.DEVNULL)
     try:
         # Probe the actual relay rather than guessing that startup is complete.
-        for _ in range(100):
+        ready_until = asyncio.get_running_loop().time() + 5
+        while asyncio.get_running_loop().time() < ready_until:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
                 probe.settimeout(0.02)
                 probe.sendto(b"!probe", ("127.0.0.1", 3000))
                 try:
                     if probe.recv(100) == b"!probe-ok":
                         break
-                except TimeoutError:
+                except (TimeoutError, ConnectionResetError):
                     pass
             if proc.poll() is not None:
                 raise RuntimeError("UDP relay failed to start (port 3000 already occupied?)")

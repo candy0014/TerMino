@@ -2,6 +2,7 @@
 #include "tetr/network/frame_packet.h"
 #include "tetr/network/network_services.h"
 #include "tetr/network/event_stream.h"
+#include "tetr/util/timer_resolution.h"
 #include <algorithm>
 #include <iostream>
 #include <filesystem>
@@ -12,6 +13,7 @@ namespace Network {
 RelayServer::RelayServer(std::uint32_t randomSeed,const std::string& roomCodeHistory) : random_(randomSeed),roomCodeHistory_(roomCodeHistory),
     nextRoomInstance_(static_cast<std::uint64_t>(randomSeed)<<32),nextConfigEpoch_(static_cast<std::uint64_t>(randomSeed)<<32),
     nextMatchEpoch_(static_cast<std::uint64_t>(randomSeed)<<32) {
+    Util::enable_precise_waits();
     if(!roomCodeHistory_.empty()) {
         const auto path=std::filesystem::u8path(roomCodeHistory_);
         if(!path.parent_path().empty())std::filesystem::create_directories(path.parent_path());
