@@ -3,6 +3,7 @@
 
 #include "tetr/engine/autoplay_adapter.h"
 #include "tetr/engine/live_piece_periodic_events.h"
+#include "tetr/rules/game_completion.h"
 #include "tetr/engine/movement_controller.h"
 #include "live_piece_controls.h"
 #include "tetr/engine/player_input.h"
@@ -77,18 +78,21 @@ Rules::PlayResult run_live_piece_movement(
         lastRender=context.real_now();
     };
     const auto presentPiece = [&] {
-        Render::OutputGuard output(context);
-        synchronizePaintedPiece();
-        player.presentation.activePose=movementState.pose;
+        {
+            Render::OutputGuard output(context);
+            synchronizePaintedPiece();
+            player.presentation.activePose=movementState.pose;
+            if (!pieceDrawn) Render::draw_piece(context,piece,player,movementState.pose,field);
+            else if (renderedPose != movementState.pose)
+                Render::draw_piece_transition(context,piece,player,renderedPose,movementState.pose,field);
+            renderedPose=movementState.pose;
+            pieceDrawn=true;
+            paintedRevision=player.presentation.activePiecePaintRevision;
+            lastRender=context.real_now();
+        }
+        // Commit the local movement before serialization or socket work.
         if (context.config.garbage.mode==Runtime::GarbageMode::Multiplayer)
             Network::send_piece_motion_frame(context,player,movementState.pose);
-        if (!pieceDrawn) Render::draw_piece(context,piece,player,movementState.pose,field);
-        else if (renderedPose != movementState.pose)
-            Render::draw_piece_transition(context,piece,player,renderedPose,movementState.pose,field);
-        renderedPose=movementState.pose;
-        pieceDrawn=true;
-        paintedRevision=player.presentation.activePiecePaintRevision;
-        lastRender=context.real_now();
     };
     if (!instantGravityAlreadyMovesPiece) {
         record_piece_pose(context, Replay::OperationKind::PutDraw, movementState.pose);
@@ -118,7 +122,7 @@ Rules::PlayResult run_live_piece_movement(
         const bool periodicDue = periodic_event_due(context.real_now(),player.timing.framePoll,Network::multiplayer_frame_poll_interval(context)) ||
             (context.config.garbage.mode==Runtime::GarbageMode::CheeseTimer &&
                 periodic_event_due(context.now(),player.timing.timedGarbage,context.config.garbage.generationInterval)) ||
-            blitz_time_expired(context.config.mode.mode,Runtime::elapsed_game_time(context.session,context.now()),context.config.mode.blitzTime) ||
+            Rules::time_goal_reached(context.config,Runtime::elapsed_game_time(context.session,context.now())) ||
             GarbageService::has_due_garbage_rise(context,player) ||
             (context.config.garbage.entryMode == Runtime::GarbageEntryMode::Immediate && GarbageService::has_ready_buffer(context,player));
         if (periodicDue && pieceDrawn && renderedPose!=movementState.pose) presentPiece();
@@ -237,7 +241,8 @@ Rules::PlayResult run_live_piece_movement(
             context, player, Network::ActivePieceState::active(movementState.pose));
     }
     Replay::record_end_move_data(
-        context, movementState.lastRotation, scoring.score, movementState.pose);
+        context, movementState.lastRotation, scoring.score, movementState.pose,
+        Runtime::finesse_rules(context.config.challengeRules)?movementState.inputActions:-1);
     return Rules::PlayResult::ContinueFrame;
 }
 

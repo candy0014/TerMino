@@ -99,7 +99,7 @@ void print_spin(
     move_to(
         context,
         player,
-        3 + player.presentation.hold_panel_height(),
+        1 + board_info_top_row(player),
         -6,
         -nameOffset);
     if (!pieceType.valid()) {
@@ -114,7 +114,7 @@ void print_spin(
 
 void print_clear(const Runtime::GameContext& context, Runtime::PlayerSessionState& player, int lines) {
     OutputGuard output(context);
-    move_to(context, player, 4 + player.presentation.hold_panel_height(), -7, 1);
+    move_to(context, player, 2 + board_info_top_row(player), -7, 1);
     ui_color(context, ColorRole::Text);
     switch (lines) {
         case -1: std::cout << "ＶＯＩＤ　　"; break;
@@ -135,10 +135,10 @@ void print_b2b(
     std::optional<int> requestedValue) {
     OutputGuard output(context);
     const int value = requestedValue.value_or(player.gameplay.scoring.b2b);
-    move_to(context, player, 5 + player.presentation.hold_panel_height(), -7, 2);
+    move_to(context, player, 3 + board_info_top_row(player), -7, 2);
     std::cout << "           ";
     if (value < 2) return;
-    move_to(context, player, 5 + player.presentation.hold_panel_height(), -7, 2);
+    move_to(context, player, 3 + board_info_top_row(player), -7, 2);
     ui_color(context, ColorRole::Text);
     std::cout << "B2B×" << value - 1;
 }
@@ -149,7 +149,7 @@ void print_combo(
     std::optional<int> requestedValue) {
     OutputGuard output(context);
     const int value = requestedValue.value_or(player.gameplay.scoring.combo);
-    move_to(context, player, 7 + player.presentation.hold_panel_height(), -9, 0);
+    move_to(context, player, 5 + board_info_top_row(player), -9, 0);
     std::cout << "                 ";
     if (value < 2) return;
 
@@ -158,7 +158,7 @@ void print_combo(
     move_to(
         context,
         player,
-        7 + player.presentation.hold_panel_height(),
+        5 + board_info_top_row(player),
         -7 - digits / 2 + !(digits & 1),
         digits & 1);
     ui_color(context, ColorRole::Text);
@@ -170,17 +170,17 @@ void print_all_clear(
     Runtime::PlayerSessionState& player,
     bool enabled, bool halfClear) {
     OutputGuard output(context);
-    move_to(context, player, 9 + player.presentation.hold_panel_height(), -5, 0);
+    move_to(context, player, 7 + board_info_top_row(player), -5, 0);
     std::cout << "　　　　";
-    move_to(context, player, 10 + player.presentation.hold_panel_height(), -6, 0);
+    move_to(context, player, 8 + board_info_top_row(player), -6, 0);
     std::cout << "　　　　　";
     if (!enabled && !halfClear) return;
 
     if (context.config.display.obscuredColors) set_ui_color(ColorRole::Ghost, true);
     else set_rgb(238, 219, 47);
-    move_to(context, player, 9 + player.presentation.hold_panel_height(), -5, 0);
+    move_to(context, player, 7 + board_info_top_row(player), -5, 0);
     std::cout << (enabled ? "ＡＬＬ" : "ＨＡＬＦ");
-    move_to(context, player, 10 + player.presentation.hold_panel_height(), -6, 0);
+    move_to(context, player, 8 + board_info_top_row(player), -6, 0);
     std::cout << "ＣＬＥＡＲ";
 }
 
@@ -217,7 +217,7 @@ void print_clutch(
     // ordinary layouts and remain safely left of it in garbage layouts.
     // The former width of 22 erased the border and part of the first cell.
     constexpr int kDisplayWidth = 19;
-    const int row = 8 + player.presentation.hold_panel_height();
+    const int row = 6 + board_info_top_row(player);
     move_to(context, player, row, -10, 0);
     std::cout << std::string(kDisplayWidth, ' ');
     if (consecutive <= 0) return;
@@ -246,12 +246,12 @@ void print_spike(
     const Runtime::GameContext& context,
     Runtime::PlayerSessionState& player) {
     OutputGuard output(context);
-    // This row is immediately below HOLD.  Spin/clear messages begin two rows
-    // later and statistics begin ten rows later, so the left-side labels never
+    // This row is immediately below HOLD. Spin/clear messages begin one row
+    // later and statistics begin nine rows later, so the left-side labels never
     // share a terminal row.  Width 19 ends before the board border even when
     // the garbage meter shifts the whole left panel two columns left.
     constexpr int kDisplayWidth = 19;
-    const int row = 1 + player.presentation.hold_panel_height();
+    const int row = board_info_top_row(player);
     move_to(context, player, row, -10, 0);
     std::cout << std::string(kDisplayWidth, ' ');
     if (!Rules::spike_visible(player.presentation.spike)) return;

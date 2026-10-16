@@ -9,7 +9,11 @@
 - Commit subject: `Botris 10`
 - License: MIT; see [the active checkout's license](../../../zzztoj_standalone/upstream/LICENSE.md).
 
-The main project now compiles the checkout under
+The patched upstream snapshot is vendored as ordinary source files; cloning
+the repository does not require submodule initialization. Original MIT notices
+and the commit above are preserved.
+
+The main project compiles the snapshot under
 `zzztoj_standalone/upstream/src` and the shared adapters in
 `zzztoj_standalone/src`. This keeps the main game and the independent visualizer
 on exactly the same upstream evaluators, searches, and SRS+ reachability graph.

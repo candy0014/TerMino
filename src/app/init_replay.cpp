@@ -1,10 +1,13 @@
+#include "tetr/util/file_path.h"
 #include "init_replay.h"
+#include "challenge_replay_analysis.h"
 #include "tetr/app/init.h"
 #include "tetr/app/application_state.h"
 #include "tetr/replay/session_state.h"
 
 #include "tetr/engine/autoplay_adapter.h"
 #include "tetr/replay/config_codec.h"
+#include "tetr/replay/challenge_prefix.h"
 #include "tetr/replay/file_path.h"
 #include "tetr/replay/operation_codec.h"
 #include "tetr/replay/playback_checkpoint.h"
@@ -30,6 +33,16 @@
 namespace App::InitDetail {
 namespace {
 
+std::optional<std::filesystem::path> session_replay_path(const UserConfig::Settings& user) {
+    // Challenge records already contain project-relative references, including
+    // files outside the default directory. Old absolute references still work.
+    if(user.challengeReplay) {
+        if(user.replayPath.empty())return std::nullopt;
+        return std::filesystem::u8path(user.replayPath);
+    }
+    return Replay::replay_path_for_loading(user.replayPath);
+}
+
 bool replay_hash_valid(const std::string& replay) {
     if (replay.size() <= 17) return false;
     const std::size_t dataLength = replay.size() - 17;
@@ -39,6 +52,7 @@ bool replay_hash_valid(const std::string& replay) {
 void reset_replay_state(Runtime::GameContext& context) {
     auto& state = Replay::session(context);
     state.data.clear();
+    state.loadedRecording.clear();state.sourcePath.clear();state.recentPath.clear();state.challengeRecords.clear();
     state.configPrefix.clear();
     state.undoCount = 0;
     state.pauseCount = 0;
@@ -51,6 +65,7 @@ void reset_replay_state(Runtime::GameContext& context) {
     state.recordingStart.reset();
     state.turnPlayback.reset();
     state.localVersusReplay = false;
+    state.challengePrefixActive = false;
     state.playback = {};
     state.pendingCheckpointRestore.reset();
 }
@@ -140,9 +155,11 @@ bool load_replay(
     Runtime::GameContext& context,
     Runtime::GameContext* secondContext,
     const UserConfig::Settings& user) {
+    const auto previousSource=Replay::session(context).sourcePath;
+    const auto previousRecords=Replay::session(context).challengeRecords;
     reset_replay_state(context);
     if (secondContext != nullptr) reset_replay_state(*secondContext);
-    const auto replayPath=Replay::replay_path_for_loading(user.replayPath);
+    const auto replayPath=session_replay_path(user);
     if (!replayPath) return false;
     std::ifstream input(*replayPath);
     std::string replay;
@@ -152,8 +169,24 @@ bool load_replay(
     replay.resize(replay.size() - 17);
 
     if (!Replay::is_local_versus_replay(replay)) {
+        const auto original=replay;
+        bool prefixActive=false;
+        if(user.challengeReplay && !user.challengeReplay->challengeId.empty()) {
+            const auto definition=Challenges::lookup(user.challengeReplay->challengeId);
+            if(!definition)return false;
+            const auto prepared=Replay::prepare_challenge_replay(replay,definition->id,definition->ruleVersion,bool(definition->stopRule),
+                [&](const std::string& source){return App::analyze_challenge_replay(source,*definition);});
+            if(prepared.status!=Replay::PrefixPreparationStatus::Ready)return false;
+            replay=prepared.recording;prefixActive=prepared.boundary.has_value();
+        }
         const bool loaded=load_replay_stream(context,std::move(replay));
-        if (loaded) apply_replay_resume_request(context,nullptr);
+        if (loaded) {
+            Replay::session(context).challengePrefixActive=prefixActive;
+            Replay::session(context).loadedRecording=original;
+            Replay::session(context).sourcePath=Util::FilePath::generic(*replayPath);
+            if(Replay::session(context).sourcePath==previousSource)Replay::session(context).challengeRecords=previousRecords;
+            apply_replay_resume_request(context,nullptr);
+        }
         return loaded;
     }
 
@@ -169,7 +202,11 @@ bool load_replay(
         return false;
     }
     Replay::session(context).localVersusReplay = true;
+    Replay::session(context).loadedRecording=replay;
+    Replay::session(context).sourcePath=Util::FilePath::generic(*replayPath);
+    if(Replay::session(context).sourcePath==previousSource)Replay::session(context).challengeRecords=previousRecords;
     Replay::session(*secondContext).localVersusReplay = true;
+    Replay::session(*secondContext).sourcePath=Replay::session(context).sourcePath;
     Replay::configure_turn_playback(context, *secondContext);
     apply_replay_resume_request(context,secondContext);
     return true;
@@ -207,13 +244,16 @@ bool configure_replay_or_local_game(
     Runtime::GameContext& context,
     Runtime::GameMode& selectedMode,
     Runtime::GameContext* localPlayerTwoContext) {
-    if (selectedMode == Runtime::GameMode::Replay) {
-        context.user_settings().replayPath=
-            Replay::replay_setting_path(context.user_settings().replayPath);
+    auto playbackUser=context.user_settings();
+    const auto* app=context.app_component();
+    const bool preview=app && app->replayPreview.has_value();
+    if(preview)playbackUser.replayPath=app->replayPreview->path;
+    if (!preview && selectedMode == Runtime::GameMode::Replay && !context.user_settings().challengeReplay) {
+        context.user_settings().replayPath=Replay::replay_setting_path(context.user_settings().replayPath);
     }
     const bool replayMode =
         selectedMode == Runtime::GameMode::Replay &&
-        load_replay(context, localPlayerTwoContext, context.user_settings());
+        load_replay(context, localPlayerTwoContext, preview?playbackUser:context.user_settings());
     if (!replayMode) {
         if (auto* app=context.app_component()) app->replayResume.pending=false;
         if (!context.app_component() || !context.app_component()->headlessLocalMatch)

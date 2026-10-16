@@ -10,6 +10,7 @@
 #include "tetr/runtime/bag_randomizer.h"
 
 #include <deque>
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -66,6 +67,7 @@ struct GarbageSessionState {
 struct PendingAttack {
     MultiplayerSequenceId sequenceId{};
     int attack = 0;
+    int targetSlot = -1;
 
     friend bool operator==(const PendingAttack& lhs, const PendingAttack& rhs) noexcept {
         return lhs.sequenceId == rhs.sequenceId && lhs.attack == rhs.attack;
@@ -76,6 +78,7 @@ struct MultiplayerSessionState {
     std::deque<PendingAttack> pendingSends;
     MultiplayerSequenceId sendId{};
     MultiplayerSequenceId receiveId{};
+    int lastDamageSource = -1;
 };
 
 struct PlayerTimingState {
@@ -89,6 +92,13 @@ struct PlayerTimingState {
     std::optional<TimePoint> realGameStart;
     std::optional<Duration> completedGameTime;
     std::optional<Duration> completedRealTime;
+    std::optional<Duration> remoteGameTime;
+    std::optional<TimePoint> remoteTimeUpdated;
+    double remoteTimeRate = 1.0;
+    Duration remote_elapsed(TimePoint now) const {
+        return remoteGameTime.value_or(Duration{})+
+            (remoteTimeUpdated?std::max(Duration{},now-*remoteTimeUpdated)*remoteTimeRate:Duration{});
+    }
 };
 
 // State for TETR.IO's current Clutch Clear rule.  Eligibility belongs to the
@@ -115,6 +125,12 @@ struct TextDisplaySpan {
 };
 
 struct PlayerPresentationState {
+    std::string username;
+    // Last remote placement HUD survives the following active-piece checkpoint.
+    std::uint64_t remotePlacementRevision=0;
+    Piece::Type remoteSpinPiece=Piece::Type::none();
+    bool remoteMini=false,remotePerfectClear=false,remoteHalfClear=false;
+    int remoteClearLines=0;
     std::string roundEndHeadline;
     int margin = 0;
     int topMargin = 8;
@@ -135,12 +151,21 @@ struct PlayerPresentationState {
     std::vector<bool> garbageBufferSegmentTops;
     bool garbageBufferDisplayDeferred = false;
     int racingGoalRows = -1;
+    std::string racingGoalLabel;
     SpikeDisplayState spike;
-    std::array<std::size_t, 5> messageWidths{};
+    std::array<std::size_t, 6> messageWidths{};
+    std::array<std::string, 6> messageText{};
+    std::array<int,6> messageRows{{-1,-1,-1,-1,-1,-1}};
+    int messageMargin=-1,messageTopMargin=-1;
+    bool messageObscured=false;
+    TimePoint lastMessagePaint{};
     std::array<TextDisplaySpan, 2> altitudeDisplay{};
     TextDisplaySpan undoCountDisplay{};
     std::vector<TextDisplaySpan> replayPromptDisplay;
-    bool qpInvisibleFlash = false;
+    bool invisibleFlash = false;
+    Duration visibilityTime{};
+    Duration activePieceBorn{};
+    bool activePieceShown=true;
     std::array<TextDisplaySpan,5> windupDisplay{};
     int windupDisplayedSegments=-1;
     int windupPulse=-1;

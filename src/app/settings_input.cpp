@@ -99,7 +99,7 @@ struct InlineInputScope {
 #endif
 
 std::string read_inline_text(Runtime::GameContext& context, const CheckMenuControls& checkControls,
-                            const ScalarInputRedraw& redraw, bool* savedByEscape) {
+                            const ScalarInputRedraw& redraw, bool* savedByEscape,const std::string& initialValue) {
     InlineInputScope inlineInput;
 #ifndef _WIN32
     std::string escapeSequence;
@@ -109,8 +109,9 @@ std::string read_inline_text(Runtime::GameContext& context, const CheckMenuContr
 #else
     wchar_t highSurrogate = 0;
 #endif
-    std::string value;
-    std::size_t caret = 0;
+    std::string value=initialValue;
+    std::size_t caret=value.size();
+    bool replaceOnInput=!value.empty();
     redraw(value, caret);
     const auto previous_character = [&](std::size_t at) {
         if (at) --at;
@@ -227,6 +228,10 @@ std::string read_inline_text(Runtime::GameContext& context, const CheckMenuContr
         }
         if (key == '\r' || key == '\n') break;
         bool changed = key != -1 || !inserted.empty();
+        if(key==Left || key==Right || key==Home || key==End) replaceOnInput=false;
+        if(replaceOnInput && (key==Delete || key=='\b' || key==127)) {
+            value.clear();caret=0;replaceOnInput=false;
+        }
         if (key == Left) caret = previous_character(caret);
         else if (key == Right) caret = next_character(caret);
         else if (key == Home) caret = 0;
@@ -240,6 +245,9 @@ std::string read_inline_text(Runtime::GameContext& context, const CheckMenuContr
         else if (key >= ' ' && key <= '~') inserted.assign(1, static_cast<char>(key));
         else if (inserted.empty()) changed = false;
         if (!inserted.empty()) {
+            // The full address starts selected: typing replaces it; cursor
+            // movement keeps it for editing. Other scalar inputs start blank.
+            if(replaceOnInput) {value.clear();caret=0;replaceOnInput=false;}
             value.insert(caret, inserted);
             caret += inserted.size();
         }
@@ -294,7 +302,7 @@ void refresh_runtime_bindings(Runtime::GameContext& context) {
 }
 
 std::string read_scalar_text(Runtime::GameContext& context, const CheckMenuControls& checkControls,
-                             const ScalarInputRedraw& redraw, bool* savedByEscape) {
+                             const ScalarInputRedraw& redraw, bool* savedByEscape,const std::string& initialValue) {
     if (savedByEscape) *savedByEscape = false;
     // Release the action that opened the editor, then discard its queued text.
     wait_for_confirm_release(context, checkControls);
@@ -318,7 +326,7 @@ std::string read_scalar_text(Runtime::GameContext& context, const CheckMenuContr
         previous = value;
         previousCaret = caret;
     };
-    const auto value = read_inline_text(context, checkControls, redraw ? redraw : echo, savedByEscape);
+    const auto value = read_inline_text(context, checkControls, redraw ? redraw : echo, savedByEscape,initialValue);
     context.services.clock.sleep_for(Runtime::Duration::from_seconds(0.1));
     return value;
 }

@@ -9,6 +9,7 @@
 #include "tetr/replay/recorder.h"
 #include "tetr/replay/replay_hash.h"
 #include "tetr/replay/file_path.h"
+#include "tetr/util/file_path.h"
 #include "tetr/replay/local_versus_codec.h"
 #include "tetr/replay/operation_codec.h"
 #include "tetr/replay/playback_checkpoint.h"
@@ -160,32 +161,58 @@ void recording_metadata_preserves_gameplay_and_hashes() {
     assert(Replay::decode_config_prefix(sides.first,decoded,legacy) && legacy.undoCount==0);
 }
 
-void replay_paths_are_rooted_and_saves_cannot_escape() {
-    assert(Replay::replay_path_for_loading("demo.txt") ==
-        std::optional<std::filesystem::path>("replay/demo.txt"));
-    assert(Replay::replay_path_for_loading("replay/demo.txt") ==
-        std::optional<std::filesystem::path>("replay/demo.txt"));
-    assert(Replay::replay_path_for_loading("./replay/demo.txt") ==
-        std::optional<std::filesystem::path>("replay/demo.txt"));
-    assert(Replay::replay_setting_path("  'demo.txt'  ") == "replay/demo.txt");
-    assert(Replay::replay_path_for_saving("demo.txt") ==
-        std::optional<std::filesystem::path>("replay/demo.txt"));
-    assert(Replay::replay_path_for_saving("replay/nested/demo.txt") ==
-        std::optional<std::filesystem::path>("replay/nested/demo.txt"));
-    assert(!Replay::replay_path_for_saving("../demo.txt"));
-    assert(!Replay::replay_path_for_saving("/tmp/demo.txt"));
-    assert(!Replay::replay_path_for_loading("../demo.txt"));
-    assert(!Replay::replay_path_for_loading("/tmp/demo.txt"));
+void replay_paths_distinguish_filenames_and_project_references() {
+    namespace fs=std::filesystem;
+    const fs::path defaultFile=".tetr/replay/demo.txt";
+    for(const auto* name:{"demo.txt","replay/demo.txt",".tetr/replay/demo.txt"}) {
+        assert(Replay::replay_path_for_loading(name)==defaultFile);
+        assert(Replay::replay_path_for_saving(name)==defaultFile);
+        assert(Replay::replay_setting_path(name)==defaultFile.generic_u8string());
+    }
+    assert(Replay::replay_path_for_loading("./replay/demo.txt")==fs::path("replay/demo.txt"));
+    assert(Replay::replay_setting_path("./.tetr/replay/nested/demo.txt")==".tetr/replay/nested/demo.txt");
+    assert(Replay::replay_setting_path("  'demo.txt'  ")==defaultFile.generic_u8string());
+    assert(Replay::replay_path_for_saving("replay/nested/demo.txt")==fs::path(".tetr/replay/nested/demo.txt"));
+    assert(Replay::replay_path_for_saving("../demo.txt")==fs::path("../demo.txt"));
+    assert(Replay::replay_setting_path("../demo.txt")=="../demo.txt");
+    assert(Replay::replay_path_for_saving(".tetr/replay/../demo.txt")==fs::path(".tetr/demo.txt"));
+    for(const auto* invalid:{"",".","..",".tetr/replay",".tetr/replay/","replay"}) {
+        assert(!Replay::replay_path_for_loading(invalid));
+        assert(!Replay::replay_path_for_saving(invalid));
+    }
+    const auto root=fs::current_path();
+    // Absolute input selects its actual location. Stored references must round
+    // trip without being accidentally rooted under the default replay folder.
+    for(const auto& absolute:{root/defaultFile,root/"exports"/fs::u8path("中文 replay.txt"),
+            root/"replay/explicit.txt",root/"root replay.txt",root.parent_path()/"external replay.txt"}) {
+        assert(Replay::replay_path_for_loading(absolute.u8string())==absolute);
+        assert(Replay::replay_path_for_saving(absolute.u8string())==absolute);
+        const auto reference=Replay::replay_setting_path("\""+absolute.u8string()+"\"");
+        assert(!fs::u8path(reference).is_absolute());
+        assert(Replay::replay_setting_path(reference)==reference);
+        const auto loaded=Replay::replay_path_for_loading(reference);assert(loaded);
+        assert(fs::absolute(*loaded).lexically_normal()==absolute);
+    }
 #ifdef _WIN32
-    assert(!Replay::replay_path_for_saving("C:\\demo.txt"));
+    assert(Replay::replay_path_for_saving("C:\\demo.txt")==fs::path("C:\\demo.txt"));
     assert(!Replay::replay_path_for_loading("C:demo.txt"));
-    assert(!Replay::replay_path_for_loading("\\\\server\\share\\demo.txt"));
-    assert(!Replay::replay_path_for_saving("..\\demo.txt"));
-    assert(Replay::replay_setting_path("replay\\demo.txt") == "replay/demo.txt");
-    assert(Replay::replay_path_for_saving("replay\\demo.txt") ==
-        std::filesystem::path("replay") / "demo.txt");
+    assert(Replay::replay_path_for_loading("\\\\server\\share\\demo.txt")==fs::path("\\\\server\\share\\demo.txt"));
+    const fs::path unc=R"(\\server\share\demo.txt)";
+    assert(Replay::replay_path_for_saving(R"(\\server\share\nested\..\demo.txt)")==unc);
+    assert(Replay::replay_setting_path(unc.u8string())=="//server/share/demo.txt");
+    assert(Replay::replay_path_for_loading(Replay::replay_setting_path(unc.u8string()))==unc);
+    assert(!Replay::replay_path_for_loading(R"(\\server\share)"));
+    std::error_code uncError;
+    assert(Util::FilePath::absolute(unc,uncError)==unc && !uncError);
+    assert(Util::FilePath::relative(unc,fs::path(R"(\\SERVER\SHARE)"))==fs::path("demo.txt"));
+    assert(Util::FilePath::relative(unc,fs::path(R"(\\other\share)")).empty());
+    assert(!Replay::replay_path_for_loading("\\demo.txt"));
+    assert(Replay::replay_path_for_saving("..\\demo.txt")==fs::path("../demo.txt"));
+    assert(Replay::replay_setting_path("replay\\demo.txt")==".tetr/replay/demo.txt");
+    assert(Replay::replay_setting_path(".tetr\\replay\\demo.txt")==".tetr/replay/demo.txt");
+    const auto otherDrive=root.root_name()==fs::path("C:")?fs::path("D:\\demo.txt"):fs::path("C:\\demo.txt");
+    assert(Replay::replay_setting_path(otherDrive.u8string())==otherDrive.generic_u8string());
 #endif
-    assert(Replay::replay_setting_path("../demo.txt").empty());
 }
 
 void replay_clock_pauses_and_changes_speed_without_jumping() {
@@ -287,15 +314,15 @@ void replay_progress_renders_timeline_and_controls_below_the_board() {
     std::streambuf* original=std::cout.rdbuf(rendered.rdbuf());
     Engine::render_replay_playback_progress(context,player);
     assert(Replay::playback_presented_elapsed(context).seconds()==3.25);
-    assert(rendered.str().find("00:03.25 / 00:20.00")!=std::string::npos);
-    assert(rendered.str().find("00:15.00 / 00:20.00")==std::string::npos);
+    assert(rendered.str().find("00:03.250")!=std::string::npos);
+    assert(rendered.str().find("00:15.000")==std::string::npos);
 
     rendered.str({});
     rendered.clear();
     replaySession.operations={};
     replaySession.playback.elapsed=Runtime::Duration::from_seconds(20.0);
     Engine::render_replay_playback_progress(context,player);
-    assert(rendered.str().find("00:20.00 / 00:20.00")!=std::string::npos);
+    assert(rendered.str().find("00:20.000")!=std::string::npos);
     assert(rendered.str().find(
         "["+std::string(19,'=')+"|]")!=std::string::npos);
 
@@ -306,7 +333,7 @@ void replay_progress_renders_timeline_and_controls_below_the_board() {
     Engine::update_replay_playback_controls(context,player,true);
     std::cout.rdbuf(original);
 
-    assert(rendered.str().find("00:00.00 / 00:20.00")!=std::string::npos);
+    assert(rendered.str().find("00:00.000")!=std::string::npos);
     assert(rendered.str().find("PLAY")!=std::string::npos);
     assert(rendered.str().find("PAUSE")!=std::string::npos);
     assert(rendered.str().find("Space: Pause")!=std::string::npos);
@@ -445,8 +472,8 @@ void replay_completion_fills_the_timeline_with_trailing_markers() {
         auto* original=std::cout.rdbuf(rendered.rdbuf());
         Engine::render_replay_playback_progress(context,player);
         std::cout.rdbuf(original);
-        const std::string time=duration==0 ? "00:00.00" : "00:20.00";
-        assert(rendered.str().find(time+" / "+time)!=std::string::npos);
+        const std::string time=duration==0 ? "00:00.000" : "00:20.000";
+        assert(rendered.str().find(time)!=std::string::npos);
         assert(rendered.str().find("["+std::string(19,'=')+"|]")!=std::string::npos);
         assert(Replay::playback_elapsed(context,TimePoint::from_seconds(1000)).seconds()==duration);
         assert(replay.operations.size()==1 && replay.lastConsumedTimestamp.seconds()==duration/2);
@@ -811,7 +838,7 @@ int main() {
     replay_gameplay_payloads_hide_argument_positions();
     local_versus_replay_envelope_preserves_both_streams();
     recording_metadata_preserves_gameplay_and_hashes();
-    replay_paths_are_rooted_and_saves_cannot_escape();
+    replay_paths_distinguish_filenames_and_project_references();
     replay_clock_pauses_and_changes_speed_without_jumping();
     replay_progress_renders_timeline_and_controls_below_the_board();
     high_speed_progress_and_controls_follow_the_applied_board();

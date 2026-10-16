@@ -4,10 +4,6 @@
 
 namespace Engine {
 
-bool qp_invisible_flash(Runtime::Duration elapsedGameTime) noexcept {
-    return elapsedGameTime.seconds()>=5 && std::fmod(elapsedGameTime.seconds(),5.0)<1.0;
-}
-
 bool periodic_event_due(Runtime::TimePoint now, Runtime::TimePoint last, Runtime::Duration interval) {
     return now - last > interval;
 }

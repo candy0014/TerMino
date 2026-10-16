@@ -125,7 +125,17 @@ bool decode_map_hex(std::string_view text,MapDefinition& map) {
     for(std::size_t i=0;i<text.size();i+=2) {const int a=digit(text[i]),b=digit(text[i+1]);if(a<0 || b<0) return false;result+=static_cast<char>(a*16+b);}
     return decode_map(result,map);
 }
+MapDefinition construction_map_target(const MapDefinition& map) {
+    MapDefinition target;target.id=map.id;target.name=map.name;target.width=map.width;target.height=map.height;target.rows=map.rows;
+    for(auto& row:target.rows)for(auto& cell:row)cell=map_cell(cell).occupied()?'G':' ';
+    return target;
+}
 void apply_map_config(RuntimeConfig& config,const MapDefinition& map) {
+    if(config.challengeRules==ChallengeRules::ConstructMap) {
+        config.initialMap=std::make_shared<const MapDefinition>(construction_map_target(map));
+        config.field.width=map.width;config.field.height=map.height;
+        return;
+    }
     auto stored=std::make_shared<MapDefinition>(map);
     if(stored->generator==MapGenerator::CustomSequence && config.mapRotationSystem>=0) {
         const auto system=rotation_system_from_index(config.mapRotationSystem);

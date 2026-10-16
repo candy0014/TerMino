@@ -114,6 +114,7 @@ AttackResult configured_attack(const AttackInput& in) {
         ? std::max(0, in.attackRules.garbageSpecialAttack) : 0;
     out.attack = static_cast<int>(std::min<long long>(std::numeric_limits<int>::max(),
         rounded + garbageBonus));
+    if(in.garbageMultiplier<=0) out.attack=0;
     return out;
 }
 

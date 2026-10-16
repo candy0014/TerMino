@@ -53,7 +53,7 @@ void settings_and_replay() {
     auto tree=App::Settings::Model::make_tree(user,false,0);
     assert(!find_item(tree,UserConfig::SettingId::LockResetLimit));
     const auto* garbage=find_node(tree,"garbage-rules"); assert(garbage);
-    int fields=0; for(const auto& child:garbage->children) fields+=child.item.has_value(); assert(fields==8); // Seven shared controls and opener protection.
+    int fields=0; for(const auto& child:garbage->children) fields+=child.item.has_value(); assert(fields==9); // Eight shared controls, including row-rise timing, and opener protection.
     using Id=UserConfig::SettingId;
     for(const auto id:{Id::InfiniteMovement,Id::EntryDelay,Id::CancellationMultiplier,
         Id::MessinessWithinAttack,Id::AvoidSameColumn,Id::GarbageCap,Id::OpenerPhase}) {
@@ -207,7 +207,9 @@ void queue_and_multiplier() {
     in.perfectClear=true; const auto pc=Rules::calculate_attack(in);
     assert(pc.attack==4 && pc.perfectClearAttack==2); // PC is rounded separately.
     in.garbageMultiplier=0; in.clearedGarbageLines=4;
-    assert(Rules::calculate_attack(in).attack==1); // Flat garbage-clear bonus is not multiplied.
+    assert(Rules::calculate_attack(in).attack==0); // Zero attack strength also disables the garbage-clear bonus.
+    in.garbageMultiplier=.5;
+    assert(Rules::calculate_attack(in).attack==5); // A positive multiplier keeps the flat bonus independent.
     using Packet=Rules::GarbagePacket;
     for(const int limit:{0,3,14}) for(const int placed:{1,3,4,14,15}) for(const int sent:{0,5,12}) for(const int pending:{0,3,8,14}) {
         std::deque<Packet> q; if(pending) q.push_back({pending,TimePoint{},false});

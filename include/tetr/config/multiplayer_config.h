@@ -11,10 +11,12 @@ struct MultiplayerConfig {
     std::shared_ptr<const Runtime::MapDefinition> map;
     bool continuousCancellation = false;
 };
-std::string encode_multiplayer_config(const Settings& settings,const Runtime::RuntimeConfig& config);
+std::string encode_multiplayer_config(const Settings& settings,const Runtime::RuntimeConfig& config,bool includePersonal=false);
 std::optional<MultiplayerConfig> decode_multiplayer_config(std::string_view wire);
 // Build match-local rules; local profile, controls and display preferences are preserved.
 Runtime::RuntimeConfig apply_multiplayer_config(const Settings& local,const Runtime::RuntimeConfig& current,
-    const MultiplayerConfig& host,bool forceRules,bool forceHandling);
+    const MultiplayerConfig& host,bool forceRules);
+bool copy_multiplayer_config(Settings& local,const MultiplayerConfig& host);
+Settings multiplayer_config_view_settings(const Settings& local,const MultiplayerConfig& host);
 }
 #endif

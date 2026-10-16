@@ -14,6 +14,7 @@ struct MovementState {
     Runtime::RotationRecord lastRotation{};
     int lockResetCount = 0;
     Runtime::TimePoint lockTimer{};
+    int inputActions=0;
 };
 
 struct MovementEffect {
@@ -31,6 +32,7 @@ public:
     MovementController(MovementState& state, CanPlace canPlace, TryRotate tryRotate);
 
     bool grounded() const;
+    void recordInput() {++state_.inputActions;}
     bool shouldLock(Runtime::TimePoint now, Runtime::Duration lockDelay, Runtime::GravityInterval gravityInterval, bool autoplay) const;
     MovementEffect applyGravity(Runtime::TimePoint now, Runtime::GravityInterval gravityInterval);
     MovementEffect dropToFloor(int scorePerCell, bool refreshLockTimer, Runtime::TimePoint now);

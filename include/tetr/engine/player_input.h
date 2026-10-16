@@ -36,6 +36,7 @@ struct PlayerInputConfig {
     Runtime::Duration dcd{};
     bool softDropFixed = false;
     bool disableUndo = false;
+    bool disableRetry = false;
 };
 
 struct PlayerInputResult {

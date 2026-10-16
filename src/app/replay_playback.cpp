@@ -46,7 +46,9 @@ Rules::PlayResult playback_replay_piece(
                 return Rules::PlayResult::Dead;
             }
             Engine::apply_replay_gameplay_event(context,event.operation,field,player,piece);
-            if(event.movement.type==Replay::MovementEventType::StartPlace) break;
+            if(event.movement.type==Replay::MovementEventType::StartPlace) {
+                player.presentation.activePieceBorn=event.operation.gameTimestamp.value_or(event.operation.timestamp);break;
+            }
         } else {
             context.services.clock.sleep_for(Runtime::Duration::from_seconds(0.001));
         }
@@ -119,6 +121,7 @@ Rules::PlayResult playback_replay_piece(
             }
             assert(event.movement.type==Replay::MovementEventType::EndMoveData);
             movementState.lastRotation=event.movement.lastRotation;
+            movementState.inputActions=event.movement.inputActions;
             player.gameplay.scoring.score=event.movement.score;
             assert(movementState.pose==event.movement.pose);
             player.presentation.activePose.reset();

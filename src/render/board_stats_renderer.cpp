@@ -27,21 +27,33 @@ void ui_color(const Runtime::GameContext& context, ColorRole role) {
 
 } // namespace
 
+double board_elapsed_seconds(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player) {
+    const double timelineElapsed=context.config.mode.replayMode
+        ? Replay::playback_game_elapsed(context,context.now()).seconds()
+        : Runtime::elapsed_game_time(context.session,context.now()).seconds()*context.config.timeMultiplier;
+    return std::max(0.0,player.timing.completedGameTime ? player.timing.completedGameTime->seconds() :
+        player.timing.remoteGameTime ? player.timing.remote_elapsed(context.services.clock.now()).seconds() : timelineElapsed);
+}
+
 bool board_cell_visible(const Runtime::GameContext& context,
-    const Runtime::PlayerSessionState& player, int row, Runtime::BoardCell cell) {
+    const Runtime::PlayerSessionState& player, int row, int column, Runtime::BoardCell cell) {
     if (!cell.occupied()) return false;
     if (context.config.garbage.mode == Runtime::GarbageMode::QuickPlay &&
         Runtime::reverse(context.config.quickPlay.invisible) && cell.is_normal_garbage()) {
         const auto& field=player.gameplay.playfield;
         return row < field.activeHeight-field.garbageHeight+3;
     }
-    return !context.config.field.invisible || cell.is_garbage_like() || player.presentation.qpInvisibleFlash;
+    const auto& config=context.config.field;
+    if(!config.invisible || cell.is_garbage_like() || player.presentation.invisibleFlash) return true;
+    if(config.periodicInvisible || config.invisibilityDelay<=Runtime::Duration{}) return false;
+    const auto locked=player.gameplay.playfield.field.cell_lock_time(row,column);
+    return board_elapsed_seconds(context,player)<(locked+config.invisibilityDelay).seconds();
 }
 
 BoardCellAppearance board_cell_appearance(const Runtime::GameContext& context,
-    const Runtime::PlayerSessionState& player, int row, Runtime::BoardCell cell) {
+    const Runtime::PlayerSessionState& player, int row, int column, Runtime::BoardCell cell) {
     if (!cell.occupied()) return BoardCellAppearance::Empty;
-    if (board_cell_visible(context,player,row,cell)) return BoardCellAppearance::Visible;
+    if (board_cell_visible(context,player,row,column,cell)) return BoardCellAppearance::Visible;
     return context.config.mode.replayMode ? BoardCellAppearance::Dimmed : BoardCellAppearance::Empty;
 }
 
@@ -49,14 +61,14 @@ void draw_board_cell(const Runtime::GameContext& context, const Runtime::PlayerS
     int row, int column, Runtime::BoardCell cell) {
     OutputGuard output(context);
     move_to(context,player,row,column);
-    const auto appearance=board_cell_appearance(context,player,row,cell);
+    const auto appearance=board_cell_appearance(context,player,row,column,cell);
     if (appearance==BoardCellAppearance::Empty && !cell.is_timed_number()) {
         draw_empty_board_cell(context,player,row,column);
         return;
     }
     const auto colors=board_cell_colors(cell,context.config.display.obscuredColors,appearance==BoardCellAppearance::Dimmed);
     set_colors(colors);
-    const bool marked=spawn_marker_cell(context,player,row,column);
+    const bool marked=board_hint_cell(context,player,row,column);
     if (cell.is_timed_number()) {
         if (marked) draw_spawn_number(context.config.display.squareStyle,cell.timed_countdown(),colors);
         else draw_number(context.config.display.squareStyle,cell.timed_countdown());
@@ -65,11 +77,25 @@ void draw_board_cell(const Runtime::GameContext& context, const Runtime::PlayerS
 }
 
 void print_score(const Runtime::GameContext& context, Runtime::PlayerSessionState& player) {
+    const auto mode=context.config.mode.mode;
+    const bool battle=mode==Runtime::GameMode::Multiplayer || mode==Runtime::GameMode::LocalVersus;
+    if(!battle && mode!=Runtime::GameMode::Zen && mode!=Runtime::GameMode::Blitz) return;
     OutputGuard output(context);
-    long long value = player.gameplay.scoring.score;
-    if (context.config.garbage.mode == Runtime::GarbageMode::Multiplayer) {
-        value = player.gameplay.scoring.wins;
+    if(battle) {
+        const int width=player.gameplay.playfield.width*2;
+        auto name=player.presentation.username;
+        const int length=static_cast<int>(Util::TerminalText::width(name));
+        if(length>width) {
+            const int left=std::max(0,(width-3+1)/2),right=std::max(0,width-3-left);
+            name=width<=3?std::string(width,'.'):Util::TerminalText::slice(name,0,left)+"..."+Util::TerminalText::slice(name,length-right,right);
+        }
+        set_ui_color(ColorRole::Accent,context.config.display.obscuredColors);
+        move_cursor(player.gameplay.playfield.visibleHeight+player.presentation.topMargin+1,player.presentation.margin);
+        const int padding=std::max(0,width-int(Util::TerminalText::width(name)));
+        std::cout<<std::string(padding/2,' ')<<name<<std::string(padding-padding/2,' ');
+        return;
     }
+    long long value = player.gameplay.scoring.score;
     ui_color(context, ColorRole::Text);
     const int digits = Util::digit_count(value);
     move_cursor(
@@ -138,58 +164,97 @@ void print_altitude(const Runtime::GameContext& context, Runtime::PlayerSessionS
 
 void print_message(const Runtime::GameContext& context, Runtime::PlayerSessionState& player) {
     OutputGuard output(context);
+    auto& presentation=player.presentation;
+    const int baseRow=board_info_top_row(player)+9;
+    // Required metrics share a 15-row region with the clear messages. Goals
+    // use the last row unless the existing count/time row already shows them.
+    const auto goal=Runtime::active_goal(context.config);
+    std::array<int,6> rows{{0,1,4,2,3,5}}; // P, A, time, PPS, APM, goal.
+    if(goal==Runtime::GameGoal::None || goal==Runtime::GameGoal::Time ||
+       goal==Runtime::GameGoal::Pieces || goal==Runtime::GameGoal::Attack) rows={{1,2,5,3,4,-1}};
+    if(Runtime::challenge_population(context.config.challengeRules) || context.config.challengeRules==Runtime::ChallengeRules::StageMaster)rows={{0,1,4,2,3,5}};
+    const int absoluteRow=presentation.topMargin+baseRow;
+    const bool layoutChanged=presentation.messageMargin!=presentation.margin || presentation.messageTopMargin!=absoluteRow ||
+        presentation.messageRows!=rows || presentation.messageObscured!=context.config.display.obscuredColors;
+    if(layoutChanged && presentation.messageTopMargin>=0 && presentation.messageMargin==presentation.margin) {
+        for(std::size_t index=0;index<rows.size();++index)if(presentation.messageWidths[index] && presentation.messageRows[index]>=0) {
+            const int suffixWidth=index<2?2:index>=3?4:0;
+            const int right=index==2?-4:std::min(-2,-8+suffixWidth),eraseRight=index==5?-2:right;
+            ui_color(context,ColorRole::Text);
+            move_to(context,player,presentation.messageTopMargin-presentation.topMargin+presentation.messageRows[index],-4,
+                eraseRight+9-int(presentation.messageWidths[index]));
+            std::cout<<std::string(presentation.messageWidths[index],' ');
+        }
+    }
+    if(layoutChanged) {
+        presentation.messageText={};presentation.messageWidths={};presentation.messageRows=rows;presentation.messageMargin=presentation.margin;
+        presentation.messageTopMargin=absoluteRow;presentation.messageObscured=context.config.display.obscuredColors;
+    }
+    // Network polling runs at 120 Hz; wall-clock statistics do not need that
+    // console cadence. Placement/attack changes and completed times stay immediate.
+    const auto paintTime=context.real_now();
+    if(context.session.roomScene.enabled && !player.timing.completedGameTime &&
+       presentation.messageText[0]==std::to_string(player.gameplay.scoring.placedBlocks)+" P" &&
+       presentation.messageText[1]==std::to_string(player.gameplay.scoring.totalAttack)+" A" &&
+       paintTime-presentation.lastMessagePaint<Runtime::Duration::from_seconds(0.05)) return;
+    presentation.lastMessagePaint=paintTime;
     print_racing_goal_marker(context,player);
-    ui_color(context, ColorRole::Text);
-    const double timelineElapsed=context.config.mode.replayMode
-        ? Replay::playback_game_elapsed(context,context.now()).seconds()
-        : Runtime::elapsed_game_time(context.session,context.now()).seconds() *
-            context.config.timeMultiplier;
-    double elapsed = std::max(0.0, timelineElapsed);
+    const double elapsed=board_elapsed_seconds(context,player);
     const double pps = elapsed > 0 ? player.gameplay.scoring.placedBlocks / elapsed : 0.0;
     const double apm = elapsed > 0 ? player.gameplay.scoring.totalAttack * 60.0 / elapsed : 0.0;
-    if (context.config.mode.mode == Runtime::GameMode::Blitz) {
-        elapsed = context.config.mode.blitzTime.seconds() - elapsed;
-    }
 
-    const int baseRow = 11 + player.presentation.hold_panel_height();
     const auto printStat = [&](std::size_t index, const std::string& text,
                                const std::string& suffix) {
+        if(rows[index]<0) return;
+        const auto combined=text+suffix;
+        if(presentation.messageText[index]==combined) return;
+        presentation.messageText[index]=combined;
+        ui_color(context, ColorRole::Text);
         auto& previousWidth = player.presentation.messageWidths[index];
         const int suffixWidth=static_cast<int>(Util::TerminalText::width(suffix));
         const auto totalWidth=Util::TerminalText::width(text)+suffixWidth;
-        const int right=std::min(-2,-8+suffixWidth);
-        const int eraseRight=index==4 ? -2 : right;
+        const int right=index==2 ? -4 : std::min(-2,-8+suffixWidth);
+        const int eraseRight=index==5 ? -2 : right;
         const auto span=totalWidth+eraseRight-right;
         const int width = static_cast<int>(std::max(previousWidth, span));
-        move_to(context, player, baseRow + static_cast<int>(index), -4, eraseRight+9-width);
+        move_to(context, player, baseRow + rows[index], -4, eraseRight+9-width);
         std::cout << std::string(width, ' ');
-        move_to(context, player, baseRow + static_cast<int>(index), -4,
+        move_to(context, player, baseRow + rows[index], -4,
                 right+9-static_cast<int>(totalWidth));
-        std::cout << text << suffix;
+        std::cout << combined;
         previousWidth = span;
     };
-    printStat(0, std::to_string(player.gameplay.scoring.placedBlocks), " P");
-    printStat(1, std::to_string(player.gameplay.scoring.totalAttack), " A");
-    printStat(2, Util::format_fixed_2(elapsed), " S");
+    printStat(0, std::to_string(player.gameplay.scoring.placedBlocks)+
+        (goal==Runtime::GameGoal::Pieces ? "/"+std::to_string(context.config.mode.pieceTarget) : ""), " P");
+    printStat(1, std::to_string(player.gameplay.scoring.totalAttack)+
+        (goal==Runtime::GameGoal::Attack ? "/"+std::to_string(context.config.mode.attackTarget) : ""), " A");
+    printStat(2, Util::format_time(goal==Runtime::GameGoal::Time ?
+        std::max(0.0,context.config.mode.blitzTime.seconds()-elapsed) : elapsed), "");
     printStat(3, Util::format_fixed_2(pps), " PPS");
-    if (context.config.mode.mode != Runtime::GameMode::Racing) {
-        printStat(4, Util::format_fixed_2(apm), " APM");
-        return;
+    printStat(4, Util::format_fixed_2(apm), " APM");
+    const auto& scoring=player.gameplay.scoring;
+    const auto progress=[&](std::uint64_t current,int target,const std::string& suffix) {
+        printStat(5,std::to_string(current)+"/"+std::to_string(target),suffix);
+    };
+    switch(goal) {
+        case Runtime::GameGoal::Lines: progress(scoring.totalLines,context.config.mode.racingDistance," LINES");break;
+        case Runtime::GameGoal::Garbage: progress(scoring.totalGarbageLines,context.config.mode.garbageTarget," GARBAGE");break;
+        case Runtime::GameGoal::AllClear: progress(scoring.allClearCount,context.config.mode.allClearTarget," ALLCLEAR");break;
+        case Runtime::GameGoal::InitialCells: {
+            int total=0;
+            if(context.config.initialMap) for(const auto& row:context.config.initialMap->rows)
+                total+=static_cast<int>(std::count_if(row.begin(),row.end(),[](char cell){return cell!=' ';}));
+            const int remaining=player.gameplay.playfield.field.remaining_initial_cells();
+            progress(std::max(0,total-remaining),total," MAP CELLS");break;
+        }
+        default:
+            if(Runtime::challenge_population(context.config.challengeRules))progress(scoring.battleRank,Runtime::challenge_population(context.config.challengeRules)," ALIVE");
+            else if(context.config.challengeRules==Runtime::ChallengeRules::StageMaster) {
+                const int stage=std::min(3,scoring.challengeStages);
+                const std::array<std::string,4> tasks{{"10 LINES","2 QUADS","2 SPINS","1 PC"}};
+                printStat(5,std::to_string(scoring.challengeStages)+"/4 ",tasks[stage]);
+            }else printStat(5,"","");break;
     }
-    if(context.config.initialMap && context.config.mode.mapGoal==Runtime::MapGoal::ClearInitial) {
-        printStat(4,std::to_string(player.gameplay.playfield.field.remaining_initial_cells())," MAP CELLS");return;
-    }
-    if(context.config.initialMap && context.config.mode.mapGoal==Runtime::MapGoal::AllClear) {
-        printStat(4,player.gameplay.scoring.mapAllClearReached ? "1/1" : "0/1"," ALLCLEAR");return;
-    }
-    const bool garbageRace =
-        context.config.garbage.mode == Runtime::GarbageMode::CheeseLayer ||
-        context.config.garbage.mode == Runtime::GarbageMode::CheeseTimer;
-    const int completedLines = garbageRace
-        ? player.gameplay.scoring.totalGarbageLines
-        : player.gameplay.scoring.totalLines;
-    printStat(4, std::to_string(completedLines) + "/" +
-        std::to_string(context.config.mode.racingDistance), " LINES");
 }
 
 } // namespace Render

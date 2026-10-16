@@ -27,6 +27,7 @@ enum class OperationKind {
     Move,
     EndMove,
     EndMoveData,
+    BattleRank,
     OffsetData,
     ClearLine,
     EndClearLine,
@@ -50,7 +51,9 @@ struct EndMoveDataPayload {
     Runtime::RotationRecord lastRotation{};
     long long score = 0;
     Piece::Pose pose{};
+    int inputActions=-1;
 };
+struct BattleRankPayload {int remaining=0;};
 
 struct AddGarbagePayload {
     int height = 0;
@@ -117,6 +120,7 @@ using OperationPayload = std::variant<
     std::monostate,
     PosePayload,
     EndMoveDataPayload,
+    BattleRankPayload,
     AddGarbagePayload,
     AddSolidGarbagePayload,
     AddBufferPayload,

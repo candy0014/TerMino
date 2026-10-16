@@ -1,4 +1,7 @@
 #include "tetr/network/udp_socket.h"
+#ifdef TETR_PORTABLE_DNS
+#include "portable_dns.h"
+#endif
 
 #include <array>
 #include <cerrno>
@@ -73,6 +76,9 @@ std::string UdpSocket::resolve_ipv4(const std::string& host) {
 #else
     if (inet_pton(AF_INET, host.c_str(), &numeric) == 1) return host;
 #endif
+#ifdef TETR_PORTABLE_DNS
+    return Detail::resolve_portable_ipv4(host);
+#else
     addrinfo hints{};
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
@@ -95,6 +101,7 @@ std::string UdpSocket::resolve_ipv4(const std::string& host) {
 #endif
     }
     throw UdpException("[resolve] cannot resolve server IPv4 address");
+#endif
 }
 
 UdpAddress UdpSocket::resolve_address(const std::string& endpoint, UdpPort defaultPort) {

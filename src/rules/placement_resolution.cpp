@@ -15,6 +15,7 @@ PlacementResult resolve_placement(
         in.garbageStartRow,
         in.layerStartRow,
         cellValue);
+    if(in.retainFullRows || (in.clearBatch>0 && out.clear.clearedLines<in.clearBatch)){out.clear={};out.clear.perfectClear=false;}
     out.clear.halfClear = out.clear.halfClear && in.attackRules.halfClearEnabled;
     out.allClear=out.clear.perfectClear;
     out.clear.perfectClear = out.clear.perfectClear && in.attackRules.perfectClearEnabled;

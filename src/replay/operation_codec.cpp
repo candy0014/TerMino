@@ -31,6 +31,7 @@ constexpr OperationName kOperationNames[] = {
     {OperationKind::Move, "move"},
     {OperationKind::EndMove, "end_move"},
     {OperationKind::EndMoveData, "end_move_data"},
+    {OperationKind::BattleRank,"battle_rank"},
     {OperationKind::OffsetData, "offset_data"},
     {OperationKind::ClearLine, "clear_line"},
     {OperationKind::EndClearLine, "end_clear_line"},
@@ -104,6 +105,7 @@ Piece::Pose pose_fields(const FieldViews& fields, std::size_t offset = 0) {
 
 OperationPayload decode_known_payload(OperationKind kind, const FieldViews& fields) {
     switch (kind) {
+        case OperationKind::BattleRank:return BattleRankPayload{std::clamp(int_field(fields,0),1,99)};
         case OperationKind::PutErase:
         case OperationKind::PutDraw:
         case OperationKind::Move:
@@ -112,7 +114,7 @@ OperationPayload decode_known_payload(OperationKind kind, const FieldViews& fiel
             return EndMoveDataPayload{
                 Compat::rotation_record_from_legacy(int_field(fields, 0)),
                 score_field(fields, 1),
-                pose_fields(fields, 2)};
+                pose_fields(fields, 2),int_field(fields,5,-1)};
         case OperationKind::AddGarbage: {
             AddGarbagePayload payload{
                 int_field(fields, 0),

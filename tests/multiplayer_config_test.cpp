@@ -10,6 +10,7 @@ int main() {
     host.gameMode=guest.gameMode=4;
     host.fieldWidth=14; host.fieldHeight=25; host.nextCount=2; host.holdEnabled=0;
     host.hitMultiplier=3.75; host.cancelMultiplier=2.5; host.lockDelay=.25;
+    host.attackMultiplier=1.75;
     host.gravityInterval=.05; host.das=.07; host.arr=0; host.dcd=.002;
     host.softDropFactor=.012; host.softDropFixed=1; host.preMove=0; host.dasPrecharge=0;
     host.ghost=0; host.squareStyle=1; host.obscuredColors=1;
@@ -17,6 +18,8 @@ int main() {
     guest.das=.42; guest.arr=.03; guest.softDropFactor=12;
     guest.ghost=1; guest.squareStyle=0; guest.username="Guest"; guest.serverIp="guest.server";
     guest.mapId=99; guest.keyCodes=UserConfig::default_player_two_key_codes();
+    host.autoplayMode=2;host.autoplayPps=15;host.autoplayWidth=600;host.autoplayHandlingSimulation=0;
+    guest.autoplayMode=1;guest.autoplayPps=3.25;guest.autoplayWidth=120;guest.autoplayHandlingSimulation=1;
     auto source=Runtime::normalize_user_config(host,Runtime::GameMode::Multiplayer);
     Runtime::MapDefinition map; map.id=99; map.name="Only host has this map";
     map.width=12; map.height=20; map.rows.assign(20,std::string(12,' ')); map.rows.back()[0]='G';
@@ -33,15 +36,18 @@ int main() {
     assert(!UserConfig::decode_multiplayer_config(invalid));
     assert(!UserConfig::decode_multiplayer_config("TETR_ROOM_CONFIG 1\nMAP\n"));
     const auto local=Runtime::normalize_user_config(guest,Runtime::GameMode::Multiplayer);
-    for (bool rules:{false,true}) for (bool handling:{false,true}) {
-        const auto applied=UserConfig::apply_multiplayer_config(guest,local,*decoded,rules,handling);
-        assert(applied.handling.das.seconds()==(handling?host.das:guest.das));
-        assert(applied.handling.arr.seconds()==(handling?host.arr:guest.arr));
-        assert(applied.handling.softDropFactor==(handling?host.softDropFactor:guest.softDropFactor));
-        assert(applied.handling.softDropFixed==(handling?true:false));
+    for (bool rules:{false,true}) {
+        const auto applied=UserConfig::apply_multiplayer_config(guest,local,*decoded,rules);
+        assert(applied.handling.das.seconds()==guest.das);
+        assert(applied.autoplay.mode==local.autoplay.mode && applied.autoplay.pps==local.autoplay.pps);
+        assert(applied.autoplay.searchWidth==local.autoplay.searchWidth && applied.autoplay.handlingSimulation==local.autoplay.handlingSimulation);
+        assert(applied.handling.arr.seconds()==guest.arr);
+        assert(applied.handling.softDropFactor==guest.softDropFactor);
+        assert(applied.handling.softDropFixed==false);
         assert(applied.handling.gravityInterval.interval().seconds()==(rules?host.gravityInterval:guest.gravityInterval));
         assert(applied.handling.epld.seconds()==(rules?host.lockDelay:guest.lockDelay));
         assert(applied.garbage.hitMultiplier==(rules?host.hitMultiplier:guest.hitMultiplier));
+        assert(applied.garbage.sendMultiplier==(rules?host.attackMultiplier:guest.attackMultiplier));
         assert(applied.field.width==(rules?map.width:guest.fieldWidth));
         assert(applied.field.nextCount==(rules?host.nextCount:guest.nextCount));
         assert(applied.field.ghost && applied.display.squareStyle==guest.squareStyle && !applied.display.obscuredColors);
@@ -50,6 +56,13 @@ int main() {
     }
     assert(guest.mapId==99 && guest.username=="Guest" && guest.serverIp=="guest.server" && guest.das==.42);
     assert(guest.keyCodes==UserConfig::default_player_two_key_codes());
+    const auto preview=UserConfig::multiplayer_config_view_settings(guest,*decoded);
+    assert(preview.fieldWidth==host.fieldWidth && preview.autoplayMode==guest.autoplayMode);
+    assert(preview.autoplayPps==guest.autoplayPps && preview.autoplayWidth==guest.autoplayWidth && preview.autoplayHandlingSimulation==guest.autoplayHandlingSimulation);
+    auto copied=guest;auto noMap=*decoded;noMap.map.reset();
+    assert(UserConfig::copy_multiplayer_config(copied,noMap));
+    assert(copied.fieldWidth==host.fieldWidth && copied.autoplayMode==guest.autoplayMode);
+    assert(copied.autoplayPps==guest.autoplayPps && copied.autoplayWidth==guest.autoplayWidth && copied.autoplayHandlingSimulation==guest.autoplayHandlingSimulation);
     // Missing, reordered, duplicated and damaged fragments cannot yield a partial configuration.
     Network::ConfigAssembler assembler;
     const auto digest=Network::room_config_digest(wire);

@@ -7,6 +7,10 @@
 #include <string_view>
 
 namespace Network {
+struct RemoteClockSample {
+    double elapsedSeconds = 0.0;
+    double rate = 1.0;
+};
 inline constexpr double kMotionFramesPerSecond = 120.0;
 struct BoardFrameStamp {
     std::uint32_t epoch = 0;
@@ -21,6 +25,7 @@ struct PieceMotionFrame {
     PieceMotionKind kind = PieceMotionKind::Translate;
     int rows = 0, columns = 0, rotations = 0;
     Piece::Pose result{};
+    std::optional<RemoteClockSample> clock;
 };
 struct BoardCheckpointWire {
     BoardFrameStamp stamp;

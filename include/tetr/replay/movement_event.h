@@ -18,6 +18,7 @@ struct MovementEvent {
     Piece::Pose pose{};
     Runtime::RotationRecord lastRotation{};
     long long score = 0;
+    int inputActions=-1;
 };
 
 MovementEventType movement_event_type(OperationKind kind);

@@ -19,6 +19,8 @@ bool save(Runtime::MapDefinition& map,SaveUndo& undo,const std::filesystem::path
 bool undo_save(const SaveUndo& undo,const std::filesystem::path& path=default_path());
 using IdChanges=std::vector<std::pair<int,int>>;
 int renumbered_id(int id,const IdChanges& changes);
+// Selecting a map adopts its default goal once; later goal edits remain local.
+void select(Settings& settings,const Runtime::MapDefinition* map);
 void remap_selection(Settings& settings,const IdChanges& changes);
 bool remove(int id,const std::filesystem::path& path=default_path(),IdChanges* changes=nullptr);
 } // namespace UserConfig::Maps

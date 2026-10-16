@@ -6,6 +6,8 @@
 #include "tetr/network/multiplayer_channel.h"
 #include "tetr/engine/garbage_service.h"
 #include "tetr/render/terminal_renderer.h"
+#include "tetr/rules/game_completion.h"
+#include "tetr/render/board_renderer.h"
 
 namespace Engine {
 void schedule_entry_delay(Runtime::GameContext& context, Runtime::PlayerSessionState& player) {
@@ -28,6 +30,11 @@ Rules::PlayResult wait_for_entry_delay(Runtime::GameContext& context, Runtime::P
     if (context.config.mode.replayMode) return Rules::PlayResult::ContinueFrame;
     bool firstFrame = true;
     while (player.timing.entryDelayEnd && context.real_now() < *player.timing.entryDelayEnd) {
+        if(Rules::time_goal_reached(context.config,Runtime::elapsed_game_time(context.session,context.now()))) {
+            player.timing.entryDelayEnd.reset();
+            Render::print_message(context,player);
+            return Rules::PlayResult::Locked;
+        }
         if (GarbageService::advance_garbage_rise(context,player,player.gameplay.playfield.field)>0) {
             Render::OutputGuard output(context);
             Render::flush();
@@ -37,7 +44,8 @@ Rules::PlayResult wait_for_entry_delay(Runtime::GameContext& context, Runtime::P
             for (const auto& [key,action] : context.input_services().bindings.entries()) {
                 if ((action == Input::Action::Retry || action == Input::Action::OpenSettings) &&
                     context.input_services().key_down(key)) {
-                    if (context.config.garbage.mode == Runtime::GarbageMode::Multiplayer)
+                    if(!Network::handle_room_game_control(context,action==Input::Action::Retry)) continue;
+                    if (context.config.garbage.mode == Runtime::GarbageMode::Multiplayer && !context.session.roomScene.enabled)
                         Network::send_round_signal(context,Network::OutgoingRoundSignal::LeaveRound);
                     player.timing.entryDelayEnd.reset();
                     return action == Input::Action::Retry ? Rules::PlayResult::Retry : Rules::PlayResult::OpenSettings;

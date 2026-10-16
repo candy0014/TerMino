@@ -28,6 +28,9 @@ void check_interrupted(const std::string& wire) {
 void send_lobby_signal(Runtime::GameContext& context, ClientLobbySignal signal) {
     send(network_services(context), std::string(encode_client_lobby_signal(signal)));
 }
+void send_player_setup(Runtime::GameContext& context,const LobbyPlayerSetup& setup) {
+    send(network_services(context),encode_lobby_player_setup(setup));
+}
 
 std::optional<ServerLobbySignal> receive_lobby_signal_for(
     Runtime::GameContext& context,

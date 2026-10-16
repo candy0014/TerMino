@@ -83,10 +83,10 @@ P 返回、各层级 R 重开、双人类别和独立绑定、切换为双人时
 时间冻结时按住方向键仍会重复移动。`render_layer_test` 覆盖零时刻 PPS 和数字缩短擦除。
 
 实际主程序、UDP 对战和完整测试的结果见
-本次运行日志。
-此前配额及菜单功能见 运行日志。
+[本次运行日志](../runlogs/20260924_turn_gate_replay_summary.log)。
+此前配额及菜单功能见 [运行日志](../runlogs/20260924_turn_pieces_settings_summary.log)。
 此前 x 功能的原始测试数据保留于
-初版运行日志。
+[初版运行日志](../runlogs/20260924_simulation_time_summary.log)。
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release

@@ -1,3 +1,5 @@
+#include "single_player_challenges.h"
+#include "bot_battle_royale.h"
 #include "tetr/app/game.h"
 #include "tetr/app/place.h"
 #include "tetr/app/settings_menu.h"
@@ -11,10 +13,15 @@
 #include "tetr/app/post_game_interaction.h"
 #include "tetr/app/application_state.h"
 #include "local_versus.h"
+#include "multiplayer_battle.h"
+#include "tetr/engine/multiplayer_scene.h"
+#include "tetr/network/multiplayer_channel.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/network/lobby_channel.h"
 #include "tetr/network/network_services.h"
+#include "tetr/network/round_statistics.h"
 #include "tetr/replay/session_state.h"
+#include "tetr/replay/recorder.h"
 #include "tetr/replay/playback_clock.h"
 #include "tetr/engine/undo.h"
 #include "tetr/engine/pause.h"
@@ -42,9 +49,22 @@ void run(Runtime::GameContext& context){
     auto& second=context.session.opponent;
     PieceLoopState pieceLoopState;
     pieceLoopState.reset();
-    Input::GameplayInputScope inputScope(context.input_component());
-
-    if(!context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer){
+    const bool roomBattle=context.session.roomScene.enabled;
+    const bool roomParticipant=!roomBattle || wait_for_room_ready(context);
+    // Pre-start observers share the visible countdown. A late observer can
+    // enter the live boards directly, without starting a local player loop.
+    if(roomBattle && !roomParticipant && Network::network_services(context).matchPhase!=Network::RoomMatchPhase::Countdown) {
+        watch_room_match(context);return;
+    }
+    Input::GameplayInputScope inputScope(context.input_component(),roomParticipant);
+    std::function<Runtime::Duration()> countdownRemaining;
+    if(roomBattle && Network::network_services(context).countdownDeadline) {
+        countdownRemaining=[&] {
+            return Runtime::Duration::from_seconds(std::chrono::duration<double>(
+                *Network::network_services(context).countdownDeadline-std::chrono::steady_clock::now()).count());
+        };
+    }
+    if(!roomBattle && !context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer){
         Network::send_lobby_signal(context,Network::ClientLobbySignal::SetupReceived);
         Network::wait_for_lobby_signal(context,Network::ServerLobbySignal::CountdownReady);
     }
@@ -53,27 +73,48 @@ void run(Runtime::GameContext& context){
         Replay::playback_resuming(context);
     if(context.config.mode.replayMode&&!resumingReplay)
         Engine::render_replay_playback_progress(context,first);
-    const auto countdown=resumingReplay
+    auto countdown=resumingReplay
         ? Engine::CountdownResult::Completed
-        : Engine::run_start_countdown(context,first,second,&pieceLoopState.input,[&] {
+        : Engine::run_start_countdown(context,first,second,roomParticipant?&pieceLoopState.input:nullptr,[&] {
+            if(roomBattle) {
+                auto& n=Network::network_services(context);Network::poll_connection(n);
+                if(n.connection!=Network::ConnectionState::Connected) throw Network::ConnectionError(n.connectionMessage);
+                if(n.matchEpoch!=context.session.roomScene.epoch || n.matchCanceled)
+                    throw Network::LobbyInterrupted("Match changed during countdown");
+            }
             return Engine::refresh_game_terminal_layout(context);
-        });
+        },[&](Engine::CountdownResult result) {
+            return !roomBattle || Network::handle_room_game_control(context,result==Engine::CountdownResult::Retry);
+        },countdownRemaining);
+    if(roomBattle && countdown==Engine::CountdownResult::Completed && countdownRemaining) {
+        // All clients and the relay already have the start deadline. No RTT
+        // or completion acknowledgement belongs after the visible countdown.
+        auto& n=Network::network_services(context);n.countdownStarted=true;n.matchPhase=Network::RoomMatchPhase::Playing;
+    } else if(roomBattle && roomParticipant && countdown==Engine::CountdownResult::Completed)
+        countdown=wait_for_room_round(context,pieceLoopState.input);
     if (countdown != Engine::CountdownResult::Completed && !context.config.mode.replayMode &&
         context.config.garbage.mode == Runtime::GarbageMode::Multiplayer)
         Network::send_lobby_signal(context, Network::ClientLobbySignal::Cancel);
-    if(countdown==Engine::CountdownResult::Retry) return;
+    if(countdown==Engine::CountdownResult::Retry) {
+        if(roomBattle) {inputScope.end();watch_room_match(context,true);}
+        return;
+    }
     if(countdown==Engine::CountdownResult::OpenSettings){ inputScope.end(); Settings::run_menu(context); return; }
+    if(roomBattle && !roomParticipant) {watch_room_match(context);return;}
     Engine::finish_start_precharge(context,pieceLoopState.input);
 
-    if(!context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer)
+    if(!roomBattle && !context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer)
         Network::send_lobby_signal(context,Network::ClientLobbySignal::CountdownComplete);
-    if (!context.config.mode.replayMode &&
+    if (!roomBattle && !context.config.mode.replayMode &&
         context.config.garbage.mode == Runtime::GarbageMode::Multiplayer)
         Network::wait_for_lobby_signal(context, Network::ServerLobbySignal::RoundReady);
 
+    begin_single_player_challenges(context);
     Engine::initialize_board_timers(context,first);
     if(context.config.mode.replayMode) Replay::start_playback(context,context.now());
-    if(!context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer) Engine::initialize_board_timers(context,second);
+    if(roomBattle) {
+        for(auto& [slot,p]:context.session.roomScene.players) p.timing.realGameStart=first.timing.realGameStart;
+    } else if(!context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer) Engine::initialize_board_timers(context,second);
     Engine::initialize_quick_play(context,first);
     Engine::GamePauseScope pauseScope(context,&pieceLoopState.input);
     context.undoHistory.reset();
@@ -88,6 +129,8 @@ void run(Runtime::GameContext& context){
         Replay::session(context).pauseCount=0;
     }
 
+    auto botRoyale=start_bot_battle_royale(context);
+    struct RoyaleScope {ApplicationState* app;~RoyaleScope(){if(app){app->challengeFrame={};app->challengeSendAttack={};}}} royaleScope{context.app_component()};
     Engine::GameLoopExit outcome;
     for (;;) {
         try {
@@ -103,12 +146,52 @@ void run(Runtime::GameContext& context){
 
             if(outcome==Engine::GameLoopExit::OpenSettings){
                 pauseScope.end();
-                if(!context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer) Engine::close_multiplayer_round(context);
+                if(roomBattle) {
+                    Replay::add_replay(context,Replay::OperationKind::EndAll);
+                    remember_finished_replay(context);
+                    Network::send_round_statistics(context,first);
+                    Network::handle_room_game_control(context,false);
+                    first.presentation.activePose.reset();first.presentation.activePieceType.reset();
+                    Network::send_board_state_frame(context,first,Network::ActivePieceState::locked(),
+                        Network::network_services(context).boardSync.lastPlacement,true);
+                    Network::send_round_signal(context,Network::OutgoingRoundSignal::LeaveRound);
+                    Network::send_lobby_signal(context,Network::ClientLobbySignal::Cancel);
+                }
+                else if(!context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer) Engine::close_multiplayer_round(context);
                 inputScope.end(); Settings::run_menu(context); return;
             }
             if(outcome==Engine::GameLoopExit::Retry){
-                if(!context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer) Engine::close_multiplayer_round(context);
+                if(roomBattle) {
+                    Replay::add_replay(context,Replay::OperationKind::EndAll);
+                    remember_finished_replay(context);
+                    Network::send_round_statistics(context,first);
+                    Network::handle_room_game_control(context,true);
+                    pauseScope.end();inputScope.end();watch_room_match(context,true);
+                }
+                else if(!context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer) Engine::close_multiplayer_round(context);
                 return;
+            }
+            if(roomBattle) {
+                Replay::add_replay(context,Replay::OperationKind::EndAll);
+                remember_finished_replay(context);
+                if(outcome==Engine::GameLoopExit::Won) ++first.gameplay.scoring.wins;
+                Network::send_round_statistics(context,first);
+                if(outcome!=Engine::GameLoopExit::Won) {
+                    // Send the final fixed field (including fatal garbage)
+                    // before elimination freezes the relay's cached board.
+                    first.presentation.activePose.reset();first.presentation.activePieceType.reset();
+                    Network::send_board_state_frame(context,first,Network::ActivePieceState::locked(),
+                        Network::network_services(context).boardSync.lastPlacement,true);
+                    Network::send_round_signal(context,Network::OutgoingRoundSignal::LocalLoss);
+                }
+                pauseScope.end();inputScope.end();
+                // Repeat the loss until the authoritative roster marks this slot eliminated.
+                auto& n=Network::network_services(context);
+                for(int attempt=0;attempt<20 && context.session.roomScene.selfAlive && n.matchPhase==Network::RoomMatchPhase::Playing;++attempt) {
+                    Network::send_round_signal(context,Network::OutgoingRoundSignal::LocalLoss);
+                    Engine::poll_multiplayer_scene(context,false);context.services.clock.sleep_for(Runtime::Duration::from_seconds(0.05));
+                }
+                watch_room_match(context,outcome!=Engine::GameLoopExit::Won);return;
             }
             if(context.config.garbage.mode == Runtime::GarbageMode::Multiplayer) Engine::close_multiplayer_round(context);
             const Runtime::Duration finalElapsed=*first.timing.completedGameTime;
@@ -141,7 +224,7 @@ void run(Runtime::GameContext& context){
             inputScope.restart();
             Render::OutputGuard output(context);
             if (context.config.mode.replayMode) Render::end_output_suppression();
-            Engine::synchronize_qp_invisible_flash(context,first);
+            Engine::synchronize_field_visibility(context,first);
             if (const auto size=Render::terminal_size()) Engine::center_game_boards(context,*size);
             Render::clear_screen();
             Render::redraw_player_board(context,first);

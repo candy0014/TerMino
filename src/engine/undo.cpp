@@ -19,7 +19,7 @@ namespace {
 // Keep every typed component, but store only occupied board cells rather than
 // duplicating the playfield's two fixed 105x105 storage arrays at every lock.
 struct PlayerSnapshot {
-    struct Cell { int row, column; Runtime::BoardCell value; bool initial=false; };
+    struct Cell { int row, column; Runtime::BoardCell value; bool initial=false; Runtime::Duration lockedAt{}; };
     std::array<int,8> board{};
     bool holdEnabled=false, initialized=false;
     std::vector<Cell> cells;
@@ -46,7 +46,7 @@ struct PlayerSnapshot {
         initialized=field.field.initialized();
         if (initialized) for (int row=-Runtime::kHiddenRowCapacity; row<field.field.height(); ++row)
             for (int col=0; col<field.field.width(); ++col)
-                if (field.field.cell(row,col).occupied()) cells.push_back({row,col,field.field.cell(row,col),field.field.initial_cell(row,col)});
+                if (field.field.cell(row,col).occupied()) cells.push_back({row,col,field.field.cell(row,col),field.field.initial_cell(row,col),field.field.cell_lock_time(row,col)});
     }
 
     void restore(Runtime::PlayerSessionState& player) const {
@@ -59,6 +59,7 @@ struct PlayerSnapshot {
             for (const auto& cell:cells) {
                 field.field.set_cell(cell.row,cell.column,cell.value);
                 if(cell.initial) field.field.mark_initial_cell(cell.row,cell.column);
+                field.field.mark_cell_lock_time(cell.row,cell.column,cell.lockedAt);
             }
         } else field.field=Runtime::Playfield{};
         player.gameplay.scoring=scoring; player.gameplay.hold=hold;

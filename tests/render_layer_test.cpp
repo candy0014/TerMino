@@ -16,6 +16,14 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <cmath>
+#include <memory>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #ifdef __linux__
 #include <csignal>
 #include <cstdlib>
@@ -278,6 +286,16 @@ void test_short_next_preview() {
 }
 
 void test_viewport_clips_without_wrapping() {
+#ifdef _WIN32
+    // Capture redirects cout, but the Win32 standard handle still describes
+    // the real console. Hide it so this test uses the supplied 10x4 viewport
+    // rather than having OutputGuard replace it with the live console size.
+    struct CapturedOutput {
+        HANDLE original=GetStdHandle(STD_OUTPUT_HANDLE);
+        CapturedOutput() { assert(SetStdHandle(STD_OUTPUT_HANDLE,INVALID_HANDLE_VALUE)); }
+        ~CapturedOutput() { assert(SetStdHandle(STD_OUTPUT_HANDLE,original)); }
+    } redirected;
+#endif
     Runtime::SessionState session;
     Runtime::RuntimeServices services;
     Runtime::GameContext context(session,services);
@@ -332,7 +350,7 @@ void test_replay_invisible_colors() {
         Test::TerminalScreen screen;
         for (bool replay:{false,true}) for (bool flash:{false,true,false}) {
             context.config.mode.replayMode=replay;
-            player.presentation.qpInvisibleFlash=flash;
+            player.presentation.invisibleFlash=flash;
             { Capture c; Render::redraw_player_board(context,player); screen.feed(c.str()); }
             for (int color=0;color<7;++color) {
                 const auto cell=screen.at(28,31+color*2);
@@ -345,15 +363,15 @@ void test_replay_invisible_colors() {
         }
     }
     context.config.mode.replayMode=true;
-    player.presentation.qpInvisibleFlash=false;
+    player.presentation.invisibleFlash=false;
     const auto piece=Runtime::BoardCell::piece(0), garbage=Runtime::BoardCell::garbage();
-    assert(Render::board_cell_appearance(context,player,19,piece)==Render::BoardCellAppearance::Dimmed);
-    assert(Render::board_cell_appearance(context,player,19,garbage)==Render::BoardCellAppearance::Visible);
+    assert(Render::board_cell_appearance(context,player,19,0,piece)==Render::BoardCellAppearance::Dimmed);
+    assert(Render::board_cell_appearance(context,player,19,0,garbage)==Render::BoardCellAppearance::Visible);
     context.config.garbage.mode=Runtime::GarbageMode::QuickPlay;
     context.config.quickPlay.invisible=Runtime::ModifierMode::Reverse;
     board.garbageHeight=6;
-    assert(Render::board_cell_appearance(context,player,16,garbage)==Render::BoardCellAppearance::Visible);
-    assert(Render::board_cell_appearance(context,player,17,garbage)==Render::BoardCellAppearance::Dimmed);
+    assert(Render::board_cell_appearance(context,player,16,0,garbage)==Render::BoardCellAppearance::Visible);
+    assert(Render::board_cell_appearance(context,player,17,0,garbage)==Render::BoardCellAppearance::Dimmed);
     Test::TerminalScreen screen;
     { Capture c; Render::draw_board_cell(context,player,17,0,garbage); screen.feed(c.str()); }
     assert((screen.at(26,31).foreground==Test::TerminalScreen::Color{{26,26,26}}));
@@ -376,13 +394,13 @@ void test_racing_markers() {
         field.nextCount=0; field.holdEnabled=false;
         player.presentation.margin=30;
         context.config.field.height=height;
-        context.config.mode.mode=Runtime::GameMode::Racing;
+        context.config.mode.goal=cheese ? Runtime::GameGoal::Garbage : Runtime::GameGoal::Lines;
         context.config.mode.racingDistance=40;
         context.config.display.squareStyle=style;
         context.config.display.obscuredColors=obscured;
         context.config.garbage.mode=cheese ? Runtime::GarbageMode::CheeseLayer : Runtime::GarbageMode::None;
         int& completed=cheese ? score.totalGarbageLines : score.totalLines;
-        // Exactly a full field remaining: no marker yet.
+        // Exactly a full field remaining: mark all rows, including the top border.
         completed=40-height;
         if (cheese) score.totalLines=40;
         Test::TerminalScreen screen;
@@ -393,7 +411,7 @@ void test_racing_markers() {
             Render::draw_piece(context,piece,player,Piece::Pose{{0,3},Runtime::Rotation{}},field.field);
             screen.feed(c.str());
         }
-        assert(player.presentation.racingGoalRows==0);
+        assert(player.presentation.racingGoalRows==height);
         const auto initial=screen;
         completed=37;
         { Capture c; Render::print_racing_goal_marker(context,player); screen.feed(c.str()); }
@@ -445,11 +463,43 @@ void test_racing_markers() {
             assert(screen.position_of("12L")==std::make_pair(0,0));
             assert(screen.position_of("2L")==std::make_pair(bottom,40));
         }
-        context.config.mode.mode=Runtime::GameMode::Zen;
+        context.config.mode.goal=Runtime::GameGoal::None;
         { Capture c; Render::print_racing_goal_marker(context,player); screen.feed(c.str()); }
         assert(screen.at(bottom-2,30).glyph=="|" && screen.at(bottom,51).glyph=="+");
         for (int column=31;column<=50;++column) assert(screen.at(bottom,column).glyph=="-");
     }
+}
+
+void test_goal_marker_units_and_time() {
+    auto session=std::make_unique<Runtime::SessionState>();Runtime::RuntimeServices services;
+    Runtime::GameContext context{*session,services};auto& p=session->player;auto& field=p.gameplay.playfield;
+    field.width=10;field.activeHeight=field.visibleHeight=20;field.field.initialize(10,20);
+    p.presentation.margin=30;p.presentation.topMargin=8;
+    const int floor=p.presentation.topMargin+field.activeHeight+1;
+    context.config.mode.goal=Runtime::GameGoal::Pieces;context.config.mode.pieceTarget=22;p.gameplay.scoring.placedBlocks=2;
+    Test::TerminalScreen screen;
+    {Capture output;Render::print_border(context,p);screen.feed(output.str());}
+    assert(p.presentation.racingGoalRows==20 && screen.position_of("20P").first==floor);
+    context.config.mode.goal=Runtime::GameGoal::Attack;context.config.mode.attackTarget=22;p.gameplay.scoring.totalAttack=2;
+    {Capture output;Render::print_racing_goal_marker(context,p);screen.feed(output.str());}
+    assert(p.presentation.racingGoalRows==20 && screen.position_of("20A").first==floor && !screen.position_of("20P").first);
+    context.config.mode.goal=Runtime::GameGoal::Time;context.config.mode.blitzTime=Runtime::Duration::from_seconds(22);
+    p.timing.completedGameTime=Runtime::Duration::from_seconds(2.2);
+    {Capture output;Render::print_racing_goal_marker(context,p);screen.feed(output.str());}
+    assert(p.presentation.racingGoalRows==20 && screen.position_of("20s").first==floor && !screen.position_of("20A").first);
+    p.timing.completedGameTime=Runtime::Duration::from_seconds(2.99);
+    {Capture output;Render::print_racing_goal_marker(context,p);assert(output.str().empty());}
+    p.timing.completedGameTime=Runtime::Duration::from_seconds(3);
+    {Capture output;Render::print_racing_goal_marker(context,p);screen.feed(output.str());}
+    assert(p.presentation.racingGoalRows==19 && screen.position_of("19s").first==floor);
+    context.config.mode.goal=Runtime::GameGoal::Garbage;context.config.mode.garbageTarget=22;p.gameplay.scoring.totalGarbageLines=2;
+    {Capture output;Render::print_racing_goal_marker(context,p);screen.feed(output.str());}
+    assert(p.presentation.racingGoalRows==20 && screen.position_of("20L").first==floor);
+    context.config.mode.goal=Runtime::GameGoal::Time;context.config.mode.blitzTime=Runtime::Duration::from_seconds(24);
+    {Capture output;Render::print_racing_goal_marker(context,p);screen.feed(output.str());}
+    assert(p.presentation.racingGoalRows==0 && !screen.position_of("20L").first); // 21 seconds exceed the field height.
+    p.timing.completedGameTime=Runtime::Duration::from_seconds(25);
+    {Capture output;Render::print_racing_goal_marker(context,p);assert(output.str().empty());}
 }
 
 void test_piece_transitions(Runtime::GameContext& context, Runtime::PlayerSessionState& player) {
@@ -517,7 +567,103 @@ void test_map_progress_stays_outside_field() {
         context.config.mode.mode=Runtime::GameMode::Racing;
     }
 }
+void test_information_region() {
+    for(const auto mode:{Runtime::GameMode::Zen,Runtime::GameMode::Racing,Runtime::GameMode::Blitz,
+        Runtime::GameMode::QuickPlay,Runtime::GameMode::Multiplayer,Runtime::GameMode::Replay,Runtime::GameMode::LocalVersus})
+        for(int height:{4,20,40,100})for(int holdHeight:{5,11}) {
+            auto session=std::make_unique<Runtime::SessionState>();Runtime::RuntimeServices services;
+            Runtime::GameContext context{*session,services};auto& p=session->player;
+            context.config.mode.mode=mode;context.config.mode.blitzTime=Runtime::Duration::from_seconds(64);
+            context.config.mode.racingDistance=40;
+            context.config.garbage.mode=mode==Runtime::GameMode::Multiplayer || mode==Runtime::GameMode::LocalVersus?
+                Runtime::GarbageMode::Multiplayer:Runtime::GarbageMode::None;
+            p.presentation.margin=38;p.presentation.topMargin=4;p.presentation.blockMaxHeight=holdHeight-3;
+            p.gameplay.playfield.width=10;p.gameplay.playfield.visibleHeight=p.gameplay.playfield.activeHeight=height;
+            p.gameplay.playfield.field.initialize(10,height);
+            p.gameplay.scoring.placedBlocks=80;p.gameplay.scoring.totalAttack=50;p.gameplay.scoring.totalLines=5;
+            p.timing.completedGameTime=Runtime::Duration::from_seconds(4);
+            p.presentation.spike={8,Runtime::TimePoint::from_seconds(1)};
+            const int start=Render::board_info_top_row(p),distance=height-holdHeight;
+            if(distance<15)assert(start==holdHeight+1);
+            else {assert(start>holdHeight && start+14<=height);assert(std::abs((start-holdHeight-1)-(height-start-14))<=1);}
+            Capture output;Render::print_spike(context,p);Render::print_spin(context,p,Piece::Type{0},false);
+            Render::print_clear(context,p,1);Render::print_b2b(context,p,3);Render::print_combo(context,p,4);
+            Render::print_clutch(context,p,1);Render::print_all_clear(context,p,true);Render::print_message(context,p);
+            Test::TerminalScreen screen;screen.feed(output.str());
+            const auto row=[&](const std::string& text,int offset){assert(screen.position_of(text).first==p.presentation.topMargin+start+offset+1);};
+            row("8 SPIKE",0);row(std::string(Piece::metadata(Piece::Type{0}).name)+"-Spin",1);
+            row("ＳＩＮＧＬＥ",2);row("B2B",3);row("ＣＯＭＢＯ",5);row("CLUTCH",6);row("ＡＬＬ",7);row("ＣＬＥＡＲ",8);
+            const int stats=mode==Runtime::GameMode::Racing?9:10;
+            row("80 P",stats);row("50 A",stats+1);row("20.00 PPS",stats+2);row("750.00 APM",stats+3);
+            row(mode==Runtime::GameMode::Blitz?"01:00.000":"00:04.000",stats+4);
+            if(mode==Runtime::GameMode::Racing) row("5/40 LINES",14);
+        }
+    // A map-height change with an unchanged margin and identical data must
+    // erase the previous statistics rows and immediately draw the new ones.
+    auto session=std::make_unique<Runtime::SessionState>();Runtime::RuntimeServices services;
+    Runtime::GameContext context{*session,services};auto& p=session->player;
+    context.config.mode.mode=Runtime::GameMode::Zen;p.presentation.margin=38;p.presentation.topMargin=4;
+    p.presentation.blockMaxHeight=2;p.gameplay.playfield.width=10;p.gameplay.playfield.visibleHeight=20;
+    p.timing.completedGameTime=Runtime::Duration::from_seconds(4);
+    Test::TerminalScreen screen;std::pair<int,int> old;
+    {Capture output;Render::print_message(context,p);screen.feed(output.str());old=screen.position_of("00:04.000");}
+    p.gameplay.playfield.visibleHeight=40;
+    {Capture output;Render::print_message(context,p);screen.feed(output.str());}
+    assert(screen.at(old.first,old.second).glyph==" ");
+    assert(screen.position_of("00:04.000").first==4+Render::board_info_top_row(p)+15);
+    context.config.mode.mode=Runtime::GameMode::Blitz;context.config.mode.blitzTime=Runtime::Duration::from_seconds(3);
+    {Capture output;Render::print_message(context,p);assert(output.str().find("00:00.000")!=std::string::npos);}
+    // After a resize, the old statistics position can coincide with the new
+    // HOLD frame. A complete redraw must not erase its freshly painted frame.
+    p.presentation.blockMaxWidth=3;p.presentation.blockMaxHeight=2;
+    p.gameplay.playfield.holdEnabled=true;p.gameplay.playfield.nextCount=0;
+    p.gameplay.playfield.visibleHeight=p.gameplay.playfield.activeHeight=20;
+    p.gameplay.playfield.field.initialize(10,20);p.presentation.topMargin=20;
+    {Capture output;Render::print_message(context,p);}
+    p.presentation.topMargin=36;
+    {Capture output;Render::clear_screen();Render::redraw_player_board(context,p);
+        Test::TerminalScreen resized;resized.feed(output.str());
+        assert(resized.at(37,p.presentation.margin-9).glyph=="+");
+        assert(resized.at(37,p.presentation.margin-8).glyph=="-");
+        assert(resized.position_of("+--HOLD--").first==37);}
+}
+void test_time_below_statistics() {
+    for(const auto mode:{Runtime::GameMode::Zen,Runtime::GameMode::Blitz,Runtime::GameMode::Racing,
+        Runtime::GameMode::QuickPlay,Runtime::GameMode::Multiplayer,Runtime::GameMode::LocalVersus}) {
+        auto session=std::make_unique<Runtime::SessionState>();Runtime::RuntimeServices services;
+        Runtime::GameContext context{*session,services};auto& player=session->player;
+        context.config.mode.mode=mode;context.config.mode.blitzTime=Runtime::Duration::from_seconds(64);
+        context.config.mode.racingDistance=40;
+        context.config.garbage.mode=mode==Runtime::GameMode::Multiplayer || mode==Runtime::GameMode::LocalVersus
+            ?Runtime::GarbageMode::Multiplayer:Runtime::GarbageMode::None;
+        player.gameplay.playfield.width=10;player.gameplay.playfield.visibleHeight=20;
+        player.gameplay.playfield.holdEnabled=true;player.presentation.blockMaxHeight=2;
+        player.presentation.margin=36;player.presentation.topMargin=4;
+        player.gameplay.scoring.placedBlocks=80;player.gameplay.scoring.totalAttack=50;player.gameplay.scoring.totalLines=5;
+        player.timing.completedGameTime=Runtime::Duration::from_seconds(4);
+        Test::TerminalScreen screen;Capture output;Render::print_message(context,player);screen.feed(output.str());
+        const std::string time=mode==Runtime::GameMode::Blitz?"01:00.000":"00:04.000";
+        const auto timeAt=screen.position_of(time),ppsAt=screen.position_of("20.00 PPS");
+        const auto lastAt=screen.position_of("750.00 APM");
+        assert(timeAt.first==lastAt.first+1 && lastAt.first==ppsAt.first+1);
+        assert(timeAt.second+int(time.size())==ppsAt.second+int(std::string("20.00 PPS").size()));
+        assert(timeAt.second+int(time.size())==lastAt.second+int(std::string("750.00 APM").size()));
+        if(mode==Runtime::GameMode::Racing) assert(screen.position_of("5/40 LINES").first==timeAt.first+1);
+        if(mode==Runtime::GameMode::Zen) {
+            player.timing.completedGameTime=Runtime::Duration::from_seconds(6001.234);
+            Render::print_message(context,player);screen.feed(output.str());
+            const auto longTime=screen.position_of("100:01.234");
+            assert(longTime.first==timeAt.first && longTime.second+10==timeAt.second+int(time.size()));
+            player.timing.completedGameTime=Runtime::Duration::from_seconds(4);
+            Render::print_message(context,player);screen.feed(output.str());
+            assert(screen.at(timeAt.first,longTime.second).glyph==" ");
+        }
+    }
+}
 int main(){
+    test_goal_marker_units_and_time();
+    test_information_region();
+    test_time_below_statistics();
 #ifdef __linux__
     test_terminal_input_cleanup();
     test_terminal_text_input_cleanup();
@@ -572,21 +718,26 @@ int main(){
         Capture c; Render::move_to(context,player,2,-1);
         assert(c.str()=="\x1b[11;27H");
     }
+    const auto originalMode=context.config.mode.mode;
     {
+        context.config.mode.mode=Runtime::GameMode::Multiplayer;
         context.config.garbage.mode=Runtime::GarbageMode::Multiplayer;
         scoring.score=123;
         scoring.wins=7;
+        player.presentation.username="Latency player";
         Capture c; Render::print_score(context,player);
         const auto out=c.str();
-        assert(out.find("7")!=std::string::npos);
+        assert(out.find(player.presentation.username)!=std::string::npos);
         assert(out.find("123")==std::string::npos);
     }
     {
+        context.config.mode.mode=Runtime::GameMode::Zen;
         context.config.garbage.mode=Runtime::GarbageMode::None;
         scoring.score=123;
         Capture c; Render::print_score(context,player);
         assert(c.str().find("123")!=std::string::npos);
     }
+    context.config.mode.mode=originalMode;
     {
         context.config.display.obscuredColors=false;
         Capture c;
@@ -657,7 +808,7 @@ int main(){
         // Right-aligned toward the board, with one blank terminal cell before
         // the board's left border.
         assert(out.find("\x1b[17;22H")!=std::string::npos);
-        // Spin is at hold+3 and stats at hold+11; SPIKE exclusively owns
+        // Spin is at hold+2 and stats start at hold+10; SPIKE exclusively owns
         // hold+1, preventing vertical overlap with either group.
         assert(out.find("\x1b[17;")!=std::string::npos);
     }

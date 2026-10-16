@@ -71,6 +71,7 @@ PlacementApplicationConfig capture_placement_application_config(const Runtime::G
     PlacementApplicationConfig config;
     config.mode = runtime.mode.mode;
     config.blitzFlag = runtime.mode.fixedBlitzSpeed;
+    if(runtime.mode.legacyBlitzScoring) {config.mode=Runtime::GameMode::Blitz;config.blitzFlag=false;}
     config.blitzLevel = blitzLevel;
     config.garbageMode = runtime.garbage.mode;
     config.garbageMultiple = runtime.garbage.mode==Runtime::GarbageMode::Unclear && !runtime.garbage.legacyIncomingRounding

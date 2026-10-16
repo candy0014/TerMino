@@ -1,0 +1,432 @@
+--- a/src/bot/chatgpt/search.h
++++ b/src/bot/chatgpt/search.h
+@@ -4,6 +4,7 @@
+ #include "tetris_core.h"
+ #include "tetr/rules/spin.h"
+ #include <algorithm>
++#include <array>
+ #include <cstdint>
+ #include <string_view>
+ #include <vector>
+@@ -86,7 +87,14 @@
+ // eligibility and classifies spins with the host's rule implementation.
+ class Search {
+ public:
+-    struct Config { bool rootPreviousCleared = false; };
++    struct Counters {
++        std::uint64_t calls = 0, cacheHits = 0, visited = 0, landings = 0;
++    };
++    struct Config {
++        bool rootPreviousCleared = false;
++        bool cacheEnabled = true; // Exact-geometry optimization; disabled only by parity tests.
++        mutable Counters counters;
++    };
+ 
+     void init(const m_tetris::TetrisContext* context, const Config* config) {
+         context_ = context;
+@@ -94,6 +102,8 @@
+         marks_.resize(context->node_max());
+         landingMarks_.resize(context->node_max());
+         landingIndices_.resize(context->node_max());
++        cache_.clear();
++        cache_.resize(2048);
+     }
+ 
+     const std::vector<Landing>* search(const m_tetris::TetrisMap& map,
+@@ -108,6 +118,22 @@
+                                depth > 0 || (config_ && config_->rootPreviousCleared));
+             if (!start) return &landings_;
+         }
++        if (config_) ++config_->counters.calls;
++        // Memoize geometry only. Chain, timing, pressure and evaluation are
++        // never cached. Full row comparison guards hash collisions, and the
++        // resolved actual start distinguishes low starts / HOLD / Clutch.
++        std::uint64_t hash = start->index;
++        for (int y = 0; y < 40; ++y) hash = (hash ^ map.row[y]) * 1099511628211ull;
++        CacheEntry* cached = config_ && !config_->cacheEnabled ? nullptr : &cache_[hash % cache_.size()];
++        if (cached && cached->start == start && cached->hash == hash &&
++            std::equal(cached->rows.begin(), cached->rows.end(), map.row)) {
++            if (config_) {
++                ++config_->counters.cacheHits;
++                config_->counters.landings += cached->landings.size();
++            }
++            return &cached->landings;
++        }
++        const auto* originalStart = start;
+         if (++generation_ == 0) {
+             std::fill(marks_.begin(), marks_.end(), 0);
+             std::fill(landingMarks_.begin(), landingMarks_.end(), 0);
+@@ -115,8 +141,8 @@
+         }
+         m_tetris::TetrisMapSnap snap;
+         start->build_snap(map, context_, snap);
+-        // Above all obstacles every horizontal/rotation transition is open.
+-        while (start->low >= map.roof && start->move_down && start->move_down->check(snap))
++        // Keep the destination above obstacles, including higher side towers.
++        while (start->move_down && start->move_down->low >= map.roof && start->move_down->check(snap))
+             start = start->move_down;
+         auto enqueue = [&](const m_tetris::TetrisNode* node, int kick) {
+             if (!node || !node->check(snap)) return;
+@@ -172,10 +198,29 @@
+                 }
+             }
+         }
++        if (config_) {
++            config_->counters.visited += queue_.size();
++            config_->counters.landings += landings_.size();
++        }
++        // Bound cache storage even on pathological boards. Skipping a large
++        // entry affects performance only; never truncate the candidate set.
++        if (cached && landings_.size() <= 128) {
++            cached->hash = hash;
++            cached->start = originalStart;
++            std::copy_n(map.row, 40, cached->rows.begin());
++            cached->landings = landings_;
++        }
+         return &landings_;
+     }
+ 
+ private:
++    struct CacheEntry {
++        std::uint64_t hash = 0;
++        const m_tetris::TetrisNode* start = nullptr;
++        std::array<unsigned, 40> rows{};
++        std::vector<Landing> landings;
++    };
++    std::vector<CacheEntry> cache_;
+     const m_tetris::TetrisContext* context_ = nullptr;
+     const Config* config_ = nullptr;
+     std::uint32_t generation_ = 0;
+--- a/src/bot/chatgpt/evaluation.h
++++ b/src/bot/chatgpt/evaluation.h
+@@ -4,6 +4,7 @@
+ #include "search.h"
+ #include "policy.h"
+ #include "forecast.h"
++#include "opportunity.h"
+ #include "ai_zzz.h"
+ #include "tetr/rules/attack.h"
+ #include "tetr/rules/chain.h"
+@@ -39,11 +40,16 @@
+         bool operator<(const Status& other) const { return value < other.value; }
+     };
+ 
++    mutable std::array<std::uint64_t, 16> evaluatedByDepth{};
++    void reset_counters() { evaluatedByDepth.fill(0); }
++    void set_opportunity_weight(double weight) { opportunityWeight_ = weight; }
++
+     void init(const m_tetris::TetrisContext* context) {
+         context_ = context;
+         terrain_.init(context, nullptr);
++        opportunity_.init(context);
+     }
+-    std::string ai_name() const { return "bot_chatgpt v0.3.2-rc1"; }
++    std::string ai_name() const { return "bot_chatgpt v0.3.4-rc2"; }
+     double ratio() const { return 1.5; }
+ 
+     // Freeze weights for all alternatives in one search. Recompute only from
+@@ -72,6 +78,7 @@
+ 
+     Status get(Landing& landing, const Result& evaluation, std::size_t depth,
+                const Status& previous, const m_tetris::TetrisContext::Env& env) const {
++        ++evaluatedByDepth[std::min(depth, evaluatedByDepth.size() - 1)];
+         // Death is terminal: subsequent search geometry is not a playable
+         // continuation and must not earn attacks or alter the first-death score.
+         if (previous.dead) return previous;
+@@ -159,6 +166,17 @@
+             result.dead = true;
+         }
+         if (result.dead) result.value -= 1e9;
++        // Help the shallow beam retain setups whose NEXT/HOLD can really
++        // continue the chain. This estimate disappears at deeper nodes:
++        // actual follow-up clears then earn their normal rule-driven reward.
++        // No bonus is accumulated into reward/attack, and unknown risen
++        // garbage geometry must not produce a false opportunity certificate.
++        if (!result.dead && depth < 2 && result.b2b && !result.risen && env.length) {
++            const int nextSpin = opportunity_.best_lines(map, *env.next, lines > 0);
++            const int heldSpin = env.hold == *env.next ? nextSpin
++                : opportunity_.best_lines(map, env.hold, lines > 0);
++            result.value += opportunityWeight_ * std::min(2, std::max(nextSpin, heldSpin));
++        }
+         return result;
+     }
+ 
+@@ -167,6 +185,8 @@
+     GarbageForecast forecast_;
+     const m_tetris::TetrisContext* context_ = nullptr;
+     ai_zzz::Botris terrain_;
++    mutable SpinOpportunity opportunity_;
++    double opportunityWeight_ = 280;
+ };
+ }
+ 
+--- a/include/tetr/bot/bot_chatgpt.h
++++ b/include/tetr/bot/bot_chatgpt.h
+@@ -6,6 +6,7 @@
+ #include "tetr/runtime/playfield.h"
+ #include <vector>
+ #include <array>
++#include <cstdint>
+ 
+ namespace Bot_chatgpt {
+ // Read-only diagnostics. Never fed back into the policy or tied to test IDs.
+@@ -18,6 +19,9 @@
+     double digPressure = 0; // Visible-state blend: 0 firepower, 1 fast downstack.
+     double forecastStepSeconds = 0;
+     bool openerDoubleCancelEnabled = false;
++    int selectedDepth = 0;
++    std::uint64_t searchCalls = 0, cacheHits = 0, visited = 0, landings = 0;
++    std::array<std::uint64_t, 16> evaluatedByDepth{};
+     std::array<unsigned, 40> rows{}; // bottom-up board before the decision.
+ };
+ Diagnostics last_diagnostics();
+--- a/src/bot/bot_chatgpt.cpp
++++ b/src/bot/bot_chatgpt.cpp
+@@ -88,6 +88,8 @@
+     auto& search = work.engine;
+     *search.status() = status;
+     search.search_config()->rootPreviousCleared = status.previousCleared;
++    search.search_config()->counters = {};
++    search.ai()->reset_counters();
+     search.ai()->set_policy(policy);
+     diagnostics.forecastStepSeconds = environment.secondsPerPiece > 0
+         ? environment.secondsPerPiece : budgetMs / 1000.0;
+@@ -109,6 +111,13 @@
+     diagnostics.searchMilliseconds = std::chrono::duration<double, std::milli>(
+         std::chrono::steady_clock::now() - searchStarted).count();
+     diagnostics.projectedAttack = result.status.attack;
++    diagnostics.selectedDepth = std::max(0, result.status.placedPieces - status.placedPieces);
++    diagnostics.evaluatedByDepth = search.ai()->evaluatedByDepth;
++    const auto& counters = search.search_config()->counters;
++    diagnostics.searchCalls = counters.calls;
++    diagnostics.cacheHits = counters.cacheHits;
++    diagnostics.visited = counters.visited;
++    diagnostics.landings = counters.landings;
+     diagnostics.value = result.status.value;
+     diagnostics.fallbackReason = 1;
+     if (result.target != nullptr) {
+--- a/src/legacy/bot.cpp
++++ b/src/legacy/bot.cpp
+@@ -132,6 +132,13 @@
+ 				 << " dig_pressure=" << diagnostic.digPressure
+ 				 << " forecast_step=" << diagnostic.forecastStepSeconds
+ 				 << " opener_double=" << int(diagnostic.openerDoubleCancelEnabled)
++				 << " selected_depth=" << diagnostic.selectedDepth
++				 << " search_calls=" << diagnostic.searchCalls << " cache_hits=" << diagnostic.cacheHits
++				 << " visited=" << diagnostic.visited << " landings=" << diagnostic.landings
++				 << " evaluated_depths=";
++			for (std::size_t i = 0; i < diagnostic.evaluatedByDepth.size(); ++i)
++				line << (i ? "," : "") << diagnostic.evaluatedByDepth[i];
++			line
+ 				 << " selected=" << selected << " row=" << ans_x << " col=" << ans_y
+ 				 << " rotation=" << ans_type << " kick=" << ans_rot << " board=";
+ 			for (std::size_t i = 0; i < diagnostic.rows.size(); ++i)
+--- a/tests/bot_chatgpt_test.cpp
++++ b/tests/bot_chatgpt_test.cpp
+@@ -93,6 +93,23 @@
+     Bot_chatgpt::Search search;
+     Bot_chatgpt::Search::Config searchConfig;
+     search.init(engine.context().get(), &searchConfig);
++    Bot_chatgpt::Search uncached;
++    Bot_chatgpt::Search::Config uncachedConfig;
++    uncachedConfig.cacheEnabled = false;
++    uncached.init(engine.context().get(), &uncachedConfig);
++    Bot_chatgpt::SpinOpportunity opportunity;
++    opportunity.init(engine.context().get());
++    Runtime::Playfield tower;
++    tower.initialize(10, 20); tower.clear();
++    for (int y = 15; y < 20; ++y) tower.set_cell(y, 0, Runtime::BoardCell::garbage());
++    const auto towerMap = BotNativeHost::make_map(tower);
++    const auto* onTower = engine.context()->generate('O');
++    while (onTower->move_left) onTower = onTower->move_left;
++    onTower = onTower->drop(towerMap);
++    const auto* towerCandidates = search.search(towerMap, engine.context()->generate('O'), 0);
++    assert(std::any_of(towerCandidates->begin(), towerCandidates->end(), [&](const auto& l) {
++        return l->index_filtered == onTower->index_filtered;
++    }));
+     for (char type : std::string("IJLOSTZ")) {
+         for (int rotation = 0; rotation < 4; ++rotation) {
+             for (int row : {-12, -4, -2, 0, 12}) {
+@@ -108,7 +125,7 @@
+         }
+     }
+     std::mt19937 random(20260924);
+-    int spins = 0, landings = 0;
++    int spins = 0, landings = 0, certifiedOpportunities = 0;
+     for (int sample = 0; sample < 12; ++sample) {
+         Runtime::Playfield field;
+         field.initialize(10, 20);
+@@ -126,7 +143,57 @@
+             const auto piece = Piece::get_definition(Piece::Type::from_index(Bot_chatgpt::piece_index(type)));
+             const auto* candidates = search.search(map, engine.context()->generate(type), 0);
+             assert(!candidates->empty());
+-            for (const auto& landing : *candidates) {
++            const auto saved = *candidates;
++            int bestSpinLines = 0;
++            for (const auto& l : saved) {
++                int lines = 0;
++                for (int y = 0; y < l->height; ++y)
++                    lines += (map.row[l->row + y] | l->data[y]) == engine.context()->full();
++                if (l.spin) bestSpinLines = std::max(bestSpinLines, lines);
++            }
++            assert(opportunity.best_lines(map, type, false) == bestSpinLines);
++            if (bestSpinLines) {
++                ++certifiedOpportunities;
++                Bot_chatgpt::Evaluation::Result after;
++                after.shape = {0, 0, map.count, &map};
++                after.before = &map;
++                Bot_chatgpt::Evaluation::Status before;
++                before.b2b = 1;
++                m_tetris::TetrisContext::Env future{};
++                future.next = &type; future.length = 1; future.hold = ' ';
++                Bot_chatgpt::Landing placed(engine.context()->generate('J'));
++                engine.ai()->set_opportunity_weight(280);
++                const auto with = engine.ai()->get(placed, after, 0, before, future);
++                const auto deep = engine.ai()->get(placed, after, 2, before, future);
++                engine.ai()->set_opportunity_weight(0);
++                const auto without = engine.ai()->get(placed, after, 0, before, future);
++                assert(with.attack == without.attack && with.reward == without.reward);
++                assert(with.value - without.value == 280 * std::min(2, bestSpinLines));
++                assert(deep.value == engine.ai()->get(placed, after, 2, before, future).value);
++                before.risen = 1;
++                const auto unknownGeometry = engine.ai()->get(placed, after, 0, before, future);
++                engine.ai()->set_opportunity_weight(280);
++                assert(unknownGeometry.value == engine.ai()->get(placed, after, 0, before, future).value);
++                before.risen = 0;
++                future.length = 0; future.next = nullptr;
++                const auto unseen = engine.ai()->get(placed, after, 0, before, future);
++                engine.ai()->set_opportunity_weight(0);
++                assert(unseen.value == engine.ai()->get(placed, after, 0, before, future).value);
++                engine.ai()->set_opportunity_weight(280);
++            }
++            assert(saved == *uncached.search(map, engine.context()->generate(type), 0));
++            const auto hits = searchConfig.counters.cacheHits;
++            assert(saved == *search.search(map, engine.context()->generate(type), 0));
++            assert(searchConfig.counters.cacheHits == hits + 1);
++            std::set<std::size_t> found;
++            for (const auto& l : saved) found.insert(l->index_filtered);
++            for (int r = 0; r < 4; ++r) {
++                const auto* airborne = engine.context()->get(type, 3, 22, r);
++                while (airborne->move_left) airborne = airborne->move_left;
++                for (; airborne; airborne = airborne->move_right)
++                    if (airborne->check(map)) assert(found.count(airborne->drop(map)->index_filtered));
++            }
++            for (const auto& landing : saved) {
+                 const auto pose = Bot_chatgpt::host_pose(*landing.node);
+                 assert(piece.can_place(pose, field));
+                 assert(!piece.can_place(pose.translated(1, 0), field));
+@@ -147,6 +214,7 @@
+         }
+     }
+     assert(spins > 0 && landings > 1000);
++    assert(certifiedOpportunities > 0);
+ 
+     // Explicit Season 2 examples: preserve zero-line B2B, charge release,
+     // multiplicative combo, and non-T mini (not a full-spin attack).
+--- /dev/null
++++ b/src/bot/chatgpt/opportunity.h
+@@ -0,0 +1,37 @@
++#ifndef TETR_BOT_CHATGPT_OPPORTUNITY_H
++#define TETR_BOT_CHATGPT_OPPORTUNITY_H
++
++#include "search.h"
++
++namespace Bot_chatgpt {
++
++// A bounded, one-piece geometric certificate, not a guessed slot pattern.
++// Uses only a named visible piece and the real SRS+/Spin search. No future
++// garbage holes, hidden bag or imagined setup blocks are introduced.
++class SpinOpportunity {
++public:
++    void init(const m_tetris::TetrisContext* context) {
++        context_ = context;
++        search_.init(context, nullptr);
++    }
++    int best_lines(const m_tetris::TetrisMap& map, char type, bool previousCleared) {
++        if (piece_index(type) < 0) return 0;
++        const auto* start = spawn_node(context_, map, type, previousCleared);
++        if (!start) return 0;
++        int best = 0;
++        for (const auto& landing : *search_.search(map, start, 0)) {
++            if (!landing.spin) continue;
++            int lines = 0;
++            for (int y = 0; y < landing->height; ++y)
++                lines += (map.row[landing->row + y] | landing->data[y]) == context_->full();
++            best = std::max(best, lines);
++        }
++        return best;
++    }
++private:
++    const m_tetris::TetrisContext* context_ = nullptr;
++    Search search_;
++};
++}
++
++#endif
+--- /dev/null
++++ b/src/bot/chatgpt/search_probe.cpp
+@@ -0,0 +1,53 @@
++// Deterministic work-count probe, not a replacement game simulator.
++// Compare identical tree expansion iterations with geometry caching on/off.
++#include "evaluation.h"
++#include "../native_host.h"
++#include "rule_tetr_srs_plus.h"
++#include <chrono>
++#include <cstdlib>
++#include <iostream>
++#include <random>
++
++int main(int argc, char** argv) {
++    using Engine = m_tetris::TetrisEngine<rule_tetr_srs_plus::TetrisRule,
++        Bot_chatgpt::Evaluation, Bot_chatgpt::Search>;
++    Engine engine;
++    if (!engine.prepare(10, 40)) return 1;
++    engine.memory_limit(256ull << 20);
++    const bool cache = argc < 2 || std::atoi(argv[1]) != 0;
++    engine.search_config()->cacheEnabled = cache;
++    std::mt19937 random(20260926);
++    std::uint64_t calls = 0, hits = 0, visited = 0, evaluations = 0;
++    double milliseconds = 0;
++    for (int sample = 0; sample < 12; ++sample) {
++        Runtime::Playfield field;
++        field.initialize(10, 20); field.clear();
++        for (int x = 0; x < 10; ++x) {
++            const int height = sample ? random() % 8 : 0;
++            for (int y = 20 - height; y < 20; ++y)
++                if (x != sample % 10) field.set_cell(y, x, Runtime::BoardCell::garbage());
++        }
++        const auto map = BotNativeHost::make_map(field);
++        *engine.status() = {};
++        if (sample) engine.update();
++        engine.search_config()->counters = {};
++        engine.ai()->reset_counters();
++        const auto begin = std::chrono::steady_clock::now();
++        const auto* start = engine.context()->generate('T');
++        engine.run_hold(map, start, 'I', true, "ZJSOLT", 6, 0);
++        for (int iteration = 0; iteration < 100; ++iteration) engine.run_hold();
++        const auto result = engine.run_hold(map, start, 'I', true, "ZJSOLT", 6, 0);
++        milliseconds += std::chrono::duration<double, std::milli>(
++            std::chrono::steady_clock::now() - begin).count();
++        const auto& c = engine.search_config()->counters;
++        calls += c.calls; hits += c.cacheHits; visited += c.visited;
++        for (auto count : engine.ai()->evaluatedByDepth) evaluations += count;
++        if (!result.target.node) return 2;
++        std::cout << "sample=" << sample << " target=" << result.target->index
++                  << " spin=" << result.target.spin << " mini=" << result.target.mini
++                  << " hold=" << result.change_hold << " value=" << result.status.value
++                  << " depth=" << result.status.placedPieces << '\n';
++    }
++    std::cout << "cache=" << cache << " ms=" << milliseconds << " calls=" << calls
++              << " hits=" << hits << " visited=" << visited << " evaluations=" << evaluations << '\n';
++}
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -352,5 +352,8 @@
+     target_link_libraries(bot_chatgpt_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
+     add_test(NAME bot_chatgpt COMMAND bot_chatgpt_test)
+     set_tests_properties(bot_chatgpt PROPERTIES TIMEOUT 30)
++    add_executable(bot_chatgpt_search_probe src/bot/chatgpt/search_probe.cpp)
++    target_include_directories(bot_chatgpt_search_probe PRIVATE zzztoj_standalone/src)
++    target_link_libraries(bot_chatgpt_search_probe PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
+ 
+     add_executable(bot_zzztoj_benchmark tests/bot_zzztoj_benchmark.cpp)

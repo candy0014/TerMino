@@ -1,74 +1,122 @@
-# TerMino · 终端方块
+# TerMino
 
-C++17 终端方块游戏，支持 Linux 和 Windows。玩法参考 TETR.IO Season 2 / Quick Play 2，支持自定义规则、地图与块序、回放、本地双人、公网房间及多个 BOT。
+C++17 编写的终端方块游戏，支持 Linux 和 Windows。
 
-## 构建和运行
+由 candy0014 开发和维护；项目原创代码和文档沿用 [MIT 许可证](LICENSE)。第三方部分遵循各自许可，见 [第三方来源](THIRD_PARTY_NOTICES.md)。
 
-需要 CMake 3.18+ 和支持 C++17 的编译器。Windows 可使用 Visual Studio 2022 的 C++ 桌面开发组件或 MinGW-w64。WebSocket 使用 libcurl 8.14+；找不到合适版本时，CMake 自动下载并构建固定版本依赖。
+- 自由练习、消行/限时/挖掘等目标、快速游戏、地图编辑与预设。
+- 单机挑战、与 Bot 对战、回合制 Bot 对战及构造图形挑战。
+- UDP / WebSocket 公网房间，多人对战、房主移交与观战。
+- 原生回放、最近 30 场自动回放、挑战成绩与回放关联，以及重复另存为。
+- 多套旋转系统与 Bot；尚需性能或设备验证的挑战保留【测试】标签。
 
-```bash
-git clone https://github.com/candy0014/TerMino.git
-cd TerMino
-./compile.sh
+## 下载与运行
+
+在仓库的 **Releases** 页面下载对应平台的完整压缩包，解压到可写目录：
+
+- Linux x64：在终端运行 `./Play.sh`。
+- Windows 10/11 x64：运行 `Play.bat`，建议使用 Windows Terminal 和支持中文的等宽字体。
+- `Server.sh` / `Server.bat` 启动独立 UDP 服务端，默认端口 3000。
+
+发行包及源码均不包含个人设置、个人地图/预设、挑战成绩或回放。
+缺少配置文件时，程序使用代码中的完整默认值。不要只复制单个可执行文件。
+Linux 的键盘输入需要可读取的输入设备；WSS 需要系统可信 CA 证书。
+
+## 从源码构建
+
+源码已包含带本地修补的 zzztoj 快照和 Cold Clear 参考源码，无需初始化 Git 子模块。
+需要 CMake、C/C++17 工具链及线程支持。首次便携构建会下载校验哈希固定的网络依赖。
+
+Linux：
+
+```sh
+bash compile.sh
 ./build/tetr
 ```
 
-Windows 在项目目录运行 `compile.bat`；也可以使用 CMake：
+Windows（Visual Studio 2022 或更新版本的 C++ 桌面工具，或 MinGW-w64）：
 
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
-cmake --build build --config Release --parallel 4
+```powershell
+.\compile.ps1
 ```
 
-第三方 BOT 所需代码随源码提供，包含本项目使用的边界修复，无须初始化子模块。建议使用 Windows Terminal 或支持中文的等宽终端。Linux 可读取当前有权限访问的键盘设备；也支持终端输入。
+也可直接使用 CMake：
 
-首次启动使用默认配置。玩家配置、地图和预设自动保存在 `.tetr/`；回放保存在 `replay/`。这些运行数据不加入 Git。平台默认键位文件随源码提供。
-
-## 操作和设置
-
-开始界面默认 `R` 开始、`P` 设置、`Esc` 退出，提示会跟随实际绑定变化。在设置中使用方向键、Enter 和 Backspace 浏览，支持分页、数值输入和多键绑定。界面默认中文，可在外观中切换 English。
-
-支持多个旋转系统、随机器、HOLD/NEXT、重力与锁定规则、攻击及垃圾参数、Quick Play 修改器、暂停和撤回。设置、预设和地图说明见：
-
-- [地图与自定义块序](docs/MAPS.md)
-- [预设](docs/PRESETS.md)
-- [Quick Play 规则](docs/QUICK_PLAY_RULES.md)
-- [模拟时间和轮流出块](docs/SIMULATION_TIME.md)
-- [BOT 支持范围](docs/BOT_COMPATIBILITY.md)
-- [Quick Play BOT 适配](docs/BOT_QUICK_PLAY_MODS.md)
-- [Cold Clear C++ 移植](docs/BOT_COLDCLEAR.md)
-
-本地双人使用一个窗口、独立的玩家配置和键位。回放支持暂停、变速、跳转和双方视角；录制包含实际规则及地图内容。
-
-## 联机和房间
-
-运行 `./build/tetr_server` 启动 UDP 中继，默认端口为 3000。客户端在「联机」中设置服务器地址和用户名；用户名默认使用 `GUEST-` 随机字符串，连接后修改会同步到服务器。
-
-连接后先创建或加入房间。房间可公开或私有，空房名自动生成四个随机大写字母。大厅显示公开房间及人数，也支持按名称加入私有房间。当前每房最多两人，支持多个独立房间。
-
-房间显示成员及房主。只有房主显示「切换房主」「强制使用房主配置」和「强制使用房主手感」；其他成员看到只读状态。房主退出时自动转交权限，最后一人离开后销毁房间。
-
-强制房主配置默认开启，开始前同步本场规则、地图及完整块序；外观、键位和网络身份保持各自设置。强制手感默认关闭，开启时同步 DAS、ARR、DCD、软降和预输入参数。强制配置仅本场生效，不覆盖个人配置或地图库。所有成员校验并应用完整配置后，才初始化棋盘和倒计时。
-
-对方画面使用实际动作结果和周期性压缩快照混合同步，带帧号、序号、版面校验及丢包恢复。联机设置中的重置保留联机模式；根重置保留网络选项、连接和房间。
-
-公网可部署 WebSocket 网关，让客户端填写 `wss://你的域名/ws`。网关把每条连接转发到本地 UDP 中继，支持 TLS 反向代理和 Cloudflare Tunnel：
-
-```bash
-python3 -m pip install -r deploy/websocket-requirements.txt
-python3 tools/websocket_gateway.py --host 127.0.0.1 --port 8080
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build build --config Release --parallel 2
+ctest --test-dir build -C Release --output-on-failure --parallel 2
 ```
 
-中继需同时运行。`deploy/` 提供 systemd 服务模板，`tools/check_relay.py` 可检查 UDP 往返。启用任一房主强制开关时，所有玩家均需新版客户端。
+WebSocket 集成测试需要 Python 和锁定的依赖：
 
-## 打包与验证
-
-Linux 使用 `./package.sh`，Windows 使用 `package.bat`。脚本生成便携包及校验文件，可通过 `--data-dir` 或 `-DataDirectory` 选择需要复制的个人运行数据；源码仓库不包含这些数据。
-
-```bash
-cmake -S . -B build-test -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-cmake --build build-test --config Release --parallel 4
-ctest --test-dir build-test -C Release --output-on-failure
+```sh
+python -m pip install --require-hashes -r deploy/websocket-requirements.txt
+python -m unittest discover -s tests -p '*test.py' -v
+node tests/moch_pressure_test.cjs
 ```
 
-WebSocket 集成测试需要 `deploy/websocket-requirements.txt` 中的 Python 依赖。`zzztoj_standalone/` 包含独立 BOT 验证程序；项目分层见 [架构说明](docs/ARCHITECTURE.md)。第三方来源与许可证见 [第三方说明](THIRD_PARTY_NOTICES.md)。
+启用 Python 依赖后重新配置 CMake，WebSocket 用例会加入 CTest。
+需要外部官方引擎或自备录像的离线参照工具另见各脚本的用法；个人录像不随仓库提供。
+
+## 默认操作
+
+| 操作 | 按键 |
+| --- | --- |
+| 左移 / 右移 / 软降 | ← / → / ↓ |
+| 硬降 | Space |
+| 顺时针 / 逆时针 / 180°旋转 | ↑ / Z / A |
+| Hold | C |
+| 重试 / 设置 | R / P |
+| 保存录像 / 撤回 / 暂停 | S / U / F2 |
+
+两个玩家的默认物理按键相同，可在设置中分别修改。
+Linux 与 Windows 使用各自的原生键码；首次运行不需要键位文件。
+
+## 个人数据
+
+所有个人数据保存在启动目录下的 `.tetr/`，不进入 Git：
+
+| 位置 | 内容 |
+| --- | --- |
+| `player1_linux.ini` / `player2_linux.ini` | Linux 玩家配置 |
+| `player1_windows.ini` / `player2_windows.ini` | Windows 玩家配置 |
+| `*.ini.challenges` | 个人挑战成绩及关联回放 |
+| `maps.txt` / `presets.txt` | 个人地图与预设库 |
+| `replay/` | 保存的录像与最近回放缓存 |
+
+以上位置均相对于 `.tetr/`。根目录的旧 `keybinding*.txt` 也属于个人配置，并被 Git 忽略。
+升级时自行保留整个 `.tetr/`；恢复默认可先备份，再移走个人配置目录和旧键位文件。
+录像可使用绝对路径输入或另存；持久化引用尽量相对于项目目录，跨 Windows 盘符或共享根时保留绝对路径。
+
+## 联机
+
+默认公网入口为 `wss://termino.candy0014.icu/ws`。也可输入自建的完整 `ws://` / `wss://` 地址，
+或用 `主机[:端口]` 连接 UDP 服务端。部署模板见 `deploy/`；令牌和本机部署参数不应提交到仓库。
+
+## 打包与发布
+
+```sh
+bash package.sh --parallel 2
+```
+
+```powershell
+.\package.ps1 -Parallel 2
+```
+
+输出在 `dist/`，包含游戏、服务端、启动脚本、许可证及 SHA256 校验文件。
+从干净源码打包使用完整默认设置，不带任何个人库或记录。
+
+`.github/workflows/release.yml` 在推送 `v*` 标签后，在原生 Linux / Windows 环境构建、运行测试、
+检查压缩包的默认配置和实际启动，然后将两平台归档及校验文件发布到 GitHub Releases。
+
+## 文档与源码
+
+- [单机挑战](docs/SINGLE_PLAYER_CHALLENGES.md)、[挑战目录](docs/SINGLE_PLAYER_CHALLENGE_CATALOG.txt)
+- [地图](docs/MAPS.md)、[预设](docs/PRESETS.md)、[多人房间](docs/MULTIPLAYER_ROOMS.md)
+- [快速游戏规则](docs/QUICK_PLAY_RULES.md)、[模拟时间](docs/SIMULATION_TIME.md)
+- [架构](docs/ARCHITECTURE.md)、[Bot 兼容性](docs/BOT_COMPATIBILITY.md)
+- [zzztoj 来源与修补](src/bot/zzztoj/UPSTREAM.md)、[Cold Clear 来源](third_party/cold-clear/UPSTREAM.md)
+
+`src/` 和 `include/` 为游戏实现，`tests/` 为回归测试，`tools/` 为分析及网关工具。
+第三方源码保留原有许可证，发行包内附带相应通知。

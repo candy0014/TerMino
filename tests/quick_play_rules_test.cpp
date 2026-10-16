@@ -18,6 +18,7 @@
 #include "tetr/replay/session_state.h"
 #include "tetr/render/board_renderer.h"
 #include "tetr/runtime/game_context.h"
+#include "tetr/runtime/field_visibility.h"
 
 #include <cassert>
 #include <cmath>
@@ -439,14 +440,14 @@ void integration_and_display() {
 
     context.config.field.invisible=true;
     context.config.quickPlay.invisible=ModifierMode::Enabled;
-    assert(!Render::board_cell_visible(context,player,10,Runtime::BoardCell::piece(0)));
-    player.presentation.qpInvisibleFlash=true;
-    assert(Render::board_cell_visible(context,player,10,Runtime::BoardCell::piece(0)));
-    player.presentation.qpInvisibleFlash=false;
+    assert(!Render::board_cell_visible(context,player,10,0,Runtime::BoardCell::piece(0)));
+    player.presentation.invisibleFlash=true;
+    assert(Render::board_cell_visible(context,player,10,0,Runtime::BoardCell::piece(0)));
+    player.presentation.invisibleFlash=false;
     context.config.quickPlay.invisible=ModifierMode::Reverse;
     field.garbageHeight=10;
-    assert(Render::board_cell_visible(context,player,12,Runtime::BoardCell::garbage()));
-    assert(!Render::board_cell_visible(context,player,13,Runtime::BoardCell::garbage()));
+    assert(Render::board_cell_visible(context,player,12,0,Runtime::BoardCell::garbage()));
+    assert(!Render::board_cell_visible(context,player,13,0,Runtime::BoardCell::garbage()));
 }
 
 void initial_floor_state() {
@@ -558,9 +559,9 @@ void continuous_cancellation_switch() {
 
 int main() {
     for (double t:{0.0,1.0,4.999,6.0,9.999,11.0})
-        assert(!Engine::qp_invisible_flash(Duration::from_seconds(t)));
+        assert(!Runtime::periodic_invisible_flash(Duration::from_seconds(t),Duration::from_seconds(5),Duration::from_seconds(1)));
     for (double t:{5.0,5.15,5.5,5.999,10.0,10.999})
-        assert(Engine::qp_invisible_flash(Duration::from_seconds(t)));
+        assert(Runtime::periodic_invisible_flash(Duration::from_seconds(t),Duration::from_seconds(5),Duration::from_seconds(1)));
     booster_idle_demotion(); delays_and_mods(); booster(); placement_rewards(); attack_and_chain();
     reception_and_fatigue(); hole_policy(); integration_and_display(); initial_floor_state(); continuous_cancellation_switch();
     std::cout << "quick play rules: OK\n";

@@ -5,6 +5,7 @@
 #include "garbage_rendering.h"
 #include "tetr/engine/movement_controller.h"
 #include "tetr/engine/periodic_events.h"
+#include "tetr/rules/game_completion.h"
 #include "tetr/network/multiplayer_channel.h"
 #include "tetr/render/board_renderer.h"
 #include "tetr/render/piece_renderer.h"
@@ -34,10 +35,7 @@ std::optional<Rules::PlayResult> process_live_piece_periodic_events(
     }
 
     const Runtime::TimePoint now = context.now();
-    if (blitz_time_expired(
-            context.config.mode.mode,
-            Runtime::elapsed_game_time(context.session, now),
-            context.config.mode.blitzTime)) {
+    if (Rules::time_goal_reached(context.config,Runtime::elapsed_game_time(context.session, now))) {
         Render::OutputGuard output(context);
         record_piece_pose(context, Replay::OperationKind::PutErase, movementState.pose);
         Render::draw_piece(
@@ -45,10 +43,7 @@ std::optional<Rules::PlayResult> process_live_piece_periodic_events(
         Render::set_ui_color(
             context.config.display.obscuredColors ? Render::ColorRole::Ghost : Render::ColorRole::Text,
             context.config.display.obscuredColors);
-        Render::move_to(context, player, 12 + player.presentation.hold_panel_height(), -8);
-        std::cout << "      ";
-        Render::move_to(context, player, 12 + player.presentation.hold_panel_height(), -5, -1);
-        std::cout << "0.00";
+        Render::print_message(context,player);
         return Rules::PlayResult::Locked;
     }
 

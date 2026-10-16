@@ -73,6 +73,16 @@ void add_garbage(
     bool preserveHole,
     Runtime::BoardCell cell,
     bool renderField,std::optional<double> qpElapsedSeconds) {
+    // Never generate more cheese than a finite digging goal needs. Replays
+    // keep their recorded rise events, including historical replenishment.
+    if (!context.config.mode.replayMode && Runtime::is_cheese_mode(context.config.garbage.mode) &&
+        Runtime::active_goal(context.config)==Runtime::GameGoal::Garbage) {
+        const auto& gameplay=player.gameplay;
+        const auto needed=std::max<std::int64_t>(0,static_cast<std::int64_t>(context.config.mode.garbageTarget)-
+            gameplay.scoring.totalGarbageLines-gameplay.playfield.garbageHeight);
+        height=static_cast<int>(std::min<std::int64_t>(std::max(0,height),needed));
+        if(!height)return;
+    }
     if (!context.config.mode.replayMode) {
         Replay::record_add_garbage(context, height, preserveHole, cell);
     }

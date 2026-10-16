@@ -118,7 +118,7 @@ GarbageRisePlan consume_ready_garbage(
             queue.pop_front();
             result.chunks.push_back(GarbageRiseChunk{
                 packet.line_count(),
-                packet.preserve_hole()
+                packet.preserve_hole(),packet.source_slot()
             });
             remaining -= packet.line_count();
         } else {
@@ -127,7 +127,7 @@ GarbageRisePlan consume_ready_garbage(
             queue.front().mark_preserve_hole();
             result.chunks.push_back(GarbageRiseChunk{
                 remaining,
-                packet.preserve_hole()
+                packet.preserve_hole(),packet.source_slot()
             });
             remaining = 0;
         }

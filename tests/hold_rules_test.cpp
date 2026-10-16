@@ -179,7 +179,9 @@ void network_and_color() {
     assert(snapshot && snapshot->placement && snapshot->holdAvailable==std::optional<bool>{true});
     Engine::apply_remote_board_state(f.context,f.session.opponent,*snapshot);
     assert(Render::hold_draw_mode(f.context,f.session.opponent)==Render::PieceDrawMode::Normal);
-    auto bad=locked; bad.back()='2';
+    auto bad=locked;
+    const auto available=bad.find(";hold-v1;");assert(available!=std::string::npos);
+    bad[available+9]='2'; // The clock extension now follows the Hold availability field.
     assert(!Network::decode_board_state(bad,10,20));
     hold.used=0; f.context.config.field.holdCount=1;
     const auto legacy=Network::decode_board_state(Network::encode_board_state(f.context,p),10,20);

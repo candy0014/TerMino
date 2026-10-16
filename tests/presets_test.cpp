@@ -69,41 +69,41 @@ void layering() {
     assert(user.spinBonuses==9 && user.b2bReward==2 && !user.b2bCharging && !user.perfectClearEnabled && !user.halfClearEnabled);
     assert(user.keyCodes==keys && user.uiLanguage==1 && user.squareStyle==1 && user.obscuredColors==1);
     auto tree=Model::make_tree(user,false,0);
-    auto das=field(tree,SettingId::Das);
+    auto das=field(tree,SettingId::ForcedDas);
     assert(Model::assign_scalar(das,"0.31"));
     assert(Presets::modified(user.presets.layers.front()));
     const auto classicSerial=user.presets.layers.front().serial;
     user.autoplayWidth=451; // Never covered by the presets because bots are off.
     assert(Presets::apply(user,PresetKind::Marathon));
     const auto marathonSerial=user.presets.layers.back().serial;
-    assert(user.gameMode==1 && user.racingDistance==150 && user.gravityProgression==2);
+    assert(user.gameMode==0 && user.goal==2 && user.racingDistance==150 && user.gravityProgression==2);
     assert(user.rotationSystem==9 && user.randomPieces==6 && !user.holdEnabled && user.holdCount==1);
     assert(user.disableHardDrop && user.disable180 && !user.infiniteMovement && user.lockResetLimit==0);
     assert(user.gravityLevelLines==10 && user.gravityAcceleration==1 && user.softDropFixed);
-    assert(user.das==.31 && user.arr==6/60.0988);
-    user.das=.22;Presets::record_edits(user);
-    assert(Presets::source(user,SettingId::Das)->serial==classicSerial);
+    assert(user.forcedDas==.31 && user.forcedArr==6/60.0988 && user.das==.073 && user.arr==.004);
+    user.forcedDas=.22;Presets::record_edits(user);
+    assert(Presets::source(user,SettingId::ForcedDas)->serial==classicSerial);
     assert(Presets::apply(user,PresetKind::Delayed));
-    assert(user.gameMode==1 && user.gravityProgression==2 && user.rotationSystem==9 && user.randomPieces==6);
-    assert(std::abs(user.das-10.0/60)<1e-12 && std::abs(user.arr-2.0/60)<1e-12);
-    assert(user.softDropFactor==20 && !user.softDropFixed && user.dcd==0);
+    assert(user.gameMode==0 && user.goal==2 && user.gravityProgression==2 && user.rotationSystem==9 && user.randomPieces==6);
+    assert(std::abs(user.forcedDas-10.0/60)<1e-12 && std::abs(user.forcedArr-2.0/60)<1e-12);
+    assert(user.forcedSdf==20 && !user.forcedSdfFixed && user.forcedDcd==0 && user.softDropFactor==.02 && user.softDropFixed);
     assert(std::abs(user.entryDelay-6.0/60)<1e-12 && std::abs(user.lineClearDelay-30.0/60)<1e-12);
     assert(Presets::remove(user,marathonSerial));
     assert(user.gameMode==0 && user.gravityProgression==1 && user.gravityInterval==48/60.0988);
-    assert(user.das==10.0/60 && user.racingDistance==std::get<int>(baseline.at(SettingId::RacingDistance)));
+    assert(user.forcedDas==10.0/60 && user.racingDistance==std::get<int>(baseline.at(SettingId::RacingDistance)));
     user.racingDistance=200; // Now uncovered, so this becomes an ordinary personal edit.
     assert(Presets::undo(user));
-    assert(user.das==.22 && user.presets.layers.size()==1 && user.presets.layers.front().serial==classicSerial);
+    assert(user.forcedDas==.22 && user.presets.layers.size()==1 && user.presets.layers.front().serial==classicSerial);
     assert(Presets::undo(user));
     auto expected=baseline;expected[SettingId::AutoplayWidth]=451;expected[SettingId::RacingDistance]=200;
     assert(numeric(user)==expected && user.presets.base.empty() && user.presets.layers.empty());
     assert(!Presets::undo(user));
 
-    assert(Presets::apply(user,PresetKind::Classic));user.das=.4;Presets::record_edits(user);
+    assert(Presets::apply(user,PresetKind::Classic));user.forcedDas=.4;Presets::record_edits(user);
     assert(Presets::apply(user,PresetKind::Classic));
     assert(user.presets.layers.size()==2);
-    assert(Presets::undo(user) && user.das==.4);
-    UserConfig::reset_section(user,UserConfig::Section::Handling);
+    assert(Presets::undo(user) && user.forcedDas==.4);
+    UserConfig::reset_section(user,UserConfig::Section::Game);
     assert(user.presets.layers.size()==1 && Presets::modified(user.presets.layers.front()));
     assert(Presets::clear(user) && user.das==.073 && user.arr==.004);
     assert(Presets::apply(user,PresetKind::Delayed));
@@ -121,9 +121,9 @@ void independent_concerns() {
     assert(Presets::apply(marathonFirst,PresetKind::Marathon));
     assert(Presets::apply(marathonFirst,PresetKind::Classic));
     assert(numeric(classicFirst)==numeric(marathonFirst));
-    assert(marathonFirst.gameMode==1 && marathonFirst.racingDistance==150 && marathonFirst.gravityProgression==2);
+    assert(marathonFirst.gameMode==0 && marathonFirst.goal==2 && marathonFirst.racingDistance==150 && marathonFirst.gravityProgression==2);
     assert(marathonFirst.rotationSystem==9 && marathonFirst.randomPieces==6 && marathonFirst.nextCount==1);
-    assert(!marathonFirst.holdEnabled && marathonFirst.disableHardDrop && marathonFirst.das==16/60.0988);
+    assert(!marathonFirst.holdEnabled && marathonFirst.disableHardDrop && marathonFirst.forcedDas==16/60.0988 && marathonFirst.das==.073);
     marathonFirst.gravityInterval=.9;Presets::record_edits(marathonFirst);
     assert(Presets::source(marathonFirst,SettingId::GravityInterval)->kind==PresetKind::Marathon);
     assert(Presets::modified(marathonFirst.presets.layers.front()));
@@ -147,19 +147,19 @@ void independent_concerns() {
         }
     }
     UserConfig::Settings race;race.gameMode=1;race.racingDistance=75;
-    assert(Presets::apply(race,PresetKind::Classic));assert(race.gameMode==1 && race.racingDistance==75);
+    assert(Presets::apply(race,PresetKind::Classic));assert(race.gameMode==0 && race.goal==2 && race.racingDistance==75);
 }
 void persistence() {
     auto user=conflicting();
     const auto baseline=numeric(user);
     user.persistencePath=(std::filesystem::temp_directory_path()/"termino_presets_test.ini").string();
-    assert(Presets::apply(user,PresetKind::Classic));user.das=.31;
+    assert(Presets::apply(user,PresetKind::Classic));user.forcedDas=.31;
     assert(Presets::apply(user,PresetKind::Marathon));user.gravityInterval=1.4;
     assert(UserConfig::save(user));
     UserConfig::Settings loaded;UserConfig::load(loaded,user.persistencePath);
-    assert(loaded.presets.layers.size()==2 && loaded.das==.31 && std::abs(loaded.gravityInterval-1.4)<1e-12);
+    assert(loaded.presets.layers.size()==2 && loaded.forcedDas==.31 && std::abs(loaded.gravityInterval-1.4)<1e-12);
     assert(Presets::modified(loaded.presets.layers[0]) && Presets::modified(loaded.presets.layers[1]));
-    assert(Presets::undo(loaded) && loaded.das==.31);
+    assert(Presets::undo(loaded) && loaded.forcedDas==.31);
     const auto owned=loaded.presets.base;
     assert(Presets::clear(loaded));
     const auto restored=numeric(loaded);
@@ -176,7 +176,7 @@ void persistence() {
     std::ofstream file(std::filesystem::u8path(user.persistencePath),std::ios::app);
     file<<"\n[PRESETS]\nState = invalid\n";file.close();
     UserConfig::load(loaded,user.persistencePath);
-    assert(loaded.presets.layers.empty() && loaded.das==.31); // Bad recovery data never changes effective settings.
+    assert(loaded.presets.layers.empty() && loaded.forcedDas==.31); // Bad recovery data never changes effective settings.
     std::filesystem::remove(std::filesystem::u8path(user.persistencePath));
 }
 void two_players_and_hidden_fields() {
@@ -190,7 +190,7 @@ void two_players_and_hidden_fields() {
     auto hold=field(both,SettingId::HoldEnabled);Model::apply_choice(hold,1);
     assert(one.holdEnabled && two.holdEnabled && one.das==.2 && two.das==.2);
     assert(Presets::clear(one,true) && Presets::clear(two,true));
-    assert(one.das==.07 && two.das==.2 && one.holdEnabled==1 && two.holdEnabled==1 && one.gameMode==6 && two.gameMode==6);
+    assert(one.das==.2 && two.das==.2 && one.holdEnabled==1 && two.holdEnabled==1 && one.gameMode==6 && two.gameMode==6);
     // Hidden gravity constants locate the mode that hides them after Tab.
     one={};two={};one.gameMode=two.gameMode=6;two.gravityProgression=2;
     both=Model::make_both_tree(one,two);
@@ -289,8 +289,8 @@ void sparse_authoring_and_storage() {
     assert(UserConfig::control_keys(player,0)==originalKeys);
     assert(Presets::decode("1 2 1 "+std::to_string(static_cast<int>(Id::Das))+" 1 0.1 1 1 1 1 "+std::to_string(static_cast<int>(Id::Das))+" 1 0.2 1 "+std::to_string(static_cast<int>(Id::Das))+" 1 0.2",state)); // Legacy numeric layers.
     assert(Presets::apply(draft,collection.presets[1]));
-    assert(Presets::defined(draft,Id::Arr));assert(Presets::undo(draft));
-    assert(!Presets::defined(draft,Id::Arr) && Presets::defined(draft,Id::Das));
+    assert(Presets::defined(draft,Id::ForcedArr) && !Presets::defined(draft,Id::Arr));assert(Presets::undo(draft));
+    assert(!Presets::defined(draft,Id::ForcedArr) && Presets::defined(draft,Id::Das));
     assert(Model::assign_scalar(das,"未定义") && !Presets::defined(draft,Id::Das));
     assert(Presets::apply(draft,collection.presets[1]));Presets::undefine(draft,Id::Das);
     assert(Presets::clear(draft) && !Presets::defined(draft,Id::Das));

@@ -1,0 +1,160 @@
+TerMino 当前单机挑战目录（已注册）
+固定挑战：129 项；本次新增 99 项；本机地图的消除与搭建挑战另行动态列出。
+来源：challenge_catalog_test --catalog（本机地图已排除）。
+check 的集合/开闭区间、成绩规则与录像说明见 SINGLE_PLAYER_CHALLENGES.md。
+
+单机挑战
+├─ 竞速
+│  ├─ 10 行 [sprint-10]
+│  ├─ 20 行 [sprint-20]
+│  ├─ 40 行 [sprint-40]
+│  ├─ 100 行 [sprint-100]
+│  ├─ 1000 行 [sprint-1000]
+│  ├─ 五连块 40 行 [sprint-pentomino-40]
+│  ├─ 无旋转 40 行 [sprint-no-rotation-40]
+│  ├─ 400 行 [sprint-400]
+│  ├─ 一至三连块 40 行 [sprint-m123-40]
+│  ├─ 无移动 40 行 [sprint-no-move-40]
+│  ├─ 无摩擦 40 行 [sprint-frictionless-40]
+│  ├─ 无预览 40 行 [sprint-no-next-40]
+│  ├─ 无预览无暂存 40 行 [sprint-no-next-hold-40]
+│  ├─ MPH 40 行 [sprint-mph-40]
+│  ├─ 干旱 100 行 [drought-100]
+│  └─ 干旱+ 100 行 [drought-plus-100]
+├─ 挖掘
+│  ├─ 10 行垃圾 [dig-10]
+│  ├─ 20 行垃圾 [dig-20]
+│  ├─ 40 行垃圾 [dig-40]
+│  ├─ 100 行垃圾 [dig-100]
+│  ├─ 挖掘 400 行 [dig-400]
+│  ├─ 效率
+│  │  ├─ 挖掘效率 10 行 [dig-efficiency-10]
+│  │  ├─ 挖掘效率 20 行 [dig-efficiency-20]
+│  │  ├─ 挖掘效率 40 行 [dig-efficiency-40]
+│  │  ├─ 挖掘效率 100 行 [dig-efficiency-100]
+│  │  └─ 挖掘效率 400 行 [dig-efficiency-400]
+│  ├─ 只消四挖掘 10 行 [dig-quads-10]
+│  ├─ 只消四挖掘 40 行 [dig-quads-40]
+│  ├─ 每 3 秒上涨一行 [cheese-timer-3]
+│  ├─ 每 2 秒上涨一行 [cheese-timer-2]
+│  └─ 每 1 秒上涨一行 [cheese-timer-1]
+├─ 生存
+│  ├─ 40 APM
+│  │  ├─ 1 分钟 [survival-40-60]
+│  │  ├─ 3 分钟 [survival-40-180]
+│  │  └─ 5 分钟 [survival-40-300]
+│  ├─ 60 APM
+│  │  ├─ 1 分钟 [survival-60-60]
+│  │  ├─ 3 分钟 [survival-60-180]
+│  │  └─ 5 分钟 [survival-60-300]
+│  ├─ 100 APM
+│  │  ├─ 1 分钟 [survival-100-60]
+│  │  ├─ 3 分钟 [survival-100-180]
+│  │  └─ 5 分钟 [survival-100-300]
+│  ├─ 150 APM
+│  │  ├─ 1 分钟 [survival-150-60]
+│  │  ├─ 3 分钟 [survival-150-180]
+│  │  └─ 5 分钟 [survival-150-300]
+│  └─ 200 APM
+│     ├─ 1 分钟 [survival-200-60]
+│     ├─ 3 分钟 [survival-200-180]
+│     └─ 5 分钟 [survival-200-300]
+├─ 攻击与效率
+│  ├─ 100 攻击竞速 [attack-100]
+│  ├─ 40 行攻击效率 [efficiency-40]
+│  ├─ 科研：普通 [research-0]
+│  ├─ 科研：困难 [research-1]
+│  ├─ 科研：疯狂 [research-2]
+│  ├─ 科研+：普通 [research-plus-0]
+│  ├─ 科研+：困难 [research-plus-1]
+│  ├─ 科研+：疯狂 [research-plus-2]
+│  ├─ 自攻 100：普通 [backfire-100-0]
+│  ├─ 自攻 100：困难 [backfire-100-1]
+│  ├─ 自攻 100：疯狂 [backfire-100-2]
+│  └─ 自攻 100：极限 [backfire-100-3]
+├─ 打分与长局
+│  ├─ 120 秒限时打分 [score-120]
+│  ├─ 120 秒加速打分 [score-blitz-120]
+│  ├─ 禅 200 行 [zen-200]
+│  └─ 无尽马拉松 [marathon-endless]
+├─ 直列进攻
+│  ├─ 普通 [offense-0]
+│  ├─ 困难 [offense-1]
+│  └─ 极限 [offense-2]
+├─ 散垃圾防守
+│  ├─ 普通 [defense-0]
+│  ├─ 困难 [defense-1]
+│  └─ 极限 [defense-2]
+├─ 重力与场地
+│  ├─ 200 行马拉松 [marathon-200]
+│  ├─ 5×10 小场地马拉松 [marathon-small]
+│  ├─ 20G 200 行 [marathon-200-hard]
+│  ├─ 5×10 小场地 20G [marathon-small-hard]
+│  ├─ 20G 大师：入门 [master-20g-0]
+│  ├─ 20G 大师：进阶 [master-20g-1]
+│  ├─ 20G 大师：大师 [master-20g-2]
+│  ├─ 20G 大师：终点 [master-20g-3]
+│  ├─ 策略堆叠：简单 [strategy-0]
+│  ├─ 策略堆叠：困难 [strategy-1]
+│  ├─ 策略堆叠：极限 [strategy-2]
+│  ├─ 策略堆叠：简单（无暂存） [strategy-0-no-hold]
+│  ├─ 策略堆叠：困难（无暂存） [strategy-1-no-hold]
+│  ├─ 策略堆叠：极限（无暂存） [strategy-2-no-hold]
+│  ├─ 高速经典：简单 [classic-200-0]
+│  ├─ 高速经典：困难 [classic-200-1]
+│  ├─ 高速经典：疯狂 [classic-200-2]
+│  ├─ 高速经典：极限 [classic-200-3]
+│  └─ 阶段任务大师 [stage-master-v1]
+├─ 隐形与记忆
+│  ├─ 半隐 200 行 [invisible-200-0]
+│  ├─ 全隐 200 行 [invisible-200-1]
+│  ├─ 瞬隐 200 行 [invisible-200-2]
+│  ├─ 瞬隐+ 200 行 [invisible-200-3]
+│  ├─ 周期闪现 200 行 [invisible-200-4]
+│  ├─ 本能：20G 当前块隐形 [instinct-200]
+│  ├─ 全程盲操 200 行 [blind-200]
+│  └─ 仅听音 200 行【测试】 [audio-200]
+├─ 指定消除与连击
+│  ├─ 连续 TSD：基础 [tsd-20-0]
+│  ├─ 连续 TSD：困难 [tsd-20-1]
+│  ├─ 连续 TSD：极限 [tsd-20-2]
+│  ├─ 纯消四：普通 [pure-quads]
+│  ├─ 纯消四：极限 [pure-quads-extreme]
+│  ├─ 单消马拉松 200 行 [singles-marathon-200]
+│  ├─ 四列连击：普通 [c4w-0]
+│  ├─ 四列连击：困难 [c4w-1]
+│  ├─ 四列连击：疯狂 [c4w-2]
+│  ├─ 堆积：累计四行后结算 [stack-100-v1]
+│  ├─ 极简操作竞速 40 行 [finesse-sprint-40-v1]
+│  └─ 极简操作科研 100 攻击 [finesse-research-100-v1]
+├─ 全清
+│  ├─ 100 行全清：普通 [pc-100-0]
+│  ├─ 100 行全清：困难 [pc-100-1]
+│  ├─ 100 行全清：疯狂 [pc-100-2]
+│  ├─ 连续全清：普通 [pc-consecutive]
+│  ├─ 连续全清：困难 [pc-consecutive-hard]
+│  ├─ 固定全清训练题 [pc-training-puzzle-v1-14147013873430567931]
+│  └─ 连续全清题库（3 题） [pc-training-series-v1-10862109966743584996]
+├─ 构造与图形
+│  ├─ 对称 40 行 [symmetry-40]
+│  ├─ 秘密段位：大于号 [construct-secret]
+│  ├─ 棋盘格堆叠 [construct-checkerboard]
+│  └─ 地图
+│     └─ 从空场搭建本机地图形状；有成绩优先，再按地图编号。
+├─ 本地 Bot 对战
+│  ├─ 49 人 Bot 混战【测试】 [bot-royale-49-v1]
+│  ├─ 99 人 Bot 混战【测试】 [bot-royale-99-v1]
+│  ├─ 单挑 bot_chatgpt
+│  │  ├─ 简单 (0.7 PPS) [local-bot-chatgpt-700]
+│  │  ├─ 普通 (1.2 PPS) [local-bot-chatgpt-1200]
+│  │  ├─ 困难 (1.5 PPS) [local-bot-chatgpt-1500]
+│  │  ├─ 疯狂 (2 PPS) [local-bot-chatgpt-2000]
+│  │  └─ 极限 (2.5 PPS) [local-bot-chatgpt-2500]
+│  └─ 回合制 bot_chatgpt（Bot 预设 2 PPS）
+│     ├─ 简单 (0.3 倍速) [local-bot-chatgpt-turn-300]
+│     ├─ 普通 (0.5 倍速) [local-bot-chatgpt-turn-500]
+│     ├─ 困难 (0.75 倍速) [local-bot-chatgpt-turn-750]
+│     ├─ 疯狂 (1 倍速) [local-bot-chatgpt-turn-1000]
+│     └─ 极限 (1.2 倍速) [local-bot-chatgpt-turn-1200]
+└─ 地图
+   └─ 从本机地图集合动态生成；有成绩优先，再按地图编号。

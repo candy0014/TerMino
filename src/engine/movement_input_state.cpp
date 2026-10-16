@@ -53,6 +53,11 @@ void MovementInputState::preparePiece(
     preparedAt_ = now;
     for (const auto& [key, action] : bindings.entries()) {
         if (!validKey(key)) continue;
+        // These controls belong to the whole game, rather than to a piece.
+        // Preserve their release debounce across spawns so a press between
+        // locking one piece and spawning the next is still handled.
+        if ((action == Input::Action::Retry || action == Input::Action::OpenSettings) && find_state(key))
+            continue;
         auto& state = state_for(key);
         if (!Input::is_horizontal(action)) {
             state.phase = KeyPhase::Released;

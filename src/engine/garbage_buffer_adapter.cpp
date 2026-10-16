@@ -1,4 +1,5 @@
 #include "tetr/engine/garbage_service.h"
+#include "tetr/app/application_state.h"
 #include "tetr/engine/live_piece_periodic_events.h"
 #include "tetr/engine/movement_controller.h"
 #include "garbage_rendering.h"
@@ -117,6 +118,7 @@ int advance_armed_rows(Runtime::GameContext& context,Runtime::PlayerSessionState
         if (plan.chunks.empty()) break;
         const auto chunk=plan.chunks.front();
         if (chunk.lines<=0) continue;
+        if(chunk.sourceSlot>=0) player.multiplayer.lastDamageSource=chunk.sourceSlot;
         Replay::add_replay(context,Replay::OperationKind::RaiseBuffer,1);
         add_garbage(context,player,field,1,chunk.preserveHole,Runtime::BoardCell::garbage(),false);
         if (player.garbage.tetrioRandom && packetLines==1)
@@ -372,7 +374,9 @@ int offset_buffer(
             auto packets = cancellation.outgoingPackets;
             if (packets.empty()) packets.push_back(attack);
             for (std::size_t i = 0; i < packets.size(); ++i) {
-                if (!context.config.mode.replayMode && context.config.garbage.mode == Runtime::GarbageMode::Backfire)
+                const auto* app=context.app_component();
+                if(!context.config.mode.replayMode && app && app->challengeSendAttack)app->challengeSendAttack(packets[i]);
+                if (!context.config.mode.replayMode && context.config.garbage.mode == Runtime::GarbageMode::Backfire && !(app && app->challengeSendAttack))
                     add_buffer(context,player,field,packets[i],false,-1,
                         context.config.garbage.entryMode==Runtime::GarbageEntryMode::AfterLock &&
                         Runtime::current_incoming_garbage_delay(context)==Runtime::Duration{} &&
@@ -452,6 +456,7 @@ int raise_ready_buffer(Runtime::GameContext& context, Runtime::PlayerSessionStat
     if (!context.config.mode.replayMode) {
         std::size_t packetIndex = 0;
         for (const auto& chunk : rise.chunks) {
+            if(chunk.lines>0 && chunk.sourceSlot>=0) player.multiplayer.lastDamageSource=chunk.sourceSlot;
             add_garbage(
                 context,
                 player,

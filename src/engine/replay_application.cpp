@@ -76,6 +76,7 @@ void apply_replay_gameplay_event(
     }
     using Replay::OperationKind;
     switch (operation.kind) {
+        case OperationKind::BattleRank:player.gameplay.scoring.battleRank=operation.payload_as<Replay::BattleRankPayload>().remaining;break;
         case OperationKind::PutErase: {
             // Older full-speed BOT recordings can erase an unpainted planned
             // landing. Only remove the overlay that is actually on screen.

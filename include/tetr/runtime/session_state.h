@@ -8,6 +8,9 @@
 
 #include <optional>
 #include <cstdint>
+#include <map>
+#include <string>
+#include <vector>
 
 namespace Runtime {
 
@@ -40,6 +43,37 @@ struct DynamicRuleState {
 struct SessionState {
     PlayerSessionState player;
     PlayerSessionState opponent;
+    struct RoomScene {
+        bool enabled=false, spectator=false, selfAlive=true, finished=false, localForfeit=false;
+        int ownSlot=-1, focusSlot=-1;
+        std::uint64_t epoch=0, revision=0;
+        std::map<int,PlayerSessionState> players;
+        // Screen state is separate from the received model: checkpoints and
+        // motion can arrive several times before the next terminal update.
+        std::map<int,PlayerSessionState> paintedPlayers;
+        std::map<int,std::string> usernames;
+        std::map<int,std::string> paintedNames;
+        std::map<int,std::string> paintedResults;
+        std::map<int,int> killers;
+        std::vector<int> survivors;
+        std::vector<int> finalists;
+        std::vector<int> finalistLayout;
+        std::vector<int> miniSlots;
+        std::vector<int> paintedFullSlots;
+        std::map<int,std::uint64_t> paintedMiniSequences;
+        std::map<int,std::vector<BoardCell>> paintedMiniCells;
+        std::map<int,std::uint64_t> appliedMiniClocks;
+        std::size_t miniPaintCursor=0;
+        struct BattleAnchor {int column,row,columns,rows,width,height;};
+        std::optional<BattleAnchor> finalBattleAnchor;
+        struct MiniLayout {int left=0,top=0,width=0,height=0,ceiling=0,logicalWidth=0,logicalHeight=0;};
+        std::map<int,MiniLayout> miniLayouts;
+        TimePoint lastPaint{};
+        TimePoint lastMiniPaint{};
+        int galleryColumn=0;
+        int galleryTop=0,miniColumns=0,miniCellWidth=0,miniCellHeight=0;
+        int paintedColumns=0,paintedRows=0;
+    } roomScene;
     std::optional<TimePoint> gameStartTime;
     QuickPlaySessionState quickPlay;
     DynamicRuleState dynamicRules;

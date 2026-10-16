@@ -42,7 +42,7 @@ enum class SquareFill { Empty, Filled, LowerSevenEighths };
 // concurrently. It is a no-op for contexts without a shared output mutex.
 class OutputGuard {
 public:
-    explicit OutputGuard(const Runtime::GameContext& context);
+    explicit OutputGuard(const Runtime::GameContext& context, bool batch = false);
     ~OutputGuard();
 
 private:

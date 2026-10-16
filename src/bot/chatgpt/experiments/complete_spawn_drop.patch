@@ -1,0 +1,70 @@
+--- a/src/bot/chatgpt/search.h
++++ b/src/bot/chatgpt/search.h
+@@ -115,8 +115,11 @@
+         }
+         m_tetris::TetrisMapSnap snap;
+         start->build_snap(map, context_, snap);
+-        // Above all obstacles every horizontal/rotation transition is open.
+-        while (start->low >= map.roof && start->move_down && start->move_down->check(snap))
++        // The DESTINATION must remain above every obstacle in every rotation.
++        // Testing the old node's low drops one row too far: an O in the center
++        // can no longer move onto a taller side platform (no upward O kicks).
++        while (start->move_down && start->move_down->low >= map.roof &&
++               start->move_down->check(snap))
+             start = start->move_down;
+         auto enqueue = [&](const m_tetris::TetrisNode* node, int kick) {
+             if (!node || !node->check(snap)) return;
+--- a/src/bot/chatgpt/evaluation.h
++++ b/src/bot/chatgpt/evaluation.h
+@@ -43,7 +43,7 @@
+         context_ = context;
+         terrain_.init(context, nullptr);
+     }
+-    std::string ai_name() const { return "bot_chatgpt v0.3.2-rc1"; }
++    std::string ai_name() const { return "bot_chatgpt v0.3.3-rc1"; }
+     double ratio() const { return 1.5; }
+ 
+     // Freeze weights for all alternatives in one search. Recompute only from
+--- a/tests/bot_chatgpt_test.cpp
++++ b/tests/bot_chatgpt_test.cpp
+@@ -93,6 +93,21 @@
+     Bot_chatgpt::Search search;
+     Bot_chatgpt::Search::Config searchConfig;
+     search.init(engine.context().get(), &searchConfig);
++    // Independent, constructive path: move O left while above all obstacles,
++    // then hard-drop onto a five-row side tower. Spawn-drop pruning must not
++    // descend below that platform before considering horizontal movement.
++    Runtime::Playfield tower;
++    tower.initialize(10, 20); tower.clear();
++    for (int y = 15; y < 20; ++y) tower.set_cell(y, 0, Runtime::BoardCell::garbage());
++    const auto towerMap = BotNativeHost::make_map(tower);
++    const auto* onTower = engine.context()->generate('O');
++    while (onTower->move_left && onTower->move_left->check(towerMap)) onTower = onTower->move_left;
++    onTower = onTower->drop(towerMap);
++    assert(onTower && onTower->check(towerMap) && onTower->row == 5);
++    const auto* towerCandidates = search.search(towerMap, engine.context()->generate('O'), 0);
++    assert(std::any_of(towerCandidates->begin(), towerCandidates->end(), [&](const auto& l) {
++        return l->index_filtered == onTower->index_filtered;
++    }));
+     for (char type : std::string("IJLOSTZ")) {
+         for (int rotation = 0; rotation < 4; ++rotation) {
+             for (int row : {-12, -4, -2, 0, 12}) {
+@@ -126,6 +141,18 @@
+             const auto piece = Piece::get_definition(Piece::Type::from_index(Bot_chatgpt::piece_index(type)));
+             const auto* candidates = search.search(map, engine.context()->generate(type), 0);
+             assert(!candidates->empty());
++            // Every high-altitude rotate/translate/drop is a constructive
++            // legal path; check completeness, not only returned-path legality.
++            std::set<std::size_t> found;
++            for (const auto& l : *candidates) found.insert(l->index_filtered);
++            for (int r = 0; r < 4; ++r) {
++                const auto* airborne = engine.context()->get(type, 3, 22, r);
++                assert(airborne && airborne->check(map));
++                while (airborne->move_left) airborne = airborne->move_left;
++                for (; airborne; airborne = airborne->move_right) {
++                    if (airborne->check(map)) assert(found.count(airborne->drop(map)->index_filtered));
++                }
++            }
+             for (const auto& landing : *candidates) {
+                 const auto pose = Bot_chatgpt::host_pose(*landing.node);
+                 assert(piece.can_place(pose, field));

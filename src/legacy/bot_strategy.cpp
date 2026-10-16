@@ -136,6 +136,13 @@ Piece::Type BotStrategy::choose_position(
     Autoplay::HoldInput hold,
     Piece::Pose& answer,
     Runtime::RotationRecord& answerRotation) {
+    // ChatGPT's workspace, diagnostics and candidate list are thread-local.
+    // Each strategy instance is owned by one search task; unlike the older
+    // BOTs it does not need the process-wide legacy-state swap lock.
+    if(context.config.autoplay.mode==Runtime::AutoplayMode::ChatGPT) {
+        const auto type=Bot::getpos(context,player,std::move(field),next,unseenBagPieces,start,hold,answer,answerRotation);
+        candidates_=Bot_chatgpt::last_candidates();return type;
+    }
     std::lock_guard<std::mutex> lock(localVersusBotMutex);
     ScopedBotInstanceState instance(*state_);
     const auto type=Bot::getpos(context, player, std::move(field), next, unseenBagPieces, start, hold, answer, answerRotation);

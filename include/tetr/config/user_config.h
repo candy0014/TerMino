@@ -36,14 +36,22 @@ inline std::string make_guest_username() {
 // These intentionally keep the historical integer/double representation so
 // Init can perform the exact same clamping and mode transformations later.
 struct Settings {
-    std::string serverIp="127.0.0.1";
+    std::optional<ChallengeAdjustment> challengeAdjustment;
+    std::optional<ChallengeReplayRestore> challengeReplay;
+    std::string serverIp="wss://termino.candy0014.icu/ws";
     std::string username = make_guest_username();
     int gameMode=0;
+    int challengeRules=0;
     int mapId=0; // Stable record ID; map names may be duplicated.
     int mapRotationSystem=-1; // -1 keeps each custom-sequence piece's rotation.
     int mapGoal=0;
     int racingDistance=40;
     double blitzTime=120;
+    int goal=0;
+    int garbageTarget=40;
+    int pieceTarget=100;
+    int attackTarget=100;
+    int allClearTarget=1;
     std::string replayPath;
     double replayTimeMultiplier=1;
     int garbageMode=0;
@@ -82,6 +90,9 @@ struct Settings {
     double dcd=0;
     int preMove=1;
     int dasPrecharge=1;
+    int forceSdf=0, forceDas=0, forceArr=0, forceDcd=0, forcePreMove=0, forceDasPrecharge=0;
+    double forcedSdf=0, forcedDas=0.1, forcedArr=0.01, forcedDcd=0;
+    int forcedSdfFixed=0, forcedPreMove=1, forcedDasPrecharge=1;
     int fieldWidth=10;
     int fieldHeight=20;
     int nextCount=5;
@@ -89,6 +100,9 @@ struct Settings {
     int infiniteHold=0;
     int holdCount=1;
     int fieldInvisible=0;
+    double invisibilityDelay=0;
+    double invisibilityInterval=5;
+    double invisibilityDuration=1;
     int antiGravity=0;
     int ghost=1;
     double lockDelay=0.5;
@@ -113,6 +127,7 @@ struct Settings {
     double lineClearDelay=0;
     double entryDelay=0;
     double cancelMultiplier=1;
+    double attackMultiplier=1;
     double messinessWithinAttack=0;
     int avoidSameColumn=0;
     int garbageCap=8;
@@ -137,7 +152,7 @@ struct Settings {
     int squareStyle=0;
     int obscuredColors=0;
     int uiLanguage=0; // 0: Chinese, 1: English.
-    int showSpawnPosition=0;
+    int showSpawnPosition=1;
     int continueInputUnfocused=0;
     static constexpr std::size_t kControlCount = 13;
     std::array<int,kControlCount> keyCodes{};
@@ -161,6 +176,7 @@ struct QuickPlayModeSnapshot {
 };
 QuickPlayModeSnapshot snapshot_quick_play_mods(const Settings& settings);
 void reconcile_quick_play_mods(Settings& settings,const QuickPlayModeSnapshot& before);
+void migrate_legacy_modes(Settings& settings);
 
 // Copy every user setting and preset recovery state, preserving the target's
 // keyboard bindings and the paths identifying its own profile/binding files.

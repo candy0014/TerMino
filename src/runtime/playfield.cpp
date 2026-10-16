@@ -21,6 +21,7 @@ const BoardCell& Playfield::Row::operator[](int col) const {
 void Playfield::Row::clear() {
     cells_.fill(BoardCell::empty());
     initialCells_.reset();
+    lockTimes_.reset();
 }
 
 Playfield::Playfield() = default;
@@ -82,6 +83,10 @@ void Playfield::expand(int width, int height, int columnOffset) {
             for (int column = 0; column < width_; ++column) {
                 expanded[column + columnOffset] = cell(source, column);
                 expanded.initialCells_[column+columnOffset]=row(source).initialCells_[column];
+                if(row(source).lockTimes_) {
+                    if(!expanded.lockTimes_) expanded.lockTimes_=std::make_shared<std::array<Duration,kStorageColumns>>();
+                    (*expanded.lockTimes_)[column+columnOffset]=(*row(source).lockTimes_)[column];
+                }
             }
         }
         auto& target = destination >= 0
@@ -127,10 +132,27 @@ const BoardCell& Playfield::cell(int rowIndex, int col) const {
 void Playfield::set_cell(int rowIndex, int col, BoardCell value) {
     cell(rowIndex, col) = value;
     row(rowIndex).initialCells_.reset(col);
+    if(row(rowIndex).lockTimes_) mark_cell_lock_time(rowIndex,col,{});
 }
 
 void Playfield::copy_row(int destination, int source) {
     row(destination) = row(source);
+}
+
+Duration Playfield::cell_lock_time(int rowIndex,int column) const {
+    if(!contains(rowIndex,column)) return {};
+    const auto& times=row(rowIndex).lockTimes_;
+    return times?(*times)[column]:Duration{};
+}
+
+void Playfield::mark_cell_lock_time(int rowIndex,int column,Duration elapsed) {
+    if(!contains(rowIndex,column)) throw std::out_of_range("playfield cell outside storage");
+    auto& times=row(rowIndex).lockTimes_;
+    if(!times) {
+        if(elapsed==Duration{}) return;
+        times=std::make_shared<std::array<Duration,kStorageColumns>>();
+    } else if(!times.unique()) times=std::make_shared<std::array<Duration,kStorageColumns>>(*times);
+    (*times)[column]=elapsed;
 }
 void Playfield::mark_initial_cell(int rowIndex,int column) {
     row(rowIndex).initialCells_.set(column,cell(rowIndex,column).occupied());

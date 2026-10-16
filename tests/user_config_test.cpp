@@ -25,7 +25,7 @@ int main(){
     assert(a.garbageRiseInterval==0);
     assert(a.squareStyle==0);
     assert(a.username.rfind("GUEST-",0)==0 && a.username.size()==14);
-    assert(a.serverIp=="127.0.0.1"&&a.keybindingPath==UserConfig::kDefaultKeybindingPath);
+    assert(a.serverIp=="wss://termino.candy0014.icu/ws"&&a.keybindingPath==UserConfig::kDefaultKeybindingPath);
     a.fieldWidth=77;
     assert(b.fieldWidth==10); // settings objects are independent, not aliases.
 
@@ -59,7 +59,7 @@ int main(){
     assert(updatedText.find("Unknown Setting = 999")!=std::string::npos);
     updatedFile.close();
     std::filesystem::remove(std::filesystem::u8path(path));
-    assert(loaded.gameMode==-2);
+    assert(loaded.gameMode==0 && loaded.goal==1);
     assert(loaded.fieldWidth==13&&loaded.fieldHeight==41);
     assert(loaded.gravityInterval==-0.25);
     assert(loaded.serverIp=="192.0.2.5");

@@ -13,8 +13,9 @@ const wchar_t* windowClass = L"PseudoConsoleWindow";
 bool visible = true;
 std::array<bool, 256> keys{};
 std::optional<bool> focusReport;
+int consoleWindowQueries=0;
 
-HWND WINAPI test_console_window() { return consoleWindow; }
+HWND WINAPI test_console_window() { ++consoleWindowQueries;return consoleWindow; }
 BOOL WINAPI test_window_visible(HWND) { return visible; }
 HWND WINAPI test_foreground_window() { return foregroundWindow; }
 int WINAPI test_window_class(HWND, LPWSTR name, int capacity) {
@@ -92,4 +93,44 @@ int main() {
     assert(!classic.key_down('R'));
     keys['R'] = true;
     assert(classic.key_down('R'));
+
+    // A gameplay scan samples focus once, then checks every binding against
+    // that sample. Repeating the console/window queries per key makes input
+    // needlessly wait on the console host during online play.
+    keys.fill(false);
+    Input::Services gameplay;
+    std::array<int,Input::kBindableActionCount> bindings;
+    bindings.fill(-1);bindings[0]='A';bindings[1]='D';bindings[4]='R';
+    gameplay.bindings=Input::BindingSet::from_key_codes(bindings);
+    consoleWindowQueries=0;
+    gameplay.begin_gameplay_input();
+    assert(consoleWindowQueries==1);
+    keys['A']=true;
+    consoleWindowQueries=0;
+    gameplay.poll_gameplay_events();
+    assert(consoleWindowQueries==1);
+    assert(gameplay.next_gameplay_event() && gameplay.next_gameplay_event()->key=='A' && gameplay.next_gameplay_event()->down);
+    gameplay.consume_gameplay_event();assert(gameplay.gameplay_key_down('A'));
+    keys['A']=false;
+    gameplay.poll_gameplay_events();
+    assert(gameplay.next_gameplay_event() && !gameplay.next_gameplay_event()->down);
+    gameplay.consume_gameplay_event();assert(!gameplay.gameplay_key_down('A'));
+    keys['A']=true;gameplay.poll_gameplay_events();gameplay.consume_gameplay_event();
+    assert(gameplay.gameplay_key_down('A'));
+    foregroundWindow=terminalWindow;gameplay.poll_gameplay_events();
+    assert(!gameplay.gameplay_key_down('A') && !gameplay.next_gameplay_event());
+    foregroundWindow=consoleWindow;gameplay.poll_gameplay_events();
+    assert(!gameplay.gameplay_key_down('A')); // A held background key stays suppressed.
+    keys['A']=false;gameplay.poll_gameplay_events();
+    while(gameplay.next_gameplay_event()) gameplay.consume_gameplay_event();
+    keys['A']=true;gameplay.poll_gameplay_events();
+    assert(gameplay.next_gameplay_event() && gameplay.next_gameplay_event()->down);
+    gameplay.consume_gameplay_event();assert(gameplay.gameplay_key_down('A'));
+
+    Input::Services second;
+    Input::share_key_state(second,gameplay);second.bindings=gameplay.bindings;
+    consoleWindowQueries=0;second.begin_gameplay_input();assert(consoleWindowQueries==1);
+    keys['A']=false;consoleWindowQueries=0;second.poll_gameplay_events();assert(consoleWindowQueries==1);
+    assert(second.next_gameplay_event() && !second.next_gameplay_event()->down);
+    second.consume_gameplay_event();assert(!second.gameplay_key_down('A'));
 }

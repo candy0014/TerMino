@@ -3,9 +3,11 @@
 
 #include "tetr/runtime/board_cell.h"
 #include "tetr/runtime/constants.h"
+#include "tetr/runtime/time.h"
 
 #include <array>
 #include <bitset>
+#include <memory>
 
 namespace Runtime {
 
@@ -26,6 +28,9 @@ public:
         friend class Playfield;
         std::array<BoardCell, kStorageColumns> cells_{};
         std::bitset<kStorageColumns> initialCells_;
+        // Allocated only for delayed invisibility. Row moves and snapshots
+        // share immutable timestamps until a cell in that row changes.
+        std::shared_ptr<std::array<Duration,kStorageColumns>> lockTimes_;
     };
 
     Playfield();
@@ -49,6 +54,8 @@ public:
     const BoardCell& cell(int rowIndex, int col) const;
     void set_cell(int rowIndex, int col, BoardCell value);
     void copy_row(int destination, int source);
+    Duration cell_lock_time(int row,int column) const;
+    void mark_cell_lock_time(int row,int column,Duration elapsed);
     void mark_initial_cell(int row,int column);
     bool initial_cell(int row,int column) const;
     int remaining_initial_cells() const;

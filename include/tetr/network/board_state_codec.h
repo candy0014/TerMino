@@ -3,6 +3,7 @@
 
 #include "tetr/runtime/playfield.h"
 #include "tetr/runtime/strong_types.h"
+#include "tetr/network/hybrid_protocol.h"
 
 #include <optional>
 #include <cstdint>
@@ -63,7 +64,9 @@ struct BoardStateSnapshot {
     std::optional<bool> holdAvailable;
     std::optional<Piece::Type> nextSpawnType;
     std::optional<Piece::Pose> nextSpawnPose;
+    std::optional<RemoteClockSample> clock;
 };
+RemoteClockSample capture_player_clock(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player);
 
 // Hash the authoritative field, queue, hold and HUD, excluding active pose and placement notifications.
 std::uint64_t board_state_fingerprint(std::string_view state);

@@ -16,10 +16,12 @@ void send(NetworkServices& services, const std::string& message) {
         transport.available.notify_all();
         return;
     }
-    poll_connection(services);
+    // Sending local input must not drain or decode the opponent's backlog.
+    // Frame/lobby polling owns reception and heartbeat work.
+    if(services.connection!=ConnectionState::Connected) poll_connection(services);
     if (services.connection != ConnectionState::Connected)
         throw ConnectionError(services.connectionMessage);
-    send_online(services, message);
+    send_online(services, services.multiplayerRoom?encode_match_packet(services.matchEpoch,message):message);
 }
 
 std::optional<std::string> try_receive(NetworkServices& services) {
@@ -46,9 +48,9 @@ std::optional<std::string> receive_for(NetworkServices& services, std::chrono::m
         auto& transport = *services.localTransport;
         std::unique_lock<std::mutex> lock(transport.mutex);
         auto& inbox = transport.inbox[services.localEndpoint];
-        if (!transport.available.wait_for(lock, timeout, [&inbox] { return !inbox.empty(); })) {
-            return std::nullopt;
-        }
+        if (timeout.count() > 0)
+            transport.available.wait_for(lock, timeout, [&inbox] { return !inbox.empty(); });
+        if (inbox.empty()) return std::nullopt;
         std::string message = std::move(inbox.front());
         inbox.pop_front();
         return message;

@@ -61,6 +61,11 @@ struct ScoringState {
     std::uint64_t totalReceivedAttack = 0;
     std::map<std::pair<int,int>,ClearCounts> clearStatistics;
     std::set<int> roundPieceTypes;
+    int stackHeight=0,secretGrade=0,patternRows=0;
+    int secretGradePieces=0,patternPieces=0;
+    Duration secretGradeTime{},patternTime{};
+    int challengeStages=0;
+    int battleRank=0;
 };
 
 struct HoldState {
@@ -79,6 +84,8 @@ struct QuickPlayPlacementState {
 // the game simulation; queue/RNG/network/timing/presentation live beside it
 // in PlayerSessionState.
 struct PlayerState {
+    struct ChallengeState {int stage=0,stageLines=0,stageQuads=0,stageSpins=0;};
+    ChallengeState challenge;
     PlayfieldState playfield;
     ScoringState scoring;
     HoldState hold;

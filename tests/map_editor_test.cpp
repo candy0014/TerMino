@@ -171,7 +171,8 @@ void map_racing_goals() {
         f.user.mapGoal=static_cast<int>(goal);f.initialize(map);
         auto& player=f.owned->player;
         assert(f.context.config.mode.mapGoal==goal); // Editor default must not replace the player's current choice.
-        f.context.config.mode.mode=Runtime::GameMode::Racing;
+        f.context.config.mode.goal=goal==MapGoal::Disabled ? Runtime::GameGoal::Lines :
+            goal==MapGoal::ClearInitial ? Runtime::GameGoal::InitialCells : Runtime::GameGoal::AllClear;
         f.context.config.mode.racingDistance=goal==MapGoal::Disabled ? 1 : 0;
         f.context.config.attackRules.perfectClearEnabled=false;
         int played=0;std::ostringstream progress;auto* output=std::cout.rdbuf(progress.rdbuf());
@@ -185,12 +186,13 @@ void map_racing_goals() {
             assert(result.clear.clearedLines==1);
             assert(Engine::run_locked_line_clear_phase(f.context,field,piece,p,result,[]{return Rules::PlayResult::ContinueFrame;})==Rules::PlayResult::ContinueFrame);
             ++p.gameplay.scoring.placedBlocks;p.gameplay.scoring.totalLines+=result.clear.clearedLines;
+            if(result.allClear) ++p.gameplay.scoring.allClearCount;
             return Rules::PlayResult::Locked;
         });
         assert(outcome==Engine::GameLoopExit::GoalReached && played==(goal==MapGoal::AllClear ? 2 : 1));
         std::cout.rdbuf(output);
         if(goal==MapGoal::ClearInitial) {
-            Test::TerminalScreen screen;screen.feed(progress.str());assert(screen.position_of("0 MAP CELLS").first!=0);
+            Test::TerminalScreen screen;screen.feed(progress.str());assert(screen.position_of("2/2 MAP CELLS").first!=0);
         }
         assert(player.pieces.bag.size()==map.sequence.size()-played);
         assert(player.gameplay.playfield.field.remaining_initial_cells()==0);
@@ -298,6 +300,9 @@ void editor_layout() {
     }
     App::UiText::set_language(App::UiText::Language::English);state.sequenceFocus=false;state.optionsOpen=false;state.exitPrompt=false;
     auto frame=App::map_editor_frame(fixture.context,state,96,30);
+    std::string hints;
+    for(const auto& row:frame) for(const auto& cell:row) hints+=cell.glyph;
+    assert(hints.find("P Options")!=std::string::npos && hints.find("Space Options")==std::string::npos);
     const auto locate=[&](const std::string& glyph) {
         for(const auto& row:frame) for(const auto& cell:row) if(cell.glyph==glyph) return cell;
         throw std::out_of_range(glyph);

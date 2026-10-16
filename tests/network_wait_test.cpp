@@ -41,6 +41,10 @@ int main() {
         Network::send(second, "second-to-first");
         assert(Network::receive_blocking(first) == "second-to-first");
         assert(!Network::try_receive(first));
+        assert(!Network::receive_for(first,std::chrono::milliseconds(0)));
+        assert(!Network::receive_for(first,std::chrono::milliseconds(-1)));
+        Network::send(second,"queued-poll");
+        assert(Network::receive_for(first,std::chrono::milliseconds(0))=="queued-poll");
         Network::disconnect_local_duplex(first);
         Network::disconnect_local_duplex(second);
         assert(!Network::uses_local_duplex(first));

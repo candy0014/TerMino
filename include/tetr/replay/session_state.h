@@ -67,6 +67,14 @@ struct ReplaySessionState {
     };
 
     std::string data;
+    // Preserve the complete source for Save As, including both local players.
+    std::string loadedRecording;
+    std::string sourcePath;
+    // Bind once to stable history/run IDs so repeated Save As and seeking can
+    // update the same plays while sourcePath remains the playback input.
+    struct ChallengeRecordLink {std::string historyPath;std::uint64_t runId=0;};
+    std::vector<ChallengeRecordLink> challengeRecords;
+    std::string recentPath;
     std::string configPrefix;
     // Recording metadata for the whole attempt; undo must never rewind it.
     std::uint64_t undoCount = 0;
@@ -85,6 +93,7 @@ struct ReplaySessionState {
     std::shared_ptr<TurnPlaybackState> turnPlayback;
     int turnPlayerIndex = 0;
     bool localVersusReplay = false;
+    bool challengePrefixActive = false;
     PlaybackState playback;
     std::string checkpointIdentity;
     std::vector<PlaybackCheckpoint> checkpoints;

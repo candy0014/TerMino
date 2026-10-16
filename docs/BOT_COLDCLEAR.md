@@ -1,7 +1,7 @@
 # Cold Clear C++ 移植
 
 来源：[MinusKelvin/cold-clear](https://github.com/MinusKelvin/cold-clear)，固定版本
-`279edd7c3177ff8077f6a930193397814b281f27`。用于移植对照和参考值生成的 Rust 源模块及 MPL-2.0
+`279edd7c3177ff8077f6a930193397814b281f27`。完整原始 Rust 源码和 MPL-2.0
 许可证保存在 `third_party/cold-clear/`。新增 C++ 移植文件同样遵循 MPL-2.0。
 游戏通过 CMake 编译 C++17，没有 Rust、Cargo、动态库或外部 bot 进程依赖。
 

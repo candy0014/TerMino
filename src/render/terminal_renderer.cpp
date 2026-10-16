@@ -141,22 +141,30 @@ void apply_windows_game_mode(TerminalSessionState& state){
 #endif
 } // namespace
 
-OutputGuard::OutputGuard(const Runtime::GameContext& context)
+OutputGuard::OutputGuard(const Runtime::GameContext& context, bool batch)
     : lock_(context.output_mutex() ?
           std::unique_lock<std::recursive_mutex>(*context.output_mutex()) :
           std::unique_lock<std::recursive_mutex>{}) {
     const auto& p=context.session.player.presentation;
-    if (currentViewport || !p.dynamicLayout || output_suppressed()) return;
-    const auto size=terminal_size().value_or(TerminalSize{p.terminalColumns,p.terminalRows});
+#ifdef _WIN32
+    // Clipping emits individual UTF-8 glyphs. Commit a positioned update in
+    // one write rather than making a console write for every glyph.
+    if(p.dynamicLayout) batch=true;
+#endif
+    if (currentViewport || (!p.dynamicLayout && !batch) || output_suppressed()) return;
+    // Batched output still clips to the configured layout when the console
+    // is redirected; batching must not silently replace its dimensions.
+    const auto fallback=p.dynamicLayout?TerminalSize{p.terminalColumns,p.terminalRows}:TerminalSize{120,40};
+    const auto size=terminal_size().value_or(fallback);
     if (size.columns<=0 || size.rows<=0) return;
-    viewport_=std::make_unique<TerminalViewportState>(std::cout.rdbuf(),size);
+    viewport_=std::make_unique<TerminalViewportState>(std::cout.rdbuf(),size,batch);
     currentViewport=viewport_.get();
     std::cout.rdbuf(&viewport_->buffer);
 }
 
 OutputGuard::~OutputGuard() {
     if (!viewport_) return;
-    viewport_->buffer.pubsync();
+    viewport_->commit();
     if (std::cout.rdbuf()==&viewport_->buffer) std::cout.rdbuf(viewport_->previous);
     else {
         // A seek can begin suppression while a positioned update is active.

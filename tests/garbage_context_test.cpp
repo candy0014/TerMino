@@ -39,7 +39,7 @@ void paint_field(Runtime::GameContext& context, Runtime::PlayerSessionState& pla
     for (int row=-Runtime::kDisplayHiddenRows;row<board.visibleHeight;++row)
         for (int column=0;column<board.width;++column) {
             const auto value=board.field.cell(row,column);
-            const bool visible=Render::board_cell_visible(context,player,row,value);
+            const bool visible=Render::board_cell_visible(context,player,row,column,value);
             const bool dimmed=value.occupied() && !visible && context.config.mode.replayMode;
             Render::move_to(context,player,row,column);
             Render::set_board_cell_color(value,context.config.display.obscuredColors,dimmed);
@@ -81,12 +81,12 @@ void replay_visibility_changes_update_existing_cells() {
     for (int style:{0,1}) {
         context.config.display.squareStyle=style;
         context.config.quickPlay.invisible=Runtime::ModifierMode::Enabled;
-        player.presentation.qpInvisibleFlash=false;
+        player.presentation.invisibleFlash=false;
         Test::TerminalScreen actual;
         { Capture c; paint_field(context,player); actual.feed(c.str()); }
         for (int transition=0;transition<4;++transition) {
             const auto before=Engine::GarbageRendering::capture_field(context,player,board.field);
-            if (transition<2) player.presentation.qpInvisibleFlash=transition==0;
+            if (transition<2) player.presentation.invisibleFlash=transition==0;
             else if (transition==2) context.config.quickPlay.invisible=Runtime::ModifierMode::Reverse;
             else board.garbageHeight=3;
             { Capture c;
@@ -104,14 +104,15 @@ void replay_visibility_changes_update_existing_cells() {
         board.garbageHeight=6;
     }
     context.config.quickPlay.invisible=Runtime::ModifierMode::Enabled;
+    context.config.field.periodicInvisible=true;
     // A restored/seeked separate game clock can cross either flash edge
     // without advancing a normal frame or changing any board cell.
     replay.separateGameTime=true;
     replay.gameClockPaused=true;
     for (double elapsed:{5.2,6.0,10.5,11.0}) {
         replay.lastGameTimestamp=Runtime::Duration::from_seconds(elapsed);
-        Engine::synchronize_qp_invisible_flash(context,player);
-        assert(player.presentation.qpInvisibleFlash==(elapsed==5.2 || elapsed==10.5));
+        Engine::synchronize_field_visibility(context,player);
+        assert(player.presentation.invisibleFlash==(elapsed==5.2 || elapsed==10.5));
     }
 }
 
@@ -302,7 +303,7 @@ void garbage_updates_match_complete_field_rendering() {
         board.width=10; board.visibleHeight=board.activeHeight=20;
         board.field.initialize(10,20);
         player.presentation.margin=30;
-        player.presentation.qpInvisibleFlash=visibility==3;
+        player.presentation.invisibleFlash=visibility==3;
         player.garbage.random.seed(123);
         Engine::GarbageService::initialize(player,context.config.garbage.holePattern);
         for (int row=-8;row<20;++row) for (int col=0;col<10;++col)

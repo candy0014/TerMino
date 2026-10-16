@@ -254,11 +254,12 @@ bool proper_name(const std::string& name) {
         name.find("bot_") == 0 || name.find("zzztoj_") == 0;
 }
 void translated_tree(const App::Settings::Model::SettingNode& node) {
+    if(node.kind==App::Settings::Model::NodeKind::Separator) return;
     using App::UiText::tr;
     // Library titles already combine the stable ID and localized built-in
     // name, or a literal user name. They must not be translated a second time.
     if (!node.literalTitle) assert(tr(node.title) != node.title);
-    if (!node.description.empty()) assert(tr(node.description) != node.description);
+    if (!node.description.empty() && !node.literalDescription) assert(tr(node.description) != node.description);
     if (node.item) {
         for (const auto& label : node.item->choice.labels)
             assert(proper_name(label) || tr(label) != label);
@@ -552,8 +553,10 @@ void dynamic_settings_viewport() {
             std::string{"Connected to wss://termino.candy0014.icu/ws"},
             std::string{"Server unavailable. Reconnect or edit Server IP."}}) {
             connection.connectionMessage=status;
-            update([&](auto& target) {target.print_connection(3,"ROOT");});
-            assert(actual.position_of("> "+App::UiText::tr("Back to settings")).first!=0);
+            auto inlineNetwork=three;inlineNetwork.section=UserConfig::Section::Network;
+            update([&](auto& target) {target.print_menu(inlineNetwork,0,"ROOT");});
+            assert(actual.position_of("┌ "+App::UiText::tr("Connection status")).first==0);
+            assert(count_token(actual.text(),"┌")<=4);
         }
     }
     size.reset();
@@ -651,7 +654,7 @@ void randomizer_hints() {
     auto root=Model::make_tree(user,false,0);auto& pieces=root.children[3].children[1];
     const auto randomizer=std::find_if(pieces.children.begin(),pieces.children.end(),[](const auto& node){return node.item && node.item->id==UserConfig::SettingId::RandomPieces;});
     assert(randomizer!=pieces.children.end() && randomizer->title=="Random rules");
-    assert(randomizer->item->choice.labels.size()==8 && !randomizer->item->choice.cycleImmediately);
+    assert(randomizer->item->choice.labels.size()==UserConfig::choice_options(UserConfig::ChoiceKind::BagRandomizer).labels.size() && !randomizer->item->choice.cycleImmediately);
     assert(Model::selected_choice(*randomizer->item)==7); // Old Random=1 remains TOTAL MAYHEM.
     const auto compact=[](std::string text) {
         text.erase(std::remove_if(text.begin(),text.end(),[](unsigned char c){return c==' ' || c=='\n' || c=='\r' || c=='\t';}),text.end());return text;
@@ -813,7 +816,7 @@ int main() {
             }
         }
     }
-    user.gameMode = 0;
+    user.gameMode = 0;user.gravityProgression=0;
     auto root = Model::make_tree(user, false, 0);
     std::ostringstream output;
     auto* old = std::cout.rdbuf(output.rdbuf());
@@ -1087,11 +1090,11 @@ int main() {
     assert(output.str().find("TerMino") != std::string::npos);
     assert(output.str().find("[R] 开始") != std::string::npos);
     assert(output.str().find("[P] 设置") != std::string::npos);
-    assert(output.str().find("[R] 开始   [P] 设置   [Esc] 退出")!=std::string::npos);
+    assert(output.str().find("[Esc] 退出")!=std::string::npos);
     assert(output.str().find("#####")==std::string::npos);
     assert(output.str().find("|__   __|")!=std::string::npos);
     assert(output.str().find("模式：")==std::string::npos);
-    assert(output.str().find("↑↓") == std::string::npos);
+    assert(output.str().find("Enter 确认") == std::string::npos);
     assert(output.str().find("\x1b[38;2;237;109;0m")!=std::string::npos);
     assert(output.str().find("\x1b[38;2;193;168;65m")!=std::string::npos);
     output.str(""); view.invalidate();
@@ -1114,7 +1117,7 @@ int main() {
     const auto actions=App::UiText::binding_label(user,8)+" 开始   "+
         App::UiText::binding_label(user,9)+" 设置   [Esc] 退出";
     assert(width(actions)>52);
-    assert(output.str().find(actions)!=std::string::npos); // Multi-key captions stay horizontal and complete.
+    assert(output.str().find(actions)!=std::string::npos);
     assert(output.str().find("\x1b[38;2;237;109;0m")!=std::string::npos);
     UserConfig::set_control_keys(user,8,{});
     output.str(""); view.invalidate();
@@ -1122,7 +1125,7 @@ int main() {
     assert(output.str().find("[未绑定] 开始")!=std::string::npos);
     std::cout.rdbuf(old);
 
-    const std::string path = "replay/中文目录/练习 rp.txt";
+    const std::string path = ".tetr/replay/中文目录/练习 rp.txt";
     assert(Replay::replay_setting_path("中文目录/练习 rp.txt") == path);
     assert(Replay::replay_path_for_loading(path)->generic_u8string() == path);
     user.persistencePath = (std::filesystem::temp_directory_path()/"tetr_chinese_settings.ini").string();

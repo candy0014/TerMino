@@ -3,12 +3,14 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <variant>
 #include <vector>
 
 namespace UserConfig {
+struct Settings;
 enum class SettingId;
 enum class PresetKind { Classic, Delayed, Marathon, Custom };
 using PresetValue=std::variant<int,double,std::string,std::vector<int>>;
@@ -26,6 +28,21 @@ struct PresetState {
     std::uint64_t nextSerial=1;
     // Only used while authoring a sparse preset; ordinary profiles have none.
     std::set<SettingId> undefinedBase;
+};
+// One volatile challenge layer, separate from persistent preset layers.
+struct ChallengeAdjustment {
+    std::string challengeId;
+    PresetFields before;
+    bool explicitlyStarted=false;
+    // Full pre-selection snapshot, shared only as immutable rollback data.
+    std::shared_ptr<const Settings> snapshot;
+    bool paired=false;
+};
+struct ChallengeReplayRestore {
+    int gameMode=0;
+    std::string replayPath;
+    bool pending=true;
+    std::string challengeId;
 };
 }
 #endif

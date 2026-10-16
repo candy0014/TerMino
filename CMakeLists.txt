@@ -26,6 +26,24 @@ include(cmake/WebSocketDependencies.cmake)
 tetr_setup_websocket()
 
 if(WIN32 AND NOT MSVC)
+    # Recent MinGW runtimes already link an asInvoker manifest. Probe the
+    # actual compiler output so older toolchains still get our explicit one.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/manifest-probe.cpp" "int main() { return 0; }\n")
+    try_compile(_tetr_manifest_probe_compiles
+        "${CMAKE_CURRENT_BINARY_DIR}/manifest-probe-build"
+        "${CMAKE_CURRENT_BINARY_DIR}/manifest-probe.cpp"
+        COPY_FILE "${CMAKE_CURRENT_BINARY_DIR}/manifest-probe.exe")
+    set(TETR_TOOLCHAIN_PROVIDES_MANIFEST OFF)
+    if(_tetr_manifest_probe_compiles)
+        file(STRINGS "${CMAKE_CURRENT_BINARY_DIR}/manifest-probe.exe" _tetr_manifest_lines
+            REGEX "requestedExecutionLevel.*asInvoker" LIMIT_COUNT 1)
+        if(_tetr_manifest_lines)
+            set(TETR_TOOLCHAIN_PROVIDES_MANIFEST ON)
+            message(STATUS "Compiler embeds an asInvoker manifest; skipping duplicate resource")
+        endif()
+    endif()
+endif()
+if(WIN32 AND NOT MSVC AND NOT TETR_TOOLCHAIN_PROVIDES_MANIFEST)
     enable_language(RC)
     set(TETR_WINDOWS_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/windows.manifest")
     configure_file(cmake/windows.rc.in windows_application.rc @ONLY)
@@ -75,6 +93,11 @@ add_library(tetr_config STATIC
     src/config/normalization.cpp
     src/config/map_store.cpp
     src/config/multiplayer_config.cpp
+    src/config/challenges.cpp
+    src/config/challenge_prefix.cpp
+    src/config/challenge_config.cpp
+    src/config/challenge_catalog.cpp
+    src/config/challenge_catalog_extended.cpp
 )
 target_link_libraries(tetr_config PUBLIC tetr_headers tetr_runtime)
 
@@ -88,6 +111,7 @@ target_link_libraries(tetr_input PUBLIC tetr_headers Threads::Threads)
 target_link_libraries(tetr_terminal PRIVATE tetr_input)
 
 add_library(tetr_network STATIC
+    src/network/curl_runtime.cpp
     src/network/udp_socket.cpp
     src/network/websocket_socket.cpp
     src/network/network_services.cpp
@@ -95,17 +119,26 @@ add_library(tetr_network STATIC
     src/network/board_state_codec.cpp
     src/network/lobby_protocol.cpp
     src/network/hybrid_protocol.cpp
+    src/network/board_view.cpp
     src/network/hybrid_sync.cpp
     src/network/lobby_channel.cpp
     src/network/frame_packet.cpp
     src/network/frame_pump.cpp
     src/network/multiplayer_channel.cpp
     src/network/relay_server.cpp
+    src/network/multiplayer_relay.cpp
+    src/network/multiplayer_client.cpp
+    src/network/round_statistics.cpp
     src/network/room_config_protocol.cpp
     src/network/room_config_channel.cpp
 )
 target_link_libraries(tetr_network PUBLIC tetr_headers tetr_runtime PRIVATE tetr_util tetr_rules)
 target_link_libraries(tetr_network PRIVATE CURL::libcurl)
+if(TETR_STATIC_DNS_ENABLED)
+    target_sources(tetr_network PRIVATE src/network/portable_dns.cpp)
+    target_compile_definitions(tetr_network PRIVATE TETR_PORTABLE_DNS=1)
+    target_link_libraries(tetr_network PRIVATE c-ares::cares_static)
+endif()
 if(WIN32)
     target_link_libraries(tetr_network PUBLIC ws2_32)
 endif()
@@ -367,13 +400,14 @@ target_link_libraries(tetr_bot_legacy
 
 
 add_library(tetr_render STATIC
+    src/render/audio_cues.cpp
     src/render/board_layout_renderer.cpp
     src/render/board_stats_renderer.cpp
     src/render/board_event_renderer.cpp
     src/render/piece_renderer.cpp
     src/render/spawn_marker.cpp
 )
-target_link_libraries(tetr_render PUBLIC tetr_headers tetr_runtime tetr_terminal tetr_replay tetr_rules)
+target_link_libraries(tetr_render PUBLIC tetr_headers tetr_runtime tetr_terminal tetr_replay tetr_rules ${CMAKE_DL_LIBS})
 
 add_library(tetr_rules STATIC
     src/rules/lock_analysis.cpp
@@ -396,7 +430,9 @@ target_link_libraries(tetr_rules PUBLIC tetr_headers PRIVATE tetr_util tetr_runt
 
 
 add_library(tetr_replay STATIC
+    src/replay/challenge_prefix.cpp
     src/replay/file_path.cpp
+    src/replay/recent.cpp
     src/replay/playback_checkpoint.cpp
     src/replay/playback_clock.cpp
     src/replay/turn_timeline.cpp
@@ -441,6 +477,7 @@ add_library(tetr_engine_presentation STATIC
     src/engine/next_preview_presentation.cpp
     src/engine/placement_presentation.cpp
     src/engine/countdown_presentation.cpp
+    src/engine/multiplayer_layout.cpp
     src/engine/game_end_presentation.cpp
 )
 target_link_libraries(tetr_engine_presentation
@@ -457,6 +494,7 @@ add_library(tetr_engine_integration STATIC
     src/engine/autoplay_handling.cpp
     src/engine/piece_replay.cpp
     src/engine/frame_coordinator.cpp
+    src/engine/multiplayer_scene.cpp
     src/engine/placement_side_effects.cpp
     src/engine/replay_application.cpp
     src/engine/replay_playback_controls.cpp
@@ -481,6 +519,7 @@ add_library(tetr_gameplay STATIC
     src/engine/piece_spawn.cpp
     src/engine/entry_delay.cpp
     src/engine/placement_coordinator.cpp
+    src/engine/finesse.cpp
     src/engine/game_loop_adapter.cpp
     src/engine/locked_line_clear_phase.cpp
     src/engine/simulation_time.cpp
@@ -499,6 +538,7 @@ add_library(tetr_app STATIC
     src/app/init.cpp
     src/app/init_replay.cpp
     src/app/init_multiplayer.cpp
+    src/app/multiplayer_battle.cpp
     src/app/init_player_setup.cpp
     src/app/game_terminal.cpp
     src/app/place.cpp
@@ -520,6 +560,9 @@ add_library(tetr_app STATIC
     src/app/replay_playback.cpp
     src/app/post_game_interaction.cpp
     src/app/post_game_statistics.cpp
+    src/app/single_player_challenges.cpp
+    src/app/challenge_replay_analysis.cpp
+    src/app/bot_battle_royale.cpp
 )
 target_link_libraries(tetr_app PUBLIC tetr_headers tetr_runtime tetr_rules tetr_engine tetr_replay tetr_input tetr_config tetr_bot_capabilities)
 
@@ -679,6 +722,9 @@ if(BUILD_TESTING)
     add_executable(handling_controls_test tests/handling_controls_test.cpp)
     target_link_libraries(handling_controls_test PRIVATE tetr_app)
     add_test(NAME handling_controls COMMAND handling_controls_test)
+    add_executable(forced_handling_test tests/forced_handling_test.cpp)
+    target_link_libraries(forced_handling_test PRIVATE tetr_app)
+    add_test(NAME forced_handling COMMAND forced_handling_test)
     set_tests_properties(handling_controls PROPERTIES TIMEOUT 10)
 
     add_executable(das_precharge_test tests/das_precharge_test.cpp)
@@ -727,14 +773,14 @@ if(BUILD_TESTING)
     add_executable(replay_garbage_timing_test tests/replay_garbage_timing_test.cpp)
     target_link_libraries(replay_garbage_timing_test PRIVATE tetr_engine tetr_runtime)
     add_test(NAME replay_garbage_timing COMMAND replay_garbage_timing_test)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/replay/windup-test.txt")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.tetr/replay/windup-test.txt")
         add_test(NAME windup_saved_replay COMMAND replay_garbage_timing_test
-            "${CMAKE_CURRENT_SOURCE_DIR}/replay/windup-test.txt")
+            "${CMAKE_CURRENT_SOURCE_DIR}/.tetr/replay/windup-test.txt")
         set_tests_properties(windup_saved_replay PROPERTIES TIMEOUT 20)
     endif()
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/replay/bug.txt")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.tetr/replay/bug.txt")
         add_test(NAME quick_play_bot_saved_replay COMMAND replay_garbage_timing_test
-            "${CMAKE_CURRENT_SOURCE_DIR}/replay/bug.txt")
+            "${CMAKE_CURRENT_SOURCE_DIR}/.tetr/replay/bug.txt")
         set_tests_properties(quick_play_bot_saved_replay PROPERTIES TIMEOUT 30)
     endif()
 
@@ -975,6 +1021,8 @@ if(BUILD_TESTING)
         add_executable(windows_console_focus_test tests/windows_console_focus_test.cpp)
         target_link_libraries(windows_console_focus_test PRIVATE tetr_headers Threads::Threads)
         add_test(NAME windows_console_focus COMMAND windows_console_focus_test)
+        add_executable(windows_multiplayer_latency_benchmark tests/windows_multiplayer_latency_benchmark.cpp)
+        target_link_libraries(windows_multiplayer_latency_benchmark PRIVATE tetr_app tetr_network)
     endif()
 
     add_executable(time_semantics_test tests/time_semantics_test.cpp)
@@ -1003,6 +1051,63 @@ if(BUILD_TESTING)
     add_executable(network_rooms_test tests/network_rooms_test.cpp)
     target_link_libraries(network_rooms_test PRIVATE tetr_network tetr_runtime)
     add_test(NAME network_rooms COMMAND network_rooms_test)
+    add_executable(room_kick_test tests/room_kick_test.cpp)
+    target_link_libraries(room_kick_test PRIVATE tetr_app tetr_network)
+    add_test(NAME room_kick COMMAND room_kick_test)
+    set_tests_properties(room_kick PROPERTIES TIMEOUT 35 RESOURCE_LOCK udp_server_3007)
+    add_executable(room_names_test tests/room_names_test.cpp)
+    target_link_libraries(room_names_test PRIVATE tetr_network tetr_runtime)
+    add_test(NAME room_names COMMAND room_names_test)
+    set_tests_properties(room_names PROPERTIES TIMEOUT 30 RESOURCE_LOCK udp_server_3018)
+    add_executable(multiplayer_bot_gallery tools/multiplayer_bot_gallery.cpp)
+    target_link_libraries(multiplayer_bot_gallery PRIVATE tetr_app tetr_network tetr_bot_legacy Threads::Threads)
+    add_executable(multiplayer_rooms_test tests/multiplayer_rooms_test.cpp)
+    target_link_libraries(multiplayer_rooms_test PRIVATE tetr_app tetr_network)
+    add_test(NAME multiplayer_rooms COMMAND multiplayer_rooms_test)
+    add_executable(multiplayer_scene_test tests/multiplayer_scene_test.cpp)
+    target_link_libraries(multiplayer_scene_test PRIVATE tetr_app tetr_network)
+    add_test(NAME multiplayer_scene COMMAND multiplayer_scene_test)
+    add_executable(room_preparation_test tests/room_preparation_test.cpp)
+    target_link_libraries(room_preparation_test PRIVATE tetr_app tetr_network)
+    add_test(NAME room_preparation COMMAND room_preparation_test)
+    set_tests_properties(room_preparation PROPERTIES TIMEOUT 30 RESOURCE_LOCK udp3034)
+    add_executable(room_config_burst_test tests/room_config_burst_test.cpp)
+    target_link_libraries(room_config_burst_test PRIVATE tetr_network)
+    add_test(NAME room_config_burst COMMAND room_config_burst_test)
+    set_tests_properties(room_config_burst PROPERTIES TIMEOUT 15 RESOURCE_LOCK udp3038)
+    add_executable(room_late_spectator_test tests/room_late_spectator_test.cpp)
+    target_link_libraries(room_late_spectator_test PRIVATE tetr_app tetr_network)
+    add_test(NAME room_late_spectator COMMAND room_late_spectator_test)
+    set_tests_properties(room_late_spectator PROPERTIES TIMEOUT 30 RESOURCE_LOCK udp_server_3035)
+    if(UNIX)
+        add_executable(room_start_spectator_test tests/room_start_spectator_test.cpp)
+        target_link_libraries(room_start_spectator_test PRIVATE tetr_app tetr_network)
+        add_test(NAME room_start_spectator COMMAND room_start_spectator_test)
+        add_test(NAME room_start_spectator_8 COMMAND room_start_spectator_test --local 8 1)
+        set_tests_properties(room_start_spectator room_start_spectator_8 PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3040)
+    endif()
+    add_executable(multiplayer_geometry_test tests/multiplayer_geometry_test.cpp)
+    target_link_libraries(multiplayer_geometry_test PRIVATE tetr_app tetr_network)
+    add_test(NAME multiplayer_geometry COMMAND multiplayer_geometry_test)
+    add_executable(adaptive_board_view_test tests/adaptive_board_view_test.cpp)
+    target_link_libraries(adaptive_board_view_test PRIVATE tetr_app tetr_network)
+    add_test(NAME adaptive_board_view COMMAND adaptive_board_view_test)
+    set_tests_properties(adaptive_board_view PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3026)
+    add_executable(board_view_stagger_test tests/board_view_stagger_test.cpp)
+    target_link_libraries(board_view_stagger_test PRIVATE tetr_app tetr_network)
+    add_test(NAME board_view_stagger COMMAND board_view_stagger_test)
+    set_tests_properties(board_view_stagger PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3027)
+    add_test(NAME board_view_stagger_32 COMMAND board_view_stagger_test 32)
+    set_tests_properties(board_view_stagger_32 PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3027)
+    add_test(NAME board_view_steady_8 COMMAND board_view_stagger_test 8 --steady)
+    set_tests_properties(board_view_steady_8 PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3027)
+
+    add_executable(multiplayer_round_lifecycle_test tests/multiplayer_round_lifecycle_test.cpp)
+    target_link_libraries(multiplayer_round_lifecycle_test PRIVATE tetr_app tetr_network)
+    add_test(NAME multiplayer_round_lifecycle COMMAND multiplayer_round_lifecycle_test)
+    set_tests_properties(multiplayer_round_lifecycle PROPERTIES RESOURCE_LOCK udp_server_3017)
+    set_tests_properties(multiplayer_round_lifecycle PROPERTIES TIMEOUT 45 ENVIRONMENT "TETR_TEST_CLOCK_SCALE=10")
+    set_tests_properties(multiplayer_rooms PROPERTIES TIMEOUT 45 RESOURCE_LOCK udp_server_3005)
     add_executable(multiplayer_config_test tests/multiplayer_config_test.cpp)
     target_link_libraries(multiplayer_config_test PRIVATE tetr_config tetr_network)
     add_test(NAME multiplayer_config COMMAND multiplayer_config_test)
@@ -1013,10 +1118,10 @@ if(BUILD_TESTING)
     add_executable(network_connection_test tests/network_connection_test.cpp)
     target_link_libraries(network_connection_test PRIVATE tetr_network tetr_runtime)
     add_test(NAME network_connection COMMAND network_connection_test)
-    set_tests_properties(network_connection PROPERTIES TIMEOUT 15 RESOURCE_LOCK udp_server_3000)
+    set_tests_properties(network_connection PROPERTIES TIMEOUT 35 RESOURCE_LOCK udp_server_3000)
     if(WIN32)
         # Windows' select() timer granularity makes the relay pump slower.
-        set_tests_properties(network_connection PROPERTIES TIMEOUT 30)
+        set_tests_properties(network_connection PROPERTIES TIMEOUT 45)
     endif()
     add_executable(network_websocket_test tests/network_websocket_test.cpp)
     target_link_libraries(network_websocket_test PRIVATE tetr_network tetr_runtime)
@@ -1027,8 +1132,14 @@ if(BUILD_TESTING)
         if(_tetr_has_websockets EQUAL 0)
             add_test(NAME network_websocket COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/network_websocket_test.py
-                $<TARGET_FILE:network_websocket_test> $<TARGET_FILE:tetr_server>)
-            set_tests_properties(network_websocket PROPERTIES TIMEOUT 60 RESOURCE_LOCK udp_server_3000)
+                $<TARGET_FILE:network_websocket_test> $<TARGET_FILE:tetr_server> $<TARGET_FILE:room_host_config_test>
+                $<TARGET_FILE:adaptive_board_view_test>)
+            set_tests_properties(network_websocket PROPERTIES TIMEOUT 90 RESOURCE_LOCK udp_server_3000)
+            add_test(NAME multiplayer_countdown_websocket COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/multiplayer_countdown_websocket_test.py
+                $<TARGET_FILE:multiplayer_round_lifecycle_test>)
+            set_tests_properties(multiplayer_countdown_websocket PROPERTIES TIMEOUT 50
+                ENVIRONMENT "TETR_TEST_CLOCK_SCALE=10" RESOURCE_LOCK udp_server_3017)
         else()
             message(STATUS "WebSocket integration test requires deploy/websocket-requirements.txt")
         endif()
@@ -1072,12 +1183,19 @@ if(BUILD_TESTING)
     target_link_libraries(map_editor_test PRIVATE tetr_app)
     add_test(NAME map_editor COMMAND map_editor_test)
     set_tests_properties(map_editor PROPERTIES TIMEOUT 30)
+    add_executable(game_goals_test tests/game_goals_test.cpp)
+    target_link_libraries(game_goals_test PRIVATE tetr_app)
+    add_test(NAME game_goals COMMAND game_goals_test)
+    add_executable(field_visibility_test tests/field_visibility_test.cpp)
+    target_link_libraries(field_visibility_test PRIVATE tetr_app)
+    add_test(NAME field_visibility COMMAND field_visibility_test)
+    set_tests_properties(game_goals PROPERTIES TIMEOUT 20)
     # Includes held-key and cancellation scripts for every preset action.
     # Confirmation holds and rendering make the complete Windows UI suite slower.
     if(WIN32)
         set_tests_properties(settings_menu PROPERTIES TIMEOUT 120)
     else()
-        set_tests_properties(settings_menu PROPERTIES TIMEOUT 40)
+        set_tests_properties(settings_menu PROPERTIES TIMEOUT 60)
     endif()
     add_executable(settings_targets_test tests/settings_targets_test.cpp)
     target_link_libraries(settings_targets_test PRIVATE tetr_app)
@@ -1086,6 +1204,10 @@ if(BUILD_TESTING)
     target_link_libraries(autoplay_handling_test PRIVATE tetr_app tetr_bot_legacy)
     add_test(NAME autoplay_handling COMMAND autoplay_handling_test)
     set_tests_properties(autoplay_handling PROPERTIES TIMEOUT 15)
+    add_executable(autoplay_network_test tests/autoplay_network_test.cpp)
+    target_link_libraries(autoplay_network_test PRIVATE tetr_app tetr_network)
+    add_test(NAME autoplay_network COMMAND autoplay_network_test)
+    set_tests_properties(autoplay_network PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3038)
     add_executable(autoplay_parameters_test tests/autoplay_parameters_test.cpp)
     target_link_libraries(autoplay_parameters_test PRIVATE tetr_app tetr_bot_legacy)
     add_test(NAME autoplay_parameters COMMAND autoplay_parameters_test)
@@ -1094,7 +1216,9 @@ if(BUILD_TESTING)
     add_executable(autoplay_timing_test tests/autoplay_timing_test.cpp)
     target_link_libraries(autoplay_timing_test PRIVATE tetr_app tetr_bot_legacy)
     add_test(NAME autoplay_timing COMMAND autoplay_timing_test)
-    set_tests_properties(autoplay_timing PROPERTIES TIMEOUT 30)
+    # This suite checks real-time cadence; concurrent Bot benchmarks can
+    # delay scheduler wakeups beyond its deliberately tight timing bounds.
+    set_tests_properties(autoplay_timing PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
     add_executable(presets_test tests/presets_test.cpp)
     target_link_libraries(presets_test PRIVATE tetr_app)
     add_test(NAME presets COMMAND presets_test)
@@ -1112,10 +1236,41 @@ if(BUILD_TESTING)
     add_test(NAME hold_rules COMMAND hold_rules_test)
     set_tests_properties(hold_rules PROPERTIES TIMEOUT 20)
     add_executable(post_game_statistics_test tests/post_game_statistics_test.cpp)
+    add_executable(challenges_test tests/challenges_test.cpp)
+    add_executable(challenge_prefix_test tests/challenge_prefix_test.cpp)
+    add_executable(challenge_modes_test tests/challenge_modes_test.cpp)
+    add_executable(challenge_catalog_test tests/challenge_catalog_test.cpp)
+    target_link_libraries(challenge_catalog_test PRIVATE tetr_app tetr_bot_legacy)
+    add_test(NAME challenge_catalog COMMAND challenge_catalog_test)
+    set_tests_properties(challenge_catalog PROPERTIES TIMEOUT 60)
+    target_link_libraries(challenge_modes_test PRIVATE tetr_app tetr_bot_legacy)
+    add_test(NAME challenge_modes COMMAND challenge_modes_test)
+    set_tests_properties(challenge_modes PROPERTIES TIMEOUT 20)
+    target_link_libraries(challenge_prefix_test PRIVATE tetr_app)
+    add_test(NAME challenge_prefix COMMAND challenge_prefix_test)
+    set_tests_properties(challenge_prefix PROPERTIES TIMEOUT 20)
+    add_executable(challenge_replay_test tests/challenge_replay_test.cpp)
+    target_link_libraries(challenge_replay_test PRIVATE tetr_app)
+    add_test(NAME challenge_replay COMMAND challenge_replay_test)
+    set_tests_properties(challenge_replay PROPERTIES TIMEOUT 20)
+    target_link_libraries(challenges_test PRIVATE tetr_app)
+    add_test(NAME challenges COMMAND challenges_test)
+    set_tests_properties(challenges PROPERTIES TIMEOUT 20)
     target_link_libraries(post_game_statistics_test PRIVATE tetr_app)
     add_test(NAME post_game_statistics COMMAND post_game_statistics_test)
     set_tests_properties(post_game_statistics PROPERTIES TIMEOUT 20)
+    add_executable(room_results_view_test tests/room_results_view_test.cpp)
+    target_link_libraries(room_results_view_test PRIVATE tetr_app tetr_network)
+    add_test(NAME room_results_view COMMAND room_results_view_test)
+    set_tests_properties(room_results_view PROPERTIES TIMEOUT 10)
+    add_executable(ui_style_gallery_test tests/ui_style_gallery_test.cpp)
+    target_link_libraries(ui_style_gallery_test PRIVATE tetr_app tetr_network)
+    add_test(NAME ui_style_gallery COMMAND ui_style_gallery_test)
+    set_tests_properties(ui_style_gallery PROPERTIES TIMEOUT 20)
 
+    add_executable(recent_replays_test tests/recent_replays_test.cpp)
+    target_link_libraries(recent_replays_test PRIVATE tetr_replay Threads::Threads)
+    add_test(NAME recent_replays COMMAND recent_replays_test)
     add_executable(timing_garbage_rules_test tests/timing_garbage_rules_test.cpp)
     target_link_libraries(timing_garbage_rules_test PRIVATE tetr_app)
     add_test(NAME timing_garbage_rules COMMAND timing_garbage_rules_test)
@@ -1129,6 +1284,14 @@ if(BUILD_TESTING)
     # The regression suite intentionally uses assert(). Release builds define
     # NDEBUG by default, so explicitly re-enable assertions for test targets.
     set(TETR_TEST_TARGETS
+        recent_replays_test
+        challenge_replay_test
+        challenges_test
+        challenge_prefix_test
+        challenge_modes_test
+        challenge_catalog_test
+        game_goals_test
+        field_visibility_test
         map_editor_test
         spawn_marker_test
         game_terminal_test
@@ -1137,6 +1300,17 @@ if(BUILD_TESTING)
         timing_garbage_rules_test
         network_connection_test
         network_rooms_test
+        room_kick_test
+        room_names_test
+        multiplayer_rooms_test
+        multiplayer_scene_test
+        room_preparation_test
+        room_config_burst_test
+        room_late_spectator_test
+        multiplayer_geometry_test
+        adaptive_board_view_test
+        board_view_stagger_test
+        multiplayer_round_lifecycle_test
         multiplayer_config_test
         room_host_config_test
         hybrid_board_sync_test
@@ -1147,11 +1321,14 @@ if(BUILD_TESTING)
         presets_test
         autoplay_timing_test
         autoplay_handling_test
+        autoplay_network_test
         autoplay_parameters_test
         settings_presentation_test
         start_screen_navigation_test
         hold_rules_test
         post_game_statistics_test
+        room_results_view_test
+        ui_style_gallery_test
         bot_chatgpt_test
         bot_chatgpt_known_bag_test
         bot_chatgpt_key_piece_test
@@ -1204,6 +1381,7 @@ if(BUILD_TESTING)
         player_input_equivalence_test
         gameplay_input_buffer_test
         handling_controls_test
+        forced_handling_test
         das_precharge_test
         util_equivalence_test
         user_config_test
@@ -1245,7 +1423,10 @@ if(BUILD_TESTING)
         disabled_movement_test
     )
     if(WIN32)
-        list(APPEND TETR_TEST_TARGETS windows_console_focus_test)
+        list(APPEND TETR_TEST_TARGETS windows_console_focus_test windows_multiplayer_latency_benchmark)
+    endif()
+    if(UNIX)
+        list(APPEND TETR_TEST_TARGETS room_start_spectator_test)
     endif()
     foreach(test_target IN LISTS TETR_TEST_TARGETS)
         if(MSVC)
@@ -1256,9 +1437,9 @@ if(BUILD_TESTING)
     endforeach()
 endif()
 
-# MSVC embeds asInvoker automatically. MinGW executables need an explicit
-# manifest so names such as frame_update_test do not trigger installer detection.
-if(WIN32 AND NOT MSVC)
+# Keep an asInvoker manifest with every toolchain so executable names such as
+# frame_update_test do not trigger installer detection.
+if(WIN32 AND NOT MSVC AND NOT TETR_TOOLCHAIN_PROVIDES_MANIFEST)
     get_property(_tetr_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
     foreach(_tetr_target IN LISTS _tetr_targets)
         get_target_property(_tetr_type ${_tetr_target} TYPE)

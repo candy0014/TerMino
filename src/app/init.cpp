@@ -11,8 +11,10 @@
 #include "init_player_setup.h"
 #include "init_replay.h"
 #include "game_terminal.h"
+#include "single_player_challenges.h"
 #include "tetr/engine/board_lifecycle.h"
 #include "tetr/engine/garbage_service.h"
+#include "tetr/engine/multiplayer_scene.h"
 #include "tetr/render/board_renderer.h"
 #include "tetr/render/terminal_renderer.h"
 #include "tetr/runtime/constants.h"
@@ -110,6 +112,9 @@ void initialize_presentation(
     Runtime::PlayerSessionState& player,
     Runtime::PlayerSessionState& opponent,
     bool multiplayer) {
+    // Room preparation retains the waiting screen. The ready/countdown
+    // transition owns the first game-board draw, including late spectators.
+    if(context.session.roomScene.enabled)return;
     Render::clear_screen();
     Render::set_ui_color(
         context.config.display.obscuredColors ? Render::ColorRole::Ghost : Render::ColorRole::Text,
@@ -259,8 +264,8 @@ bool initialize_local_versus_replay(
 }
 
 void configure_after_terminal_check(Runtime::GameContext& context, Runtime::GameContext* secondContext) {
-    if (!context.config.mode.replayMode && context.config.garbage.mode==Runtime::GarbageMode::Multiplayer)
-        Network::send_lobby_signal(context,Network::ClientLobbySignal::Cancel);
+    // Size confirmation runs before Prepare, so opening settings here must
+    // not cancel another player's existing preparation.
     if (Settings::run_menu(context)==Settings::MenuResult::StartScreen) request_start_screen(context);
     // The menu's restart action must be released before a fresh game loop.
     const auto held=[](Runtime::GameContext& target) {
@@ -275,8 +280,23 @@ void configure_after_terminal_check(Runtime::GameContext& context, Runtime::Game
 } // namespace
 
 void initialize_game(Runtime::GameContext& context) {
+    if(auto* app=context.app_component();app && app->replayPreview) {
+        if(app->replayPreview->pending)app->replayPreview->pending=false;
+        else if(!app->replayResume.pending)app->replayPreview.reset();
+    }
+    if(auto* app=context.app_component()){
+        app->challengeRound.reset();app->challengePlacementObserver={};
+        app->challengeFrame={};app->challengeSendAttack={};
+        app->playerTwoChallengeRound.reset();app->playerTwoChallengePlacementObserver={};
+    }
+    if(context.user_settings().challengeReplay) {
+        auto& restore=*context.user_settings().challengeReplay;
+        if(restore.pending)restore.pending=false;
+        else if(!context.app_component() || !context.app_component()->replayResume.pending)restore_challenge_replay(context);
+    }
     Settings::synchronize_shared_appearance(context);
     for (;;) {
+        context.session.roomScene={};
         context.pause = {};
         context.session.simulationTime = {};
         context.session.completedSimulationPieces = 0;
@@ -286,9 +306,10 @@ void initialize_game(Runtime::GameContext& context) {
         Input::refresh_bindings(context.input_services(), context.user_settings().keyCodes, context.user_settings().additionalKeyCodes);
 
         Runtime::GameMode selectedMode = Runtime::selected_game_mode(context.user_settings());
-        if (selectedMode != Runtime::GameMode::Multiplayer && context.network_component() &&
-            context.network_component()->initialized)
-            Network::disconnect_online(*context.network_component());
+        if(auto* app=context.app_component();app && app->replayPreview)selectedMode=Runtime::GameMode::Replay;
+        if(context.network_component() && context.network_component()->initialized)
+            Network::synchronize_room_player_mode(*context.network_component(),selectedMode==Runtime::GameMode::Multiplayer,
+                context.user_settings().gameMode);
         Runtime::GameContext* secondContext = local_player_two_context(context);
         if (selectedMode == Runtime::GameMode::LocalVersus) {
             if (!secondContext) {
@@ -304,6 +325,9 @@ void initialize_game(Runtime::GameContext& context) {
         }
         const bool replayMode = InitDetail::configure_replay_or_local_game(
             context, selectedMode, secondContext);
+        if(!replayMode && context.user_settings().challengeReplay) {
+            restore_challenge_replay(context);continue;
+        }
         if (replayMode && Replay::session(context).localVersusReplay) {
             if (!secondContext) {
                 throw std::logic_error("Local Versus replay requires a second player context");
@@ -324,6 +348,16 @@ void initialize_game(Runtime::GameContext& context) {
                 Network::initialize_network_services(
                     context, context.user_settings().serverIp);
             }
+            // Confirm the viewport before entering match preparation. Once in
+            // a room, later resizes only update the game layout.
+            InitDetail::reset_player_board(context.session.player,context.config);
+            InitDetail::initialize_player_field(context,context.session.player);
+            context.session.opponent.gameplay.playfield=context.session.player.gameplay.playfield;
+            context.session.opponent.presentation.blockMaxWidth=context.session.player.presentation.blockMaxWidth;
+            context.session.opponent.presentation.blockMaxHeight=context.session.player.presentation.blockMaxHeight;
+            if(InitDetail::wait_for_game_terminal(context)==InitDetail::TerminalCheckResult::OpenSettings) {
+                configure_after_terminal_check(context,nullptr);continue;
+            }
             if (InitDetail::wait_for_multiplayer_lobby(context) ==
                 InitDetail::LobbyWaitResult::Reconfigure) {
                 if (context.app_component() && context.app_component()->startScreenRequested)
@@ -343,12 +377,13 @@ void initialize_game(Runtime::GameContext& context) {
             InitDetail::exchange_multiplayer_player_setup(context, player, opponent);
             Engine::initialize_board(context, opponent, false);
             Engine::GarbageService::initialize(opponent, context.config.garbage.holePattern);
+            if(Network::network_services(context).multiplayerRoom) Engine::initialize_multiplayer_scene(context);
         }
 
         // initialize_presentation prints the elapsed-time panel, so the old
         // round must be forgotten before it draws the countdown screen.
         context.session.gameStartTime.reset();
-        if (InitDetail::wait_for_game_terminal(context)==InitDetail::TerminalCheckResult::OpenSettings) {
+        if (!multiplayer && InitDetail::wait_for_game_terminal(context)==InitDetail::TerminalCheckResult::OpenSettings) {
             configure_after_terminal_check(context,nullptr);
             continue;
         }

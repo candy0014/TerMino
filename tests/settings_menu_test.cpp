@@ -1,5 +1,6 @@
 #include "tetr/app/application_state.h"
 #include "tetr/app/settings_menu.h"
+#include "tetr/config/multiplayer_config.h"
 #include "tetr/app/start_menu.h"
 #include "tetr/network/network_services.h"
 #include "tetr/config/user_config.h"
@@ -9,9 +10,11 @@
 #include "tetr/config/normalization.h"
 #include "tetr/config/presets.h"
 #include "tetr/config/map_store.h"
+#include "tetr/replay/recent.h"
 #include "../src/app/settings_model.h"
 #include "../src/app/settings_input.h"
 #include "../src/app/settings_view.h"
+#include "../src/app/multiplayer_battle.h"
 #include "../src/app/settings_preset_editor.h"
 #include "../src/app/ui_text.h"
 #include "support/terminal_screen.h"
@@ -229,7 +232,7 @@ bool has_child(const Node& node, const std::string& key) {
     return false;
 }
 void submenu_resets(const Node& node) {
-    if(node.key=="presets" || node.key=="maps") return;
+    if(node.key=="presets" || node.key=="maps" || node.key=="challenges") return;
     if (node.kind==App::Settings::Model::NodeKind::Group && node.key!="root")
         assert(has_child(node,"reset"));
     for (const auto& entry:node.children) submenu_resets(entry);
@@ -398,8 +401,8 @@ void model_checks() {
     submenu_resets(tree);
     assert(tree.children.front().key == "player");
     assert(child(tree,"player").children.size()==2);
-    assert(child(tree,"MODEL").children.size()==3);
-    assert(tree.children.size()==11 && !has_child(tree,"QUICK PLAY"));
+    assert(child(tree,"MODEL").children.size()==4);
+    assert(tree.children.size()==12 && !has_child(tree,"QUICK PLAY"));
     assert(!has_child(tree,"copy-other-player"));
     user.gameMode=3;
     tree=make_tree(user,false,0);
@@ -432,7 +435,7 @@ void model_checks() {
     const auto& quickplayReset=child(quickplay,"reset");
     assert(quickplayReset.kind==NodeKind::ResetSection);
     UserConfig::reset_section(user,quickplayReset.section);
-    assert(user.qpExpert==0 && user.qpFool==0 && user.gameMode==1 && user.racingDistance==99);
+    assert(user.qpExpert==0 && user.qpFool==0 && user.gameMode==0 && user.goal==2 && user.racingDistance==99);
     user.qpExpert=1; user.qpFool=3;
     const auto& modelReset=child(child(tree,"MODEL"),"reset");
     assert(modelReset.kind==NodeKind::ResetSubtree);
@@ -452,7 +455,7 @@ void model_checks() {
     user.rotationSystem=0;
     user.gameMode=6;
     tree=make_tree(user,true,1);
-    assert(tree.children.size()==12 && tree.children[tree.children.size()-2].key=="copy-other-player");
+    assert(tree.children.size()==13 && tree.children[tree.children.size()-2].key=="copy-other-player");
     assert(tree.children.back().key=="reset");
     assert(child(tree,"copy-other-player").kind==NodeKind::CopyOtherPlayer);
     assert(child(tree,"player").children.size()==4);
@@ -511,10 +514,11 @@ void model_checks() {
     auto& model=child(tree,"MODEL");
     auto& gameMode=projected(model,Part::GameMode);
     assert(!gameMode.choice.cycleImmediately);
-    assert(choice_value(gameMode)==2);
-    apply_choice(gameMode,2); assert(user.gameMode==-2);
-    apply_choice(projected(model,Part::BlitzSpeed),0);
-    assert(user.gameMode==2);
+    assert(choice_value(gameMode)==0 && user.goal==1);
+    apply_choice(gameMode,0); assert(user.gameMode==0);
+    auto& gravityChoice=projected(child(child(tree,"GAME"),"gravity"),Part::GravityMode);
+    apply_choice(gravityChoice,5);
+    assert(user.gravityProgression==3);
     auto& simulation=child(child(tree,"GAME"),"timing");
     assert(simulation.children.size()==8);
     apply_choice(projected(simulation,Part::SimulationMode),1);
@@ -526,10 +530,10 @@ void model_checks() {
     user.persistencePath=file.string(); user.cheesePattern=-3; user.holeCount=-2;
     assert(UserConfig::save(user));
     UserConfig::Settings loaded; UserConfig::load(loaded,file.string());
-    assert(loaded.cheesePattern==-3 && loaded.holeCount==-2 && loaded.gameMode==2);
+    assert(loaded.cheesePattern==-3 && loaded.holeCount==-2 && loaded.gameMode==0 && loaded.goal==1);
     std::filesystem::remove(file);
 
-    user.gameMode=0; // Manual gravity is hidden while Blitz controls acceleration.
+    user.gameMode=0;
     user.gravityInterval=-.25; user.instantGravity=1; user.arr=.123;
     tree=make_tree(user,false,0);
     reset_subtree(user,child(child(child(tree,"GAME"),"gravity"),"reset"),false);
@@ -628,10 +632,10 @@ void map_menu_interaction() {
     std::string previous;if(const auto* value=std::getenv("TETR_MAP_FILE")) previous=value;
 #ifdef _WIN32
     _putenv_s("TETR_MAP_FILE",file.string().c_str());
-    constexpr int space=VK_SPACE,paintT='7',insertI='I',insertT='T',remove=VK_DELETE,saveMap='S',undoSave=VK_F8,dummy=VK_F10,shift=VK_LSHIFT,ctrl=VK_LCONTROL;
+    constexpr int space=VK_SPACE,optionsKey='P',paintT='7',insertI='I',insertT='T',remove=VK_DELETE,saveMap='S',undoSave=VK_F8,dummy=VK_F10,shift=VK_LSHIFT,ctrl=VK_LCONTROL;
 #else
     setenv("TETR_MAP_FILE",file.string().c_str(),1);
-    constexpr int space=KEY_SPACE,paintT=KEY_7,insertI=KEY_I,insertT=KEY_T,remove=KEY_DELETE,saveMap=KEY_S,undoSave=KEY_F8,dummy=KEY_F10,shift=KEY_LEFTSHIFT,ctrl=KEY_LEFTCTRL;
+    constexpr int space=KEY_SPACE,optionsKey=KEY_P,paintT=KEY_7,insertI=KEY_I,insertT=KEY_T,remove=KEY_DELETE,saveMap=KEY_S,undoSave=KEY_F8,dummy=KEY_F10,shift=KEY_LEFTSHIFT,ctrl=KEY_LEFTCTRL;
 #endif
     {
         Fixture f;f.select_category("maps");
@@ -642,13 +646,13 @@ void map_menu_interaction() {
         Fixture f;f.select_category("maps");
         f.run({{right,"> New map"},{right,"Press Enter again to confirm this map"},{enter,"MAP EDITOR"},
             {up,"Cell 1,2"},{enter,"FIELD"},{tab,"SEQUENCE"},
-            {space,"EDITOR OPTIONS"},{down,"> Rename ="},{down,"> Width = 10"},{down,"> Height = 20"},{down,"> Generator"},{right,"Generator = Custom sequence"},{space,"Custom sequence"},
+            {optionsKey,"EDITOR OPTIONS"},{down,"> Rename ="},{down,"> Width = 10"},{down,"> Height = 20"},{down,"> Generator"},{right,"Generator = Custom sequence"},{optionsKey,"Custom sequence"},
             {insertI,"Insert at 2 / 1"},{tab,"FIELD"},{tab,"SEQUENCE"},
             {left,"Insert at 1 / 1",std::chrono::milliseconds(5),true,{shift}},{insertT,"Insert at 2 / 2"},
             {remove,"Insert at 2 / 1"},{insertI,"Insert at 3 / 2"},
             {right,"CANDIDATES 2 /"},{down,"CANDIDATES 6 /"},{up,"CANDIDATES 2 /"},{left,"CANDIDATES 1 /"},
             {right,"CANDIDATES 2 /"},{enter,"Insert at 4 / 3"},{enter,"Insert at 5 / 4"},
-            {space,"EDITOR OPTIONS"},{down,"> Piece library"},{right,"Select Rotation System"},{down,"> SRS"},{enter,"Piece library = SRS"},{right,"Select Rotation System"},{up,"> SRS+"},{enter,"Piece library = SRS+"},{space,"CANDIDATES"},
+            {optionsKey,"EDITOR OPTIONS"},{down,"> Piece library"},{right,"Select Rotation System"},{down,"> SRS"},{enter,"Piece library = SRS"},{right,"Select Rotation System"},{up,"> SRS+"},{enter,"Piece library = SRS+"},{optionsKey,"CANDIDATES"},
             {escape,"Save before exiting?"},{up,"> Keep editing"},{enter,"Exit cancelled."},
             {escape,"Save before exiting?"},{down,"> Discard and exit"},{enter,"Map editor closed."},{retry,{}}});
         assert(!std::filesystem::exists(file));
@@ -660,6 +664,7 @@ void map_menu_interaction() {
     {
         Fixture f;f.select_category("maps");
         f.run({{right,"> New map"},{enter,"Press Enter again to confirm this map"},{enter,"MAP EDITOR"},
+            {space,{}},{optionsKey,"EDITOR OPTIONS"},{optionsKey,"FIELD"},
             {escape,"Map editor closed."},{retry,{}}});
         assert(f.observed_output().find("Save before exiting?")==std::string::npos);
         UserConfig::Maps::Collection collection;assert(UserConfig::Maps::load(collection) && collection.maps.size()==3);
@@ -675,7 +680,7 @@ void map_menu_interaction() {
     {
         Fixture f;f.select_category("maps");
         f.run({{right,"> New map"},{enter,"Press Enter again to confirm this map"},{enter,"MAP EDITOR"},
-            {paintT,"Brush: T"},{space,"EDITOR OPTIONS"},{down,"> Rename ="},{down,"> Width"},{down,"> Height"},
+            {paintT,"Brush: T"},{optionsKey,"EDITOR OPTIONS"},{down,"> Rename ="},{down,"> Width"},{down,"> Height"},
             {down,"> Generator"},{down,"> Rotation System"},{down,"> Map mode"},{down,"> Exit editor"},
             {enter,"Save before exiting?",std::chrono::milliseconds(300)},
             {down,"> Discard and exit"},{down,"> Keep editing"},{enter,"Exit cancelled."},
@@ -715,11 +720,10 @@ void map_menu_interaction() {
         f.run({{right,"Press Enter again to confirm this map"},{enter,"Map selection saved."},{retry,{}}});
         UserConfig::Settings loaded;UserConfig::load(loaded,f.first.user.persistencePath);
         assert(f.first.user.mapId==first.id && loaded.mapId==first.id);
-        assert(f.first.user.mapGoal==1 && loaded.mapGoal==1 && f.first.user.gameMode==0 && loaded.gameMode==0);
+        assert(f.first.user.mapGoal==1 && loaded.mapGoal==1 && f.first.user.goal==7 && loaded.goal==7 && f.first.user.gameMode==0 && loaded.gameMode==0);
         auto tree=App::Settings::Model::make_tree(f.first.user,false,0);assert(!has_setting(tree,Id::MapGoal));
-        f.first.user.gameMode=1;tree=App::Settings::Model::make_tree(f.first.user,false,0);
-        assert(setting_item(tree,Id::MapGoal).choice.labels==std::vector<std::string>({"OFF","Clear map","All clear field"}));
-        assert(!setting_item(tree,Id::RacingDistance).effective);
+        assert(setting_item(tree,Id::Goal).choice.labels.back()=="Clear initial cells");
+        assert(!has_setting(tree,Id::RacingDistance));
         f.first.user.mapId=0;tree=App::Settings::Model::make_tree(f.first.user,false,0);assert(!has_setting(tree,Id::MapGoal));
     }
     {
@@ -769,9 +773,9 @@ void map_menu_interaction() {
         EmptyStdin stdinGuard;const std::string sizes="12\n6\n";assert(write(stdinGuard.descriptors[1],sizes.data(),sizes.size())==static_cast<ssize_t>(sizes.size()));
         Fixture f;f.select_category("maps");
         f.run({{right,"> New map"},{enter,"Press Enter again to confirm this map"},{enter,"MAP EDITOR"},
-            {space,"EDITOR OPTIONS"},{down,"> Rename ="},{down,"> Width = 10"},{right,"Edit Width"},{dummy,"> Width = 12",std::chrono::milliseconds(5),false},
+            {optionsKey,"EDITOR OPTIONS"},{down,"> Rename ="},{down,"> Width = 10"},{right,"Edit Width"},{dummy,"> Width = 12",std::chrono::milliseconds(5),false},
             {down,"> Height = 20"},{enter,"Edit Height"},{dummy,"> Height = 6",std::chrono::milliseconds(5),false},
-            {right,"Edit Height"},{escape,"EDITOR OPTIONS"},{space,"FIELD 12 x 6"},
+            {right,"Edit Height"},{escape,"EDITOR OPTIONS"},{optionsKey,"FIELD 12 x 6"},
             {escape,"Save before exiting?"},{down,"> Discard and exit"},{enter,"Map editor closed."},{retry,{}}});
         assert(f.first.user.fieldWidth==10 && f.first.user.fieldHeight==20);
     }
@@ -781,9 +785,9 @@ void map_menu_interaction() {
         f.run({{right,"> New map"},{enter,"Press Enter again to confirm this map"},{enter,"MAP EDITOR"},
             {paintT,"Brush: T"},{right,"Cell 2,1",std::chrono::milliseconds(5),true,{paintT}},
             {up,"Cell 2,4",std::chrono::milliseconds(260),true,{paintT}},
-            {space,"EDITOR OPTIONS"},{down,"> Rename ="},{down,"> Width = 10"},{down,"> Height = 20"},{down,"> Generator"},{down,"Rotation System = SRS+"},{down,"> Map mode"},
-            {right,"Map mode = Clear map"},{right,"Map mode = All clear field"},{left,"Map mode = Clear map"},{space,"FIELD"},
-            {space,"EDITOR OPTIONS"},{up,"Rotation System = SRS+"},{up,"> Generator"},{up,"> Height = 20"},{up,"> Width = 10"},{up,"> Rename ="},{up,"> Save map"},
+            {optionsKey,"EDITOR OPTIONS"},{down,"> Rename ="},{down,"> Width = 10"},{down,"> Height = 20"},{down,"> Generator"},{down,"Rotation System = SRS+"},{down,"> Map mode"},
+            {right,"Map mode = Clear map"},{right,"Map mode = All clear field"},{left,"Map mode = Clear map"},{optionsKey,"FIELD"},
+            {optionsKey,"EDITOR OPTIONS"},{up,"Rotation System = SRS+"},{up,"> Generator"},{up,"> Height = 20"},{up,"> Width = 10"},{up,"> Rename ="},{up,"> Save map"},
             {enter,"Map saved:"},
             {escape,"Map editor closed."},{retry,{}}});
         UserConfig::Maps::Collection collection;assert(UserConfig::Maps::load(collection));
@@ -819,12 +823,12 @@ void map_menu_interaction() {
         assert(write(stdinGuard.descriptors[1],input.data(),input.size())==static_cast<ssize_t>(input.size()));
         Fixture f;f.select_category("maps");
         f.run({{right,"> New map"},{enter,"Press Enter again to confirm this map"},{enter,"MAP EDITOR"},
-            {saveMap,"Map saved: 地图2"},{space,"EDITOR OPTIONS"},{down,"> Rename ="},
+            {saveMap,"Map saved: 地图2"},{optionsKey,"EDITOR OPTIONS"},{down,"> Rename ="},
             {right,"Edit Rename"},{dummy,"Rename = PumpkinS",std::chrono::milliseconds(5),false},{saveMap,"Map saved: PumpkinS"},
             {down,"> Width = 10"},{down,"> Height = 20"},{down,"> Generator"},{down,"Rotation System = SRS+"},
             {right,"Select Rotation System"},{saveMap,"Map saved: PumpkinS"},{pageDown,"> 20260401"},{enter,"Rotation System = 20260401"},
             {down,"Initial floor = 1"},{right,"Edit Initial floor"},{dummy,"Initial floor = 9",std::chrono::milliseconds(5),false},
-            {saveMap,"Map saved: PumpkinS"},{space,"FIELD"},{tab,"SEQUENCE"},{saveMap,"Map saved: PumpkinS"},
+            {saveMap,"Map saved: PumpkinS"},{optionsKey,"FIELD"},{tab,"SEQUENCE"},{saveMap,"Map saved: PumpkinS"},
             {escape,"Map editor closed."},{retry,{}}});
         UserConfig::Maps::Collection collection;assert(UserConfig::Maps::load(collection) && collection.maps.size()==3);
         const auto& renamed=collection.maps.back();assert(renamed.name=="PumpkinS" && renamed.rotationSystem==Runtime::RotationSystem::AprilFools2026 && renamed.foolFloor==9);
@@ -841,6 +845,121 @@ void map_menu_interaction() {
 }
 
 int main() try {
+    App::UiText::set_language(App::UiText::Language::English);
+    for(bool hidden:{false,true}) {
+        Fixture f;f.first.context.config.display.obscuredColors=hidden;
+        Node menu{"test","Challenges"};
+        Node unmet{"unmet","Unqualified"};unmet.challengeQualified=false;
+        Node met{"met","Qualified"};met.challengeQualified=true;
+        menu.children={unmet,met};
+        App::Settings::TerminalSettingsView view(f.first.context,false,0,false,{},[]{return Render::TerminalSize{120,40};});
+        view.prepare_layout(2,"Challenges");view.print_menu(menu,1,"Challenges");
+        Test::TerminalScreen screen;screen.feed(f.output.str());const auto pos=screen.position_of("Unqualified");
+        assert(pos.first>0);const Test::TerminalScreen::Color expected=hidden?Test::TerminalScreen::Color{255,255,255}:Test::TerminalScreen::Color{128,128,128};
+        assert(screen.at(pos.first,pos.second).foreground==expected);
+    }
+    {
+        const auto original=std::filesystem::current_path(),dir=std::filesystem::temp_directory_path()/("termino_recent_menu_"+std::to_string(Challenges::utc_now_milliseconds()));
+        std::filesystem::create_directories(dir);std::filesystem::current_path(dir);
+        const auto replay=Replay::save_recent("{{Model,0}}{end_all,0}","Recent game");assert(replay);
+        Fixture f;f.first.user.gameMode=5;f.first.user.replayPath="previous.txt";
+        f.first.user.persistencePath=(dir/"player.ini").string();UserConfig::save(f.first.user);
+        const auto diskBefore=[&]{std::ifstream file(f.first.user.persistencePath);return std::string(std::istreambuf_iterator<char>(file),{});}();
+        f.select_category("MODEL");f.app.settingsMenu.path={"MODEL","recent-replays"};
+        assert(f.run({{enter,"Press Enter again to play this replay"},{right,"Confirmation cancelled."},{enter,"Press Enter again to play this replay"},{enter,{}}})==App::Settings::MenuResult::StartGame);
+        assert(f.app.replayPreview && f.app.replayPreview->path==replay->generic_u8string());
+        assert(f.first.user.gameMode==5 && f.first.user.replayPath=="previous.txt");
+        const auto diskAfter=[&]{std::ifstream file(f.first.user.persistencePath);return std::string(std::istreambuf_iterator<char>(file),{});}();assert(diskBefore==diskAfter);
+        std::filesystem::remove(*replay);
+        auto tree=App::Settings::Model::make_tree(f.first.user,false,0);
+        assert(child(child(tree,"MODEL"),"recent-replays").children.front().key=="empty");
+        std::filesystem::current_path(original);std::filesystem::remove_all(dir);
+    }
+    {
+        Fixture f;f.first.user.fieldWidth=17;
+        f.select_category("challenges");f.app.settingsMenu.path={"challenges","challenges/Sprint","sprint-40"};
+        f.app.settingsMenu.selectedEntries["root/challenges/challenges/Sprint/sprint-40"]="change";
+        f.run({{enter,"Temporary challenge settings updated."},{retry,{}}});
+        assert(f.first.user.fieldWidth==10 && f.first.user.goal==2 && f.first.user.racingDistance==40 && f.first.user.challengeAdjustment);
+        assert(!f.first.user.challengeAdjustment->explicitlyStarted);
+        f.select_category("challenges");f.app.settingsMenu.path={"challenges","challenges/Sprint"};
+        f.app.settingsMenu.selectedEntries["root/challenges/challenges/Sprint"]="sprint-20";
+        f.run({{enter,"Score records"},{retry,{}}});
+        assert(f.first.user.fieldWidth==10 && f.first.user.goal==2 && f.first.user.challengeAdjustment);
+        assert(f.first.user.challengeAdjustment->challengeId=="sprint-40");
+    }
+    {
+        Fixture f;f.first.user.fieldWidth=17;f.second.user.fieldHeight=31;
+        f.app.localVersusSettingsAvailable=true;
+        f.select_category("challenges");
+        const std::string group="challenges/Local battle/Bot duel (bot_chatgpt)",id="local-bot-chatgpt-700";
+        f.app.settingsMenu.path={"challenges","challenges/Local battle",group,id};
+        std::string key="root";for(const auto& part:f.app.settingsMenu.path)key+='/'+part;
+        f.app.settingsMenu.selectedEntries[key]="change";
+        f.run({{enter,"Temporary challenge settings updated."},{retry,{}}});
+        assert(f.first.user.gameMode==6 && f.second.user.gameMode==6 && f.second.user.autoplayMode==9 && f.second.user.autoplayPps==.7);
+        f.first.user.arr=.8;f.second.user.das=.9;
+        f.select_category("challenges");f.app.settingsMenu.path={"challenges"};
+        f.app.settingsMenu.selectedEntries["root/challenges"]="restore";
+        f.run({{enter,"Temporary challenge settings updated."},{retry,{}}});
+        assert(f.first.user.gameMode==0 && f.first.user.fieldWidth==17 && f.first.user.arr==.01);
+        assert(f.second.user.fieldHeight==31 && f.second.user.das==.1 && f.second.user.autoplayMode==0);
+    }
+    {
+        Fixture f;f.first.user.fieldWidth=17;
+        f.select_category("challenges");f.app.settingsMenu.path={"challenges","challenges/Sprint","sprint-40"};
+        f.app.settingsMenu.selectedEntries["root/challenges/challenges/Sprint/sprint-40"]="start";
+        f.run({{enter,"Press Enter again to start this challenge"},{right,"Confirmation cancelled."},
+               {enter,"Press Enter again to start this challenge"},{enter,{}}});
+        assert(f.first.user.challengeAdjustment && f.first.user.challengeAdjustment->explicitlyStarted);
+        assert(f.first.user.challengeAdjustment->challengeId=="sprint-40" && f.first.user.fieldWidth==10);
+    }
+    {
+        Fixture f;const auto dir=std::filesystem::temp_directory_path()/("termino_challenge_menu_"+std::to_string(Challenges::utc_now_milliseconds()));
+        std::filesystem::create_directories(dir);f.first.user.persistencePath=(dir/"player.ini").string();
+        const auto* challenge=Challenges::find("sprint-40");assert(challenge && challenge->change(f.first.user));
+        f.first.user.replayPath="previous.rep";
+        Challenges::History history;history.nextRunId=2;const auto replay=dir/"record.rep";std::ofstream(replay)<<"placeholder";
+        history.records.push_back({1,Challenges::utc_now_milliseconds(),challenge->id,{40,20},true,replay.u8string()});
+        assert(Challenges::save(history,Challenges::history_path(f.first.user)));
+        f.select_category("challenges");f.app.settingsMenu.path={"challenges","challenges/Sprint","sprint-40","records"};
+        f.run({{enter,"Press Enter again to play this replay",std::chrono::milliseconds(300)},{right,"Confirmation cancelled."},{enter,"Press Enter again to play this replay"},{enter,{}}});
+        const auto relative=replay.lexically_relative(std::filesystem::current_path());
+        assert(f.first.user.gameMode==5 && f.first.user.replayPath==(relative.empty()?replay:relative).generic_u8string() && f.first.user.challengeReplay && f.first.user.challengeReplay->pending);
+        assert(f.first.user.challengeReplay->challengeId=="sprint-40");
+        UserConfig::Settings disk;UserConfig::load(disk,f.first.user.persistencePath);assert(disk.gameMode==0 && disk.replayPath.empty() && disk.goal==0);
+        f.first.user.challengeReplay->pending=false;f.run({{escape,{}}});
+        assert(f.first.user.gameMode==0 && f.first.user.replayPath=="previous.rep" && !f.first.user.challengeReplay && f.first.user.challengeAdjustment);
+        std::filesystem::remove(replay);
+        auto tree=App::Settings::Model::make_tree(f.first.user,false,0);
+        auto& records=child(child(child(child(tree,"challenges"),"challenges/Sprint"),"sprint-40"),"records");
+        assert(!records.children.front().enabled && records.children.front().description=="The saved replay file no longer exists.");
+        assert(records.children.front().title.find("  Re")==std::string::npos);
+        std::filesystem::remove_all(dir);
+    }
+    {
+        using namespace App::Settings::Model;
+        UserConfig::Settings timed;timed.gameMode=2;
+        auto tree=make_tree(timed,false,0);auto limit=setting_item(tree,Id::BlitzTime);
+        assert(assign_scalar(limit,"1:75.5") && timed.blitzTime==135.5);
+        assert(scalar_value(limit)=="02:15.500");
+        assert(assign_scalar(limit,"75.125") && timed.blitzTime==75.125);
+        assert(scalar_value(limit)=="01:15.125");
+        assert(!assign_scalar(limit,"1:bad") && timed.blitzTime==75.125);
+        auto das=setting_item(tree,Id::Das);
+        assert(assign_scalar(das,"00:00.015") && timed.das==.015);
+        assert(scalar_value(das)=="0.015");
+        assert(assign_scalar(das,"1.5f") && scalar_value(das)=="0.025");
+        auto all=make_tree(timed,false,0,true);
+        for(const auto id:{Id::Arr,Id::Dcd,Id::ForcedDas,Id::ForcedArr,Id::ForcedDcd,
+            Id::LockDelay,Id::LineClearDelay,Id::EntryDelay,Id::GarbageRiseInterval}) {
+            auto delay=setting_item(all,id);
+            assert(assign_scalar(delay,"0.125s") && scalar_value(delay)=="0.125");
+        }
+        auto sdf=setting_item(all,Id::SoftDropFactor);
+        assert(assign_scalar(sdf,"20") && scalar_value(sdf)=="20" && !timed.softDropFixed);
+        assert(assign_scalar(sdf,"3f") && scalar_value(sdf)=="0.05s" && timed.softDropFixed);
+    }
     App::UiText::set_language(App::UiText::Language::English);
     for(int player:{-1,0,1,2}) for(bool draft:{false,true}) {
         Fixture f;f.first.user.das=.073;f.second.user.das=.12;
@@ -1059,7 +1178,7 @@ int main() try {
         const std::string path="中文目录/练习 rp.txt";
         const auto text=path+"\n";
         Script script{{{right,"> Model = Replay"},{down,"> Replay ="},{right,"Edit Replay"},
-            {settings,"> Replay = replay/"+path},{retry,{}}},f.output};
+            {settings,"> Replay = .tetr/replay/"+path},{retry,{}}},f.output};
         script.history=&f.screenHistory;
         bool supplied=false;
         f.first.input.keyStateProvider=[&](int key) {
@@ -1075,13 +1194,13 @@ int main() try {
         assert(App::Settings::run_menu(f.first.context)==App::Settings::MenuResult::StartGame);
         assert(supplied && script.index+1==script.presses.size() && script.sampled);
         f.first.input.keyStateProvider={};
-        assert(f.first.user.replayPath=="replay/"+path);
+        assert(f.first.user.replayPath==".tetr/replay/"+path);
         assert((f.app.settingsMenu.path==std::vector<std::string>{"MODEL"}));
         assert(f.observed_output().find("New value:")==std::string::npos);
         const std::string blank="\n";
         assert(write(stdinInput.descriptors[1],blank.data(),blank.size())==static_cast<ssize_t>(blank.size()));
         f.run({{right,"Edit Replay"},{retry,{}}});
-        assert(f.first.user.replayPath=="replay/"+path);
+        assert(f.first.user.replayPath==".tetr/replay/"+path);
     }
 #endif
     {
@@ -1194,8 +1313,7 @@ int main() try {
         f.first.user.serverIp="invalid host";
         f.select_category("NETWORK");
         assert(f.start({{settings,"SETTINGS"},{right,"> Server IP ="},
-            {down,"> CONNECT / RECONNECT"},{right,"> Back to settings"},
-            {left,"> CONNECT / RECONNECT"},{retry,{}}}));
+            {down,"> Username ="},{down,"> CONNECT / RECONNECT"},{right,"invalid server address"},{retry,{}}}));
         assert(f.first.user.gameMode==4);
     }
 #ifdef __linux__
@@ -1205,30 +1323,37 @@ int main() try {
         const auto typed=address+"\n";
         assert(write(stdinGuard.descriptors[1],typed.data(),typed.size())==static_cast<ssize_t>(typed.size()));
         f.run({{right,"> Server IP ="},{right,"Edit Server IP"},
-            {-1,"> Server IP = "+address,std::chrono::milliseconds(5),false},{retry,{}}});
+            {-1,"> Server IP = wss://te...4.icu/ws",std::chrono::milliseconds(5),false},{retry,{}}});
         assert(f.first.user.serverIp==address);
         assert(f.observed_output().find("New value:")==std::string::npos);
+    }
+    {
+        EmptyStdin stdinGuard;Fixture f;f.select_category("NETWORK");
+        const std::string address="wss://a-very-long-public-server-address.example/room-gateway/ws";
+        f.first.user.serverIp=address;
+        const std::string typed="\x1b[F\b9\n";
+        assert(write(stdinGuard.descriptors[1],typed.data(),typed.size())==static_cast<ssize_t>(typed.size()));
+        f.run({{right,"> Server IP ="},{right,"Edit Server IP"},
+            {-1,"> Server IP =",std::chrono::milliseconds(5),false},{retry,{}}});
+        assert(f.first.user.serverIp==address.substr(0,address.size()-1)+"9");
+        assert(f.observed_output().find(address)!=std::string::npos);
     }
 #endif
     {
         Fixture f;Network::NetworkServices network;f.first.context.attach_network(network);
         f.first.user.serverIp="invalid host";f.select_category("NETWORK");
-        f.run({{right,"> Server IP ="},{down,"> CONNECT / RECONNECT"},
-            {enter,"> Back to settings"},{up,"> DISCONNECT"},{up,"> CONNECT / RECONNECT"},
-            {enter,"> CONNECT / RECONNECT"},{up,"> Rooms"},
-            {enter,"Connect to the server before choosing a room."},
-            {down,"> CONNECT / RECONNECT"},{down,"> DISCONNECT"},{enter,"Disconnected"},
-            {down,"> Back to settings"},{enter,"> CONNECT / RECONNECT"},{escape,{}}});
+        f.run({{right,"> Server IP ="},{down,"> Username ="},{down,"> CONNECT / RECONNECT"},
+            {enter,"invalid server address"},{down,"> DISCONNECT"},{enter,"> DISCONNECT"},{escape,{}}});
         assert(f.first.user.gameMode==0 && network.connection==Network::ConnectionState::Disconnected);
-        assert(f.observed_output().find("Connection status")!=std::string::npos);
+        assert(f.observed_output().find("> Rooms")==std::string::npos);
+        assert(f.observed_output().find("┌ Connection status")==std::string::npos);
     }
 #ifdef __linux__
     {
         EmptyStdin stdinGuard; Fixture f; f.select_category("NETWORK");
         const std::string typed = "离线用户名\n";
         assert(write(stdinGuard.descriptors[1],typed.data(),typed.size()) == static_cast<ssize_t>(typed.size()));
-        f.run({{right,"> Server IP ="},{down,"> CONNECT / RECONNECT"},{down,"> DISCONNECT"},
-            {down,"> Rooms"},{down,"> Username ="},{enter,"Edit Username"},
+        f.run({{right,"> Server IP ="},{down,"> Username ="},{enter,"Edit Username"},
             {-1,"> Username = 离线用户名",std::chrono::milliseconds(5),false},{retry,{}}});
         assert(f.first.user.username == "离线用户名");
     }
@@ -1239,49 +1364,155 @@ int main() try {
         network.room = {"BIG",true,4,8}; network.roomPlayerIndex = 2;
         network.roomMembers = {{0,"Creator",true},{1,"Guest B",false},{2,"Guest C",false},{3,"Guest D",false}};
         f.select_category("NETWORK");
-        const auto result = f.run({{right,"> Server IP ="},{down,"> CONNECT / RECONNECT"},
-            {down,"> DISCONNECT"},{down,"> Rooms"},{enter,"> Start game"},{enter,{}}});
-        assert(result == App::Settings::MenuResult::StartGame);
+        const auto result = f.run({{right,"> Server IP ="},{down,"> Username ="},{down,"> CONNECT / RECONNECT"},
+            {down,"> DISCONNECT"},{down,"> Host configuration"},{down,"> Room player limit"},{down,"> Battle player limit"},
+            {down,"> Player status"},{down,"> Room users"},{enter,"Guest C"},{left,"> Room users"},{escape,{}}});
+        assert(result == App::Settings::MenuResult::StartScreen);
         const auto output = f.observed_output();
         for (const auto* label : {"Creator","Guest B","Guest C","Guest D","HOST","4/8"}) assert(output.find(label) != std::string::npos);
         assert(output.find("Transfer host")==std::string::npos && output.find("Force host configuration")==std::string::npos);
-        assert(output.find("Host configuration")!=std::string::npos && output.find("Host handling")!=std::string::npos);
-        assert(f.first.user.gameMode == 4);
+        assert(output.find("Host configuration")!=std::string::npos && output.find("Host handling")==std::string::npos);
+        assert(output.find("> Prepare match")==std::string::npos);
     }
     {
         Fixture f; Network::NetworkServices network; f.first.context.attach_network(network);
         network.connection=Network::ConnectionState::Connected; network.room={"BIG",true,4,8}; network.roomPlayerIndex=0;
         network.roomPolicyAvailable=true;
         network.roomMembers={{0,"Creator",true},{1,"Guest B",false},{2,"Guest C",false},{3,"Guest D",false}};
-        f.select_category("NETWORK");
-        f.run({{right,"> Server IP ="},{down,"> CONNECT / RECONNECT"},{down,"> DISCONNECT"},{down,"> Rooms"},
-            {enter,"> Start game"},{down,"> Transfer host"},{enter,"> Guest B"},{down,"> Guest C"},
-            {enter,"> Start game"},{left,"> Rooms"},{escape,{}}});
+        f.select_category("NETWORK");f.app.settingsMenu.path={"NETWORK"};f.app.settingsMenu.selectedEntries["root/NETWORK"]="room-users";
+        f.run({{enter,"> Creator"},{down,"> Guest B"},{down,"> Guest C"},{enter,"> Battle"},
+            {down,"> Spectator"},{down,"> Offline"},{down,"> Transfer host"},{enter,"Waiting for the server..."},
+            {left,"> Room users"},{escape,{}}});
         assert(network.pendingRoomRequest && network.pendingRoomRequest->operation==Network::RoomOperation::TransferHost && network.pendingRoomRequest->targetSlot==2);
+        assert(network.pendingRoomRequest->name=="Guest C");
         assert(f.observed_output().find("Host only")==std::string::npos);
+    }
+    {
+        Fixture f;Network::NetworkServices network;f.first.context.attach_network(network);
+        network.connection=Network::ConnectionState::Connected;network.room={"KICK",true,3,32};network.roomPlayerIndex=0;
+        network.multiplayerRoom=true;network.roomMembers={{0,"Host",true},{1,"Guest",false},{2,"Offline guest",false,Network::PlayerRole::Offline}};
+        f.select_category("NETWORK");f.app.settingsMenu.path={"NETWORK"};f.app.settingsMenu.selectedEntries["root/NETWORK"]="room-users";
+        f.run({{enter,"> Host"},{down,"> Guest"},{down,"> Offline guest"},{enter,"> Battle"},
+            {down,"> Spectator"},{down,"> Offline"},{down,"> Transfer host"},{down,"> Kick player"},
+            {enter,"Waiting for the server..."},{left,"> Room users"},{escape,{}}});
+        assert(network.pendingRoomRequest && network.pendingRoomRequest->operation==Network::RoomOperation::Kick);
+        assert(network.pendingRoomRequest->targetSlot==2 && network.pendingRoomRequest->name=="Offline guest");
+    }
+    for(bool offline:{false,true})for(int desired:{0,1,2}) {
+        Fixture f;Network::NetworkServices network;f.first.context.attach_network(network);
+        network.connection=Network::ConnectionState::Connected;network.room={"MANAGE",true,3,32};network.roomPlayerIndex=0;
+        network.multiplayerRoom=true;network.roomMembers={{0,"Host",true},{1,"Guest",false,offline?Network::PlayerRole::Offline:Network::PlayerRole::Spectator},{2,"Other",false}};
+        f.select_category("NETWORK");f.app.settingsMenu.path={"NETWORK"};f.app.settingsMenu.selectedEntries["root/NETWORK"]="room-users";
+        std::vector<Press> presses{{enter,"> Host"},{down,"> Guest"},{enter,"> Battle"}};
+        if(desired>=1)presses.push_back({down,"> Spectator"});
+        if(desired>=2)presses.push_back({down,"> Offline"});
+        presses.insert(presses.end(),{{enter,"Waiting for the server..."},{left,"> Room users"},{escape,{}}});
+        f.run(presses);
+        assert(network.pendingRoomRequest && network.pendingRoomRequest->operation==Network::RoomOperation::SetMemberRole &&
+            network.pendingRoomRequest->targetSlot==1 && network.pendingRoomRequest->name=="Guest" &&
+            network.pendingRoomRequest->memberRole==static_cast<Network::PlayerRole>(desired));
+    }
+    for(int desired:{0,1}) {
+        Fixture f;Network::NetworkServices network;f.first.context.attach_network(network);
+        network.connection=Network::ConnectionState::Connected;network.room={"SELF",true,2,32};network.roomPlayerIndex=0;
+        network.multiplayerRoom=true;network.roomMembers={{0,"Host",true,Network::PlayerRole::Offline},{1,"Guest",false}};
+        f.first.user.gameMode=0;f.select_category("NETWORK");
+        f.app.settingsMenu.path={"NETWORK"};f.app.settingsMenu.selectedEntries["root/NETWORK"]="room-users";
+        std::vector<Press> presses{{enter,"> Host"},{enter,"> Battle"}};
+        if(desired==1)presses.push_back({down,"> Spectator"});
+        presses.insert(presses.end(),{{enter,"Waiting for the server..."},{left,"> Room users"},{escape,{}}});
+        f.run(presses);
+        assert(network.pendingRoomRequest && network.pendingRoomRequest->operation==Network::RoomOperation::SetMemberRole &&
+            network.pendingRoomRequest->targetSlot==0 && network.pendingRoomRequest->memberRole==static_cast<Network::PlayerRole>(desired));
+        assert(f.first.user.gameMode==4 && network.roomOnlineMode==true && network.roomGameMode==4);
+    }
+    {
+        Fixture f;Network::NetworkServices network;f.first.context.attach_network(network);
+        network.connection=Network::ConnectionState::Connected;network.room={"FULL",true,3,32};network.roomPlayerIndex=0;
+        network.multiplayerRoom=true;network.battleLimit=2;
+        network.roomMembers={{0,"Host",true},{1,"Guest",false,Network::PlayerRole::Spectator},{2,"Other",false}};
+        f.select_category("NETWORK");f.app.settingsMenu.path={"NETWORK"};f.app.settingsMenu.selectedEntries["root/NETWORK"]="room-users";
+        f.run({{enter,"> Host"},{down,"> Guest"},{enter,"> Battle"},{enter,"Battle player limit reached."},
+            {left,"> Guest"},{left,"> Room users"},{escape,{}}});
+        assert(!network.pendingRoomRequest);
     }
     {
         Fixture f; Network::NetworkServices network; f.first.context.attach_network(network);
         network.connection=Network::ConnectionState::Connected; network.room={"SMALL",true,2,2}; network.roomPlayerIndex=0;
         network.roomPolicyAvailable=true; network.roomMembers={{0,"Creator",true},{1,"Guest",false}};
+        const auto presetBase= f.first.user.presets.base;
         f.select_category("NETWORK");
-        f.run({{right,"> Server IP ="},{down,"> CONNECT / RECONNECT"},{down,"> DISCONNECT"},{down,"> Rooms"},
-            {enter,"> Start game"},{down,"> Transfer host"},{down,"> Force host configuration"},{down,"> Force host handling"},
-            {enter,"Select Force host handling"},{down,"> ON"},{enter,"> Force host handling"},
-            {left,"> Rooms"},{escape,{}}});
+        f.run({{right,"> Server IP ="},{down,"> Username ="},{down,"> CONNECT / RECONNECT"},{down,"> DISCONNECT"},
+            {down,"> Prepare match"},{down,"> Force host configuration"},
+            {enter,"Waiting for the server..."},
+            {escape,{}}});
         assert(network.pendingRoomRequest && network.pendingRoomRequest->operation==Network::RoomOperation::SetPolicy &&
-            network.pendingRoomRequest->policy.forceRules && network.pendingRoomRequest->policy.forceHandling);
+            !network.pendingRoomRequest->policy.forceRules);
+        assert(f.first.user.presets.base==presetBase);
+        assert(f.observed_output().find("Select Force host configuration")==std::string::npos);
+    }
+    {
+        Fixture f;Network::NetworkServices network;f.first.context.attach_network(network);
+        network.connection=Network::ConnectionState::Connected;network.multiplayerRoom=true;
+        network.room={"SIZE-FIRST",true,1,32};network.roomPlayerIndex=0;
+        network.roomMembers={{0,"Host",true}};
+        f.select_category("NETWORK");f.app.settingsMenu.path={"NETWORK"};
+        f.app.settingsMenu.selectedEntries["root/NETWORK"]="room-start";
+        assert(f.run({{enter,{}}})==App::Settings::MenuResult::StartGame);
+        assert(network.startFromMenu && f.first.user.gameMode==4);
+        assert(!network.pendingRoomRequest && !network.queuedMatchControl);
+        assert(network.matchPhase==Network::RoomMatchPhase::Idle);
+    }
+    {
+        Fixture f;Network::NetworkServices network;f.first.context.attach_network(network);
+        network.connection=Network::ConnectionState::Connected;network.multiplayerRoom=true;
+        network.room={"CANCEL",true,2,32};network.roomPlayerIndex=0;network.matchCanceled=true;
+        network.roomMembers={{0,"Host",true},{1,"Guest",false}};
+        f.select_category("NETWORK");f.app.settingsMenu.path={"NETWORK"};
+        f.app.settingsMenu.selectedEntries["root/NETWORK"]="room-start";
+        bool returned=false;
+        try {App::wait_for_room_ready(f.first.context);} catch(const App::RoomSettingsRequested&) {returned=true;}
+        assert(returned && !f.app.startScreenRequested);
+        assert(f.app.settingsMenu.path==std::vector<std::string>{"NETWORK"});
+        assert(f.app.settingsMenu.selectedEntries.at("root/NETWORK")=="room-start");
+        network.matchCanceled=false;
+        f.run({{escape,{}}});
+        Test::TerminalScreen restored;restored.feed(f.observed_output());
+        assert(restored.position_of("> Prepare match").first>0);
+    }
+    {
+        Fixture f;Network::NetworkServices network;f.first.context.attach_network(network);
+        network.connection=Network::ConnectionState::Connected;network.room={"VIEW",true,2,2};network.roomInstance=1;
+        network.roomPlayerIndex=1;network.roomPolicyAvailable=true;network.roomMembers={{0,"Host",true},{1,"Guest",false}};
+        UserConfig::Settings host;host.gameMode=4;host.fieldWidth=13;host.forceDas=1;host.forcedDas=.015;
+        f.first.user.das=.4;f.first.user.username="Guest";
+        network.roomPreview.incoming.payload=UserConfig::encode_multiplayer_config(host,Runtime::normalize_user_config(host,Runtime::GameMode::Multiplayer),true);
+        f.select_category("NETWORK");
+        f.run({{right,"> Server IP ="},{down,"> Username ="},{down,"> CONNECT / RECONNECT"},{down,"> DISCONNECT"},
+            {down,"> Host configuration"},{down,"> Room player limit"},{down,"> Battle player limit"},{down,"> Player status"},
+            {down,"> Room users"},{down,"> View host configuration"},{enter,"> Player"},
+            {down,"> MODEL"},{enter,"> Model ="},{enter,"This configuration is read-only."},
+            {left,"> MODEL"},{up,"> Player"},{up,"> Copy host configuration"},
+            {enter,"Press Enter again to copy the host configuration."},{enter,"Host configuration copied. Changes saved."},
+            {left,"> View host configuration"},{escape,{}}});
+        assert(f.first.user.fieldWidth==13 && f.first.user.das==.4 && f.first.user.forceDas && f.first.user.forcedDas==.015);
+        assert(f.first.user.username=="Guest" && f.first.user.uiLanguage==1);
+        assert(f.app.settingsMenu.path==std::vector<std::string>{"NETWORK"});
+        assert(f.app.settingsMenu.selectedEntries.at("root/NETWORK")=="room-view-host");
+        assert(f.observed_output().find("Force host handling")==std::string::npos);
     }
     {
         Fixture f; Network::NetworkServices network; f.first.context.attach_network(network);
         network.connection = Network::ConnectionState::Connected;
         f.select_category("NETWORK");
-        f.run({{right,"> Server IP ="},{down,"> CONNECT / RECONNECT"},{down,"> DISCONNECT"},
-            {down,"> Rooms"},{enter,"> Create room"},{enter,"> Room name"},
+        f.run({{right,"> Server IP ="},{down,"> Username ="},{down,"> CONNECT / RECONNECT"},{down,"> DISCONNECT"},
+            {down,"> Create room"},{enter,"> Room name"},
             {down,"> Room type"},{enter,"Select Room type"},{down,"> Private"},
             {enter,"> Room type"},{left,"> Create room"},{down,"> Join by name"},
-            {enter,"> Room name"},{left,"> Create room"},{left,"> Rooms"},{escape,{}}});
+            {enter,"> Room name"},{left,"> Join by name"},{escape,{}}});
         assert(network.room.name.empty()); // Menu navigation alone cannot start a game.
+        const auto raw=f.output.str();const auto firstClear=raw.find("\x1b[2J");
+        assert(firstClear!=std::string::npos && raw.find("\x1b[2J",firstClear+1)==std::string::npos);
     }
     {
         Fixture f;
@@ -1359,16 +1590,16 @@ int main() try {
     {
         Fixture f;
         assert(f.run({{down,"> MODEL"},{enter,"> Model = Zen"},{enter,"Select Model"},
-            {down,"> Racing"},{backspace,"> Model = Zen"},{backspace,"> MODEL"},
+            {down,"> QuickPlay"},{backspace,"> Model = Zen"},{backspace,"> MODEL"},
             {retry,{}}})==App::Settings::MenuResult::StartGame);
         assert(f.first.user.gameMode==0 && !f.app.startScreenRequested);
     }
     {
         Fixture f;
         assert(f.start({{settings,"SETTINGS"},{down,"> MODEL"},
-            {right,"> Model = Zen"},{right,"Select Model"},{down,"> Racing"},
-            {right,"> Model = Racing"},{left,"> MODEL"},{escape,"TerMino"},{retry,{}}}));
-        assert(f.first.user.gameMode==1);
+            {right,"> Model = Zen"},{right,"Select Model"},{down,"> QuickPlay"},
+            {right,"> Model = QuickPlay"},{left,"> MODEL"},{escape,"TerMino"},{retry,{}}}));
+        assert(f.first.user.gameMode==3);
     }
     {
         App::UiText::set_language(App::UiText::Language::Chinese);
@@ -1431,17 +1662,17 @@ int main() try {
     {
         Fixture f;
         f.run({{down,"> MODEL"},{right,"> Model = Zen"},{right,"Select Model"},
-               {down,"> Racing"},{left,"> Model = Zen"},{down,"> RESET"},
+               {down,"> QuickPlay"},{left,"> Model = Zen"},{pageDown,"> RESET"},
                {left,"> MODEL"},{retry,{}}});
         assert(f.first.user.gameMode==0); // Left cancels a choice without exiting its parent.
     }
     {
         Fixture f;
-        f.run({{down,"> MODEL"},{right,"> Model = Zen"},{right,"Select Model"},
-               {down,"> Racing"},{right,"> Model = Racing"},{down,"> Racing Distance = 40"},
+        f.run({{down,"> MODEL"},{right,"> Model = Zen"},{down,"> Goal = None"},{right,"Select Goal"},
+               {down,"> Time"},{down,"> Lines"},{right,"> Goal = Lines"},{down,"> Line count = 40"},
                {left,"> MODEL"},{retry,{}}});
-        assert(f.first.user.gameMode==1);
-        assert(f.observed_output().find("Blitz Time =")==std::string::npos);
+        assert(f.first.user.gameMode==0 && f.first.user.goal==2);
+        assert(f.observed_output().find("Time limit =")==std::string::npos);
     }
     {
         Fixture f;
@@ -1803,7 +2034,7 @@ int main() try {
             {settings,"",std::chrono::milliseconds(25),false}};
         if (escapeSaves) presses.push_back({escape,{}});
         else {
-            presses.push_back({-1,"> Replay = replay/RP",std::chrono::milliseconds(5),false});
+            presses.push_back({-1,"> Replay = .tetr/replay/RP",std::chrono::milliseconds(5),false});
             presses.push_back({retry,{}});
         }
         Script script{presses,f.output};
@@ -1820,11 +2051,11 @@ int main() try {
         const auto result=App::Settings::run_menu(f.first.context);
         assert(result==(escapeSaves ? App::Settings::MenuResult::StartScreen : App::Settings::MenuResult::StartGame));
         assert(script.index+1==presses.size() && script.sampled);
-        assert(wroteR && wroteP && f.first.user.replayPath=="replay/RP");
+        assert(wroteR && wroteP && f.first.user.replayPath==".tetr/replay/RP");
         assert((f.app.settingsMenu.path==std::vector<std::string>{"MODEL"}));
         UserConfig::Settings loaded;
         UserConfig::load(loaded,f.first.user.persistencePath);
-        assert(loaded.replayPath=="replay/RP");
+        assert(loaded.replayPath==".tetr/replay/RP");
         std::filesystem::remove(f.first.user.persistencePath);
         f.first.input.keyStateProvider={};
     }
@@ -1864,7 +2095,7 @@ int main() try {
     {
         Fixture f;
         f.run({{down,"> MODEL"},{right,"> Model = Zen"},{right,"Select Model"},
-               {down,"> Racing"},{down,"> Blitz"},{down,"> QuickPlay"},
+               {down,"> QuickPlay"},
                {down,"> Multiplayer"},{down,"> Local Versus"},{right,"> Model = Local Versus"},
                {left,"> MODEL"},{up,"> Edit target = Player 1"},{right,"> Player 1 [current]"},
                {down,"> Player 2"},{retry,{}}});
@@ -1876,7 +2107,7 @@ int main() try {
         f.first.user.fieldWidth=17; f.second.user.fieldWidth=13;
         f.run({{right,"> Player 1 [current]"},{down,"> Player 2"},{right,"> Edit target = Player 2"},
                {down,"> MODEL"},{right,"> Model = Local Versus"},{right,"Select Model"},
-               {up,"> Multiplayer"},{up,"> QuickPlay"},{up,"> Blitz"},{up,"> Racing"},
+               {up,"> Multiplayer"},{up,"> QuickPlay"},
                {up,"> Zen"},{right,"> Model = Zen"},{left,"> MODEL"},
                {up,"> Player = Player 1"},{right,"> Player 1 [current]"},{retry,{}}});
         assert(f.first.user.gameMode==0 && f.first.user.fieldWidth==13);
@@ -1932,7 +2163,7 @@ int main() try {
         assert(f.first.user.qpExpert==0 && f.first.user.fieldWidth==10);
         assert(f.first.user.autoplayMode==0 && f.first.user.serverIp=="192.0.2.5");
         assert(f.first.user.gravityInterval==UserConfig::Settings{}.gravityInterval && f.first.user.instantGravity==0);
-        assert(f.first.user.das==UserConfig::Settings{}.das);
+        assert(f.first.user.das==.15 && !f.first.user.forceDas && !f.first.user.forceSdf);
         assert(f.first.user.uiLanguage==1);
         assert(f.first.user.keyCodes==keys);
         assert(f.first.user.squareStyle==0 && f.first.user.obscuredColors==1);
@@ -1946,11 +2177,11 @@ int main() try {
         Fixture f; Network::NetworkServices network; f.first.context.attach_network(network);
         f.first.user.gameMode=4; f.first.user.serverIp="wss://saved/ws"; f.first.user.username="Saved username";
         f.first.user.fieldWidth=19; network.connection=Network::ConnectionState::Connected;
-        network.room={"Kept room",false,1,2}; network.roomPlayerIndex=0; network.roomPolicy={true,true};
+        network.room={"Kept room",false,1,2}; network.roomPlayerIndex=0; network.roomPolicy={true};
         network.roomMembers={{0,"Saved username",true}};
         f.run({{up,"> RESET"},{enter,"Press Enter again to confirm RESET"},{enter,"SETTINGS"},{retry,{}}});
         assert(f.first.user.gameMode==4 && f.first.user.serverIp=="wss://saved/ws" && f.first.user.username=="Saved username");
-        assert(f.first.user.fieldWidth==10 && network.room.name=="Kept room" && network.roomPolicy==Network::RoomPolicy({true,true}));
+        assert(f.first.user.fieldWidth==10 && network.room.name=="Kept room" && network.roomPolicy==Network::RoomPolicy({true}));
         auto tree=App::Settings::Model::make_tree(f.first.user,false,0);
         App::Settings::Model::reset_subtree(f.first.user,child(child(tree,"MODEL"),"reset"),false);
         assert(f.first.user.gameMode==4);
@@ -2082,8 +2313,8 @@ int main() try {
         Fixture f;
         f.select_category("OTHERS");
         f.run({{right,"> Square Version"},{down,"> ObscuredColors"},
-            {down,"> Interface language"},{down,"> Show spawn position = OFF"},
-            {right,"> Show spawn position = ON"},{retry,{}}});
+            {down,"> Interface language"},{down,"> Show spawn position = ON"},
+            {retry,{}}});
         assert(f.first.user.showSpawnPosition==1 && f.second.user.showSpawnPosition==1);
         assert(f.first.context.config.display.showSpawnPosition && f.second.context.config.display.showSpawnPosition);
         f.run({{right,"> Show spawn position = OFF"},{retry,{}}});
@@ -2304,7 +2535,7 @@ int main() try {
         assert(f.first.user.presets.layers.size()==2);
         assert(f.first.user.presets.layers[0].kind==UserConfig::PresetKind::Classic);
         assert(f.first.user.presets.layers[1].kind==UserConfig::PresetKind::Delayed);
-        assert(std::abs(f.first.user.das-10.0/60)<1e-12);
+        assert(std::abs(f.first.user.forcedDas-10.0/60)<1e-12 && f.first.user.das==UserConfig::Settings{}.das);
     }
     {
         Fixture f;
@@ -2631,7 +2862,7 @@ int main() try {
             f.select_category("presets");f.app.settingsMenu.path={"presets"};
             f.app.settingsMenu.selectedEntries["root/presets"]="preset-new";
             f.run({{right,"> Rename preset"},{down,"> Save preset"},{down,"> Player"},{down,"> MODEL"},
-                {right,"> Model = Undefined"},{right,"Select Model"},{down,"> Racing"},{down,"> Blitz"},
+                {right,"> Model = Undefined"},{right,"Select Model"},
                 {down,"> QuickPlay"},{down,"> Multiplayer"},{down,"> Local Versus"},{enter,"Edit target: Player 1"},
                 {left,"> MODEL"},{up,"> Edit target"},{right,"> Player 1"},{down,"> Player 2"},
                 {enter,"Edit target: Player 2"},{down,"> MODEL"},{down,"> HANDLING"},{right,"> SDF = Undefined"},
@@ -2667,7 +2898,7 @@ int main() try {
                 {down,"> Use original player settings"},{enter,"Width = 23"},
                 {tab,"Width = Undefined | 23"},{right,"> All undefined"},{down,"> Use original player settings"},
                 {enter,"Width = 17 | 23"},{savePreset,"Preset saved."},{tab,"Edit target: Player 1"},
-                {pageUp,"> Width = 17"},{down,"> Height = 20"},{down,"> Invisible = OFF"},{right,"> Invisible = ON"},
+                {pageUp,"> Width = 17"},{down,"> Height = 20"},{down,"> Invisible = OFF"},{right,"> Invisible = Delayed invisibility"},
                 {tab,"Edit target: Player 2"},{escape,"> Save and exit"},{down,"> Discard and exit"},{enter,{}}});
             assert(f.first.user.fieldWidth==17 && f.second.user.fieldWidth==23);
             assert(f.first.user.fieldInvisible==1 && f.second.user.fieldInvisible==0);
@@ -2684,13 +2915,12 @@ int main() try {
             editor.preset.name="Mode round trip";editor.baselineName=editor.preset.name;
             f.app.localVersusSettingsAvailable=true;
             f.select_category("MODEL",1);f.app.playerTwoSettingsMenu.path={"MODEL"};
-            f.draft(editor,{{right,"Select Model"},{up,"> Multiplayer"},{up,"> QuickPlay"},{up,"> Blitz"},
-                {up,"> Racing"},{up,"> Zen"},{enter,"> Model = Zen"},{savePreset,"Preset saved."},{escape,{}}});
+            f.draft(editor,{{right,"Select Model"},{up,"> Multiplayer"},{up,"> QuickPlay"},{up,"> Zen"},{enter,"> Model = Zen"},{savePreset,"Preset saved."},{escape,{}}});
             assert(f.app.singlePlayerOwner==1 && f.app.savedPlayerOneSettings);
             assert(std::get<int>(editor.preset.fields.at(Id::GameMode))==0);
             assert(editor.preset.playerTwoFields && std::get<int>(editor.preset.playerTwoFields->at(Id::GameMode))==0);
             f.select_category("MODEL");
-            f.draft(editor,{{right,"Select Model"},{down,"> Racing"},{down,"> Blitz"},{down,"> QuickPlay"},{down,"> Multiplayer"},
+            f.draft(editor,{{right,"Select Model"},{down,"> QuickPlay"},{down,"> Multiplayer"},
                 {down,"> Local Versus"},{enter,"Edit target: Player 1"},{savePreset,"Preset saved."},{escape,{}}});
             assert(f.app.singlePlayerOwner==0 && f.first.user.gameMode==6 && f.second.user.gameMode==6);
             assert(f.first.user.preMove==1 && f.second.user.preMove==0);

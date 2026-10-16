@@ -32,7 +32,7 @@ int main() {
         request_room(client.network, op, name, isPublic); pump();
         assert(!client.network.pendingRoomRequest);
     };
-    for (auto* client : {&a,&b,&c,&d,&e,&f}) initialize_network_services(client->context,"127.0.0.1:3002");
+    for (auto* client : {&a,&b,&c,&d,&e,&f}) initialize_network_services(client->context,"127.0.0.1:3002",3);
     pump();
     for (auto* client : {&a,&b,&c,&d,&e,&f}) {
         assert(client->network.connection == ConnectionState::Connected);
@@ -88,8 +88,8 @@ int main() {
     request(f,RoomOperation::Join,generated);
     assert(e.network.room.players == 2 && f.network.room.players == 2);
     // Start two independent rounds. A third pair remains in its room menu.
-    set_room_policy(a.network,{false,false}); set_room_policy(c.network,{false,false}); pump();
-    assert(a.network.roomPolicy==RoomPolicy({false,false}) && c.network.roomPolicy==RoomPolicy({false,false}));
+    set_room_policy(a.network,{false}); set_room_policy(c.network,{false}); pump();
+    assert(a.network.roomPolicy==RoomPolicy({false}) && c.network.roomPolicy==RoomPolicy({false}));
     for (auto* client : {&a,&b,&c,&d}) send(client->network,"start2");
     pump();
     LobbyPlayerSetup setup; setup.width = 10; setup.visibleHeight = 20; setup.turnPieces = 1;

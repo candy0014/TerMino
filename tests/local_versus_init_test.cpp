@@ -10,6 +10,7 @@
 #include "tetr/network/multiplayer_channel.h"
 #include "tetr/network/network_services.h"
 #include "tetr/replay/session_state.h"
+#include "tetr/replay/file_path.h"
 #include "tetr/replay/local_versus_codec.h"
 #include "tetr/replay/playback_checkpoint.h"
 #include "tetr/replay/playback_clock.h"
@@ -134,20 +135,21 @@ int main() {
 
     // Leaving Local Versus from Player 2 promotes the settings currently on
     // screen to the normal single-player context and keeps the main save path.
-    second.settings.gameMode = 1;
+    second.settings.gameMode = 0;
+    second.settings.goal = 2;
     second.settings.fieldWidth = 13;
     second.settings.autoplayPps = 7.5;
     second.settings.keyCodes = UserConfig::default_player_two_key_codes();
     app.playerTwoSettingsMenu.selectedEntries["root"] = "GAME";
     app.playerTwoSettingsMenu.selectedEntries["root/GAME"] = "pieces";
     App::Settings::adopt_single_player_settings(second.context);
-    assert(first.settings.gameMode == 1);
+    assert(first.settings.gameMode == 0 && first.settings.goal==2);
     assert(first.settings.fieldWidth == 13);
     assert(first.settings.autoplayPps == 7.5);
     assert(first.settings.keyCodes == second.settings.keyCodes);
     assert(first.settings.keybindingPath == "player_two_keys.txt");
     assert(first.input.bindings.entries() == second.input.bindings.entries());
-    assert(first.context.config.mode.mode == Runtime::GameMode::Racing);
+    assert(first.context.config.mode.mode == Runtime::GameMode::Zen && first.context.config.mode.goal==Runtime::GameGoal::Lines);
     assert(app.playerTwoSettingsMenu.selectedEntries.at("root") == "GAME");
     assert(app.playerTwoSettingsMenu.selectedEntries.at("root/GAME") == "pieces");
     assert(app.savedPlayerOneSettings->fieldWidth == 17);
@@ -200,6 +202,8 @@ int main() {
     second.session.player.clutch.consecutive = 2;
     second.session.player.gameplay.scoring.totalOutgoingAttack = 12;
     second.session.player.gameplay.scoring.difficultClears = 3;
+    first.session.player.gameplay.scoring.score = 12345;
+    second.session.player.gameplay.scoring.score = 67890;
     second.session.player.presentation.spike.attack = 9;
     second.session.player.presentation.spike.lastAttackAt =
         Runtime::TimePoint::from_seconds(10.0);
@@ -210,7 +214,7 @@ int main() {
     std::cout.rdbuf(originalOutput);
     assert(rendered.str().find("HOLD") != std::string::npos);
     assert(rendered.str().find("NEXT") != std::string::npos);
-    assert(count_occurrences(rendered.str(), "0.00 S") >= 2);
+    assert(count_occurrences(rendered.str(), "00:00.000") >= 2);
     assert(!first.session.gameStartTime);
     assert(!second.session.gameStartTime);
     assert(!first.session.player.clutch.previousPieceCleared);
@@ -220,6 +224,8 @@ int main() {
     assert(second.session.player.clutch.consecutive == 0);
     assert(second.session.player.gameplay.scoring.totalOutgoingAttack == 0);
     assert(second.session.player.gameplay.scoring.difficultClears == 0);
+    assert(first.session.player.gameplay.scoring.score == 0);
+    assert(second.session.player.gameplay.scoring.score == 0);
     assert(first.session.player.presentation.spike.attack == 0);
     assert(!first.session.player.presentation.spike.lastAttackAt);
     assert(second.session.player.presentation.spike.attack == 0);
@@ -385,21 +391,23 @@ int main() {
     const std::string dualReplay = Replay::encode_local_versus_replay(
         firstReplay, secondReplay);
     const std::filesystem::path replayPath =
-        std::filesystem::path("replay") / "tetr_local_versus_replay_test.txt";
+        Replay::replay_directory() / "tetr_local_versus_replay_test.txt";
     std::filesystem::create_directories(replayPath.parent_path());
     {
         std::ofstream output(replayPath, std::ios::trunc);
         output << dualReplay << Replay::replay_hash_suffix(dualReplay);
     }
     first.settings.gameMode = 5;
-    first.settings.replayPath = replayPath.filename().string();
+    first.settings.replayPath = replayPath.generic_u8string();
     first.settings.replayTimeMultiplier = 2.0;
+    first.settings.challengeReplay=UserConfig::ChallengeReplayRestore{0,"previous-replay.txt",true};
     std::ostringstream replayRendered;
     originalOutput = std::cout.rdbuf(replayRendered.rdbuf());
     App::initialize_game(first.context);
     std::cout.rdbuf(originalOutput);
 
     assert(first.settings.replayPath == replayPath.generic_u8string());
+    assert(first.settings.challengeReplay && !first.settings.challengeReplay->pending);
     assert(first.replay.localVersusReplay);
     assert(second.replay.localVersusReplay);
     assert(first.context.config.mode.mode == Runtime::GameMode::LocalVersus);
@@ -466,6 +474,11 @@ int main() {
     assert(first.replay.playback.duration.seconds()==6.0);
     assert(Replay::playback_checkpoint_count(first.context)==1);
     assert(Replay::playback_checkpoint_count(second.context)==1);
+    assert(first.settings.challengeReplay && first.settings.gameMode==5);
+    std::ostringstream restoredRendered;originalOutput=std::cout.rdbuf(restoredRendered.rdbuf());
+    App::initialize_game(first.context);std::cout.rdbuf(originalOutput);
+    assert(!first.settings.challengeReplay && first.settings.gameMode==0 && first.settings.replayPath=="previous-replay.txt");
+    assert(!first.context.config.mode.replayMode && first.context.config.mode.mode==Runtime::GameMode::Zen);
     std::filesystem::remove(replayPath);
 
     std::cerr << "local_versus_init_test: OK\n";

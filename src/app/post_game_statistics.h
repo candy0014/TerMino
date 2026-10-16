@@ -2,6 +2,7 @@
 #define TETR_APP_POST_GAME_STATISTICS_H
 
 #include "tetr/runtime/player_state.h"
+#include "tetr/challenges/challenges.h"
 #include "terminal_canvas.h"
 #include <optional>
 #include <string>
@@ -24,13 +25,16 @@ struct PostGameStatistics {
 PostGameStatistics make_post_game_statistics(const Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player);
 
-enum class PostGamePage { Board, Summary, Clears };
+enum class PostGamePage { Board, Summary, Clears, Challenges };
 class PostGameStatisticsView {
 public:
     explicit PostGameStatisticsView(PostGameStatistics first,
         std::optional<PostGameStatistics> second=std::nullopt);
+    PostGameStatisticsView(std::vector<PostGameStatistics> players,std::vector<std::string> names);
     PostGamePage page() const { return page_; }
     void next_page();
+    void set_challenges(std::vector<Challenges::Outcome> outcomes,const std::string& notice={});
+    void close();
     void select_player(int delta);
     void move(int rows,int columns);
     bool poll(Settings::NavigationInput& first,Settings::NavigationInput* second=nullptr);
@@ -47,6 +51,8 @@ public:
 
 private:
     std::vector<PostGameStatistics> players_;
+    std::vector<std::string> playerNames_;
+    bool roomResults_=false;
     PostGamePage page_=PostGamePage::Board;
     int player_=0,selectedRow_=0,selectedColumn_=0,rowStart_=0,columnStart_=0,summaryRow_=0,summaryScroll_=0;
     bool dirty_=true;
@@ -55,6 +61,9 @@ private:
     struct SavePrompt {std::string defaultName,value;std::size_t caret;};
     std::optional<SavePrompt> savePrompt_;
     std::string notice_;
+    std::vector<Challenges::Outcome> challenges_;
+    std::string challengeNotice_;
+    int challengeRow_=0,challengeScroll_=0;
 };
 } // namespace App
 #endif

@@ -38,6 +38,7 @@ GarbageCancelAmountResult cancel_garbage_amount(std::int64_t pending,int attack,
 struct GarbageRiseChunk {
     int lines = 0;
     bool preserveHole = false;
+    int sourceSlot = -1;
 };
 
 struct GarbageRisePlan {

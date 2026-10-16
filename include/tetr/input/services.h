@@ -63,6 +63,8 @@ struct Services {
     bool gameplay_key_down(int key) const;
     std::optional<std::chrono::steady_clock::time_point> gameplay_press_time(int key) const;
     void poll_gameplay_events();
+    // Collect queued input without scanning every bound key's platform state.
+    bool gameplay_input_pending();
     const KeyEvent* next_gameplay_event() const;
     void consume_gameplay_event();
     std::vector<KeyEvent> take_spawn_horizontal_events();
@@ -78,6 +80,7 @@ private:
     void synchronize_focus();
     KeyEventBuffer& event_buffer();
     void poll_platform_events();
+    bool read_key_state(int keyCode);
     bool gameplayInputActive_ = false;
     std::uint64_t eventCursor_ = 0;
     std::uint64_t controlEventCursor_ = 0;

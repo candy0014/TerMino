@@ -51,7 +51,7 @@ std::string binding_label(const Runtime::GameContext& context, std::size_t bindi
     return "[" + (label.empty() ? UiText::tr("Unbound") : label) + "]";
 }
 }
-void draw_start_menu(const Runtime::GameContext& context) {
+void draw_start_menu(const Runtime::GameContext& context,std::optional<Render::TerminalSize> requestedSize) {
     using UiText::tr;
     Render::OutputGuard output(context);
     Render::clear_screen();
@@ -66,8 +66,8 @@ void draw_start_menu(const Runtime::GameContext& context) {
     const auto actions = binding_label(context, 8) + " " + tr("Start") + "   " +
         binding_label(context, 9) + " " + tr("Settings") + "   [Esc] " + tr("Quit");
     const auto actionWidth = Util::TerminalText::width(actions);
-    const auto size = Render::terminal_size().value_or(Render::TerminalSize{
-        static_cast<int>(std::max(std::size_t{52}, actionWidth)) + 8, 14});
+    const auto size = requestedSize.value_or(Render::terminal_size().value_or(Render::TerminalSize{
+        static_cast<int>(std::max(std::size_t{52}, actionWidth)) + 8, 14}));
     const int top = std::max(0, (size.rows - 10) / 2);
     for (int row = 0; row < 6; ++row)
         line(context, top + row, logo[row], Render::ColorRole::Orange, size);

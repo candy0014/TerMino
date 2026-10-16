@@ -22,7 +22,7 @@ struct Choice {
 // These projections expose old signed/sentinel values as independent controls.
 // They write the original field, so config files and replay formats stay stable.
 enum class ValuePart {
-    Raw, GameMode, BlitzSpeed, CheeseStyle, CheeseRefill, HoleLayout,
+    Raw, GameMode, CheeseStyle, CheeseRefill, HoleLayout,
     HoleMagnitude, GravityMode, GravitySeconds, SimulationMode, TurnMode, HoldDisabled
 };
 struct SettingItem {
@@ -40,11 +40,13 @@ struct SettingItem {
     bool secondaryEffective = true;
     bool bothReadOnly = false;
     bool allowEmptyText = false;
+    bool readOnly = false;
 };
 
-enum class NodeKind { Group, Setting, Player, ResetSection, ResetSubtree, ResetGame, Connect, Disconnect, Rooms,
+enum class NodeKind { Group, Setting, Player, ResetSection, ResetSubtree, ResetGame, Connect, Disconnect, RoomAction, Separator,
     PresetApply, PresetUndo, PresetClear, PresetCommit, PresetRemove, CopyOtherPlayer,
-    MapNew, MapUse, MapEdit, MapDelete, MapDisable, PresetNew, PresetRename, PresetSave, PresetEdit, PresetDelete };
+    MapNew, MapUse, MapEdit, MapDelete, MapDisable, PresetNew, PresetRename, PresetSave, PresetEdit, PresetDelete,
+    ChallengeChange, ChallengeReplay, ChallengeRestore, RecentReplay, ChallengeStart };
 struct SettingNode {
     std::string key;
     std::string title;
@@ -68,10 +70,15 @@ struct SettingNode {
     bool literalTitle = false;
     std::shared_ptr<const Runtime::MapDefinition> mapPreview;
     int presetId = 0;
+    std::string challengeId,replayPath;
+    std::optional<bool> challengeQualified;
+    bool literalDescription=false;
 };
 
-SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, bool includeHidden = false);
+SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, bool includeHidden = false,
+                     std::shared_ptr<const Runtime::MapDefinition> mapOverride = {});
 SettingNode make_both_tree(UserConfig::Settings& first, UserConfig::Settings& second);
+SettingNode make_host_tree(UserConfig::Settings& host,std::shared_ptr<const Runtime::MapDefinition> map);
 SettingItem rebind_item(const SettingItem& item, UserConfig::Settings& owner);
 bool mixed_value(const SettingItem& item);
 bool uses_inline_input(const SettingItem& item);

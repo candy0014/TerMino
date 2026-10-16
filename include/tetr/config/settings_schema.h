@@ -54,11 +54,17 @@ enum class SettingId {
     HalfClearEnabled, HalfClearAttack, HalfClearCharge, GarbageSpecialAttack,
     B2BRewardAmount, ShowSpawnPosition, GravityProgression, GravityLevelLines, GravityAcceleration,
     AutoplayHandlingSimulation, MapId, MapRotationSystem, MapGoal, ContinueInputUnfocused,
-    GarbageRiseInterval, Username
+    GarbageRiseInterval, Username,
+    ForceSdf, ForcedSdf, ForcedSdfFixed, ForceDas, ForcedDas, ForceArr, ForcedArr,
+    ForceDcd, ForcedDcd, ForcePreMove, ForcedPreMove, ForceDasPrecharge, ForcedDasPrecharge,
+    AttackMultiplier,
+    Goal, GarbageTarget, PieceTarget, AttackTarget, AllClearTarget,
+    InvisibilityDelay, InvisibilityInterval, InvisibilityDuration, ChallengeRules
 };
 
 enum class ChoiceKind {
     None,
+    Goal,
     MapGoal,
     GameMode,
     GarbageMode,
@@ -74,7 +80,8 @@ enum class ChoiceKind {
     BagRandomizer,
     GarbageEntryMode,
     B2BReward,
-    GravityProgression
+    GravityProgression,
+    Invisibility, ChallengeRules
 };
 
 using SettingMember = std::variant<
@@ -126,6 +133,12 @@ int clamped_int(const Settings& settings, SettingId id);
 double clamped_real(const Settings& settings, SettingId id);
 void reset_settings(Settings& settings, bool playerTwo = false);
 void reset_section(Settings& settings, Section section, bool playerTwo = false);
+
+struct ForcedHandlingSetting { SettingId personal, enabled, value; };
+const std::vector<ForcedHandlingSetting>& forced_handling_settings();
+// Resolve mechanism overrides without changing the player's personal values.
+Settings effective_handling_settings(const Settings& settings);
+SettingId personal_handling_id(SettingId id);
 
 } // namespace UserConfig
 

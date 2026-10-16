@@ -1,0 +1,122 @@
+name: Test and release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build and publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: '1'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install integration test dependency
+        run: python -m pip install --require-hashes -r deploy/websocket-requirements.txt
+      - name: Audit public source
+        run: python tools/check_public_source.py
+      - name: Python and pressure regressions
+        if: runner.os == 'Linux'
+        run: |
+          python -m unittest discover -s tests -p '*test.py' -v
+          node tests/moch_pressure_test.cjs
+      - name: Configure Linux
+        if: runner.os == 'Linux'
+        run: cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DTETR_PORTABLE_BUILD=ON -DTETR_PORTABLE_RESET_SETTINGS=ON
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          'C:\Program Files\Git\usr\bin' | Out-File -FilePath $env:GITHUB_PATH -Append
+          cmake -S . -B build-release -A x64 -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DTETR_PORTABLE_BUILD=ON -DTETR_PORTABLE_RESET_SETTINGS=ON
+      - name: Build all targets
+        run: cmake --build build-release --config Release --parallel 2
+      - name: Full native CTest suite
+        run: ctest --test-dir build-release -C Release --output-on-failure --parallel 2 --output-junit test-results.xml
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        run: bash package.sh --build-dir build-release --parallel 2
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        run: .\package.ps1 -BuildDirectory build-release -Parallel 2
+      - name: Check archive and native game/replay/server
+        run: python tools/check_public_distribution.py dist
+      - name: Upload release assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-${{ runner.os }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: tests-${{ runner.os }}
+          path: |
+            build-release/test-results.xml
+            build-release/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+      - name: Publish latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9][A-Za-z0-9._-]*$ ]] || exit 2
+          git show-ref --verify "refs/tags/$TAG"
+          (cd release-assets && sha256sum --check *.sha256)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+            gh release edit "$TAG" --latest --notes-file docs/releases/latest.txt
+          else
+            gh release create "$TAG" release-assets/* --verify-tag --latest \
+              --title "TerMino $TAG" --notes-file docs/releases/latest.txt
+          fi

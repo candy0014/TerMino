@@ -12,6 +12,7 @@
 #include "tetr/runtime/spin_bonuses.h"
 #include "tetr/runtime/bag_randomizer.h"
 #include "tetr/runtime/attack_rules.h"
+#include "tetr/runtime/challenge_rules.h"
 
 namespace Runtime {
 
@@ -22,6 +23,12 @@ struct ModeConfig {
     int racingDistance=40;
     MapGoal mapGoal=MapGoal::Disabled;
     Duration blitzTime=Duration::from_seconds(120.0);
+    GameGoal goal=GameGoal::None;
+    int garbageTarget=40;
+    int pieceTarget=100;
+    int attackTarget=100;
+    int allClearTarget=1;
+    bool legacyBlitzScoring=false;
 };
 struct HandlingConfig {
     GravityInterval gravityInterval=GravityInterval::periodic(Duration::from_seconds(0.6));
@@ -45,6 +52,10 @@ struct FieldConfig {
     int nextCount=5;
     bool holdEnabled=true;
     bool invisible=false;
+    bool periodicInvisible=false;
+    Duration invisibilityDelay{};
+    Duration invisibilityInterval=Duration::from_seconds(5);
+    Duration invisibilityDuration=Duration::from_seconds(1);
     bool antiGravity=false;
     bool ghost=true;
     Duration lineClearDelay{};
@@ -106,6 +117,7 @@ struct DisplayConfig {
     bool showSpawnPosition=false;
 };
 struct RuntimeConfig {
+    ChallengeRules challengeRules=ChallengeRules::None;
     std::shared_ptr<const MapDefinition> initialMap;
     int mapRotationSystem=-1;
     ModeConfig mode;
@@ -136,6 +148,28 @@ struct RuntimeConfig {
 inline BagRandomizer effective_bag_randomizer(const RuntimeConfig& config) noexcept {
     return config.bagRandomizer==BagRandomizer::SevenBag && config.randomPieces
         ? BagRandomizer::TotalMayhem : config.bagRandomizer;
+}
+inline GameGoal active_goal(const RuntimeConfig& config) noexcept {
+    if(config.mode.mode==GameMode::Racing) {
+        if(config.initialMap && config.mode.mapGoal==MapGoal::ClearInitial) return GameGoal::InitialCells;
+        if(config.initialMap && config.mode.mapGoal==MapGoal::AllClear) return GameGoal::AllClear;
+        return GameGoal::Lines;
+    }
+    if(config.mode.mode==GameMode::Blitz) return GameGoal::Time;
+    if(config.mode.mode!=GameMode::Zen || (config.mode.goal==GameGoal::InitialCells && !config.initialMap)) return GameGoal::None;
+    return config.mode.goal;
+}
+inline void redirect_legacy_mode(RuntimeConfig& config) {
+    const auto encoded=static_cast<int>(config.mode.mode);
+    const auto previous=encoded==-1 ? GameMode::Racing : encoded==-2 ? GameMode::Blitz : config.mode.mode;
+    if(previous!=GameMode::Racing && previous!=GameMode::Blitz) return;
+    config.mode.goal=previous==GameMode::Racing ? GameGoal::Lines : GameGoal::Time;
+    if(encoded==-2) config.mode.fixedBlitzSpeed=true;
+    config.mode.mode=GameMode::Zen;
+    if(previous==GameMode::Blitz && !config.mode.fixedBlitzSpeed) {
+        config.handling.gravityProgression=GravityProgression::Blitz;
+        config.mode.legacyBlitzScoring=true;
+    }
 }
 inline int effective_lock_reset_limit(const HandlingConfig& config) noexcept {
     return config.infiniteMovement ? -1 : config.lockResetLimit;

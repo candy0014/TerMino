@@ -11,13 +11,16 @@
 #include <optional>
 #include <map>
 #include "tetr/config/user_config.h"
+#include "tetr/challenges/challenges.h"
 
 namespace Render { class TerminalSession; }
-namespace Runtime { class GameContext; }
+namespace Runtime { class GameContext; struct PlayerSessionState; }
 
 namespace App {
 
 struct StartScreenRequested {};
+// Return to the remembered settings path after the host cancels a round.
+struct RoomSettingsRequested {};
 
 // Process-lifetime UI state. This is intentionally not serialized into the
 // user's configuration: reopening a menu during the same program run should
@@ -37,6 +40,7 @@ struct ReplayResumeRequest {
     double speed = 1.0;
     bool paused = false;
 };
+struct ReplayPreviewRequest {std::string path;bool pending=true;};
 
 struct ApplicationState {
     // Startup option; applies to live Quick Play games throughout this run.
@@ -53,6 +57,16 @@ struct ApplicationState {
     SettingsMenuState settingsMenu;
     SettingsMenuState playerTwoSettingsMenu;
     ReplayResumeRequest replayResume;
+    std::optional<ReplayPreviewRequest> replayPreview;
+    std::optional<Challenges::Round> challengeRound;
+    std::function<bool()> challengeFrame;
+    std::function<void(int)> challengeSendAttack;
+    std::function<bool(const Challenges::Placement&,Runtime::PlayerSessionState&)> challengePlacementObserver;
+    std::optional<Challenges::Round> playerTwoChallengeRound;
+    std::function<bool(const Challenges::Placement&,Runtime::PlayerSessionState&)> playerTwoChallengePlacementObserver;
+    auto& challenge_round(const Runtime::GameContext* context) {return context==localPlayerTwoContext?playerTwoChallengeRound:challengeRound;}
+    const auto& challenge_round(const Runtime::GameContext* context) const {return context==localPlayerTwoContext?playerTwoChallengeRound:challengeRound;}
+    auto& challenge_observer(const Runtime::GameContext* context) {return context==localPlayerTwoContext?playerTwoChallengePlacementObserver:challengePlacementObserver;}
     Render::TerminalSession* terminalSession = nullptr;
     Runtime::GameContext* primaryContext = nullptr;
     Runtime::GameContext* localPlayerTwoContext = nullptr;

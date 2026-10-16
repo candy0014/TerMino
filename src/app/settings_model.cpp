@@ -1,11 +1,15 @@
+#include "single_player_challenges.h"
 #include "settings_model.h"
 #include "settings_presets.h"
 #include "settings_maps.h"
 #include "tetr/config/map_store.h"
 #include "tetr/config/presets.h"
+#include "tetr/runtime/piece.h"
+#include "tetr/replay/recent.h"
 
 #include "tetr/config/normalization.h"
 #include "tetr/util/text_codec.h"
+#include "tetr/util/numeric.h"
 
 #include <algorithm>
 #include <cmath>
@@ -26,10 +30,11 @@ int magnitude(int value, int limit) {
 int cheese_style(const UserConfig::Settings& user) { return magnitude(user.cheesePattern, 3); }
 int holes(const UserConfig::Settings& user) { return magnitude(user.holeCount, std::clamp(user.fieldWidth, 1, 100)); }
 int gravity_mode(const UserConfig::Settings& user) {
+    if(user.gravityProgression==3) return 5;
     if (user.instantGravity != 0) return 2;
     if (user.gravityInterval < 0 || user.gravityInterval > 1e9) return 1;
     if (user.gravityInterval <= 1e-7) return 2;
-    return user.gravityProgression==1 ? 3 : user.gravityProgression==2 ? 4 : 0;
+    return user.gravityProgression==1 ? 3 : user.gravityProgression==2 ? 4 : user.gravityProgression==3 ? 5 : 0;
 }
 double gravity_seconds(const UserConfig::Settings& user) {
     const double value = std::abs(user.gravityInterval);
@@ -37,6 +42,8 @@ double gravity_seconds(const UserConfig::Settings& user) {
 }
 
 bool setting_effective(Id id, const UserConfig::Settings& user, const Runtime::RuntimeConfig& config) {
+    for(const auto& entry:UserConfig::forced_handling_settings())
+        if(id==entry.personal && UserConfig::clamped_int(user,entry.enabled)) return false;
     if(config.initialMap && (id==Id::FieldWidth || id==Id::FieldHeight || id==Id::LayerHeight || id==Id::QpFool || id==Id::QpSnowball ||
         (id==Id::RotationSystem && config.initialMap->generator==Runtime::MapGenerator::RotationSystem))) return false;
     const auto garbage=config.garbage.mode;
@@ -47,8 +54,7 @@ bool setting_effective(Id id, const UserConfig::Settings& user, const Runtime::R
     const bool specialShape=reverseNoHold || Runtime::enabled(config.quickPlay.doubleHole);
     const bool horizontal=!config.movement.disableLeft || !config.movement.disableRight;
     switch (id) {
-        case Id::RacingDistance: return !config.initialMap || config.mode.mapGoal==Runtime::MapGoal::Disabled;
-        case Id::MapGoal: return config.initialMap && config.mode.mode==Runtime::GameMode::Racing;
+        case Id::Goal: return config.mode.mode==Runtime::GameMode::Zen;
         case Id::GarbageMode:
             return !quickplay && config.mode.mode!=Runtime::GameMode::Multiplayer &&
                 config.mode.mode!=Runtime::GameMode::LocalVersus;
@@ -81,7 +87,7 @@ bool setting_effective(Id id, const UserConfig::Settings& user, const Runtime::R
         case Id::GravityInterval:
         case Id::GravityLevelLines:
         case Id::GravityAcceleration:
-            return !quickplay && (config.mode.mode!=Runtime::GameMode::Blitz || user.gameMode==-2) &&
+            return !quickplay &&
                 !Runtime::enabled(config.quickPlay.gravity);
         case Id::SoftDropFactor:
             return !config.movement.disableSoftDrop && !Runtime::autoplay_enabled(config.autoplay.mode);
@@ -93,7 +99,10 @@ bool setting_effective(Id id, const UserConfig::Settings& user, const Runtime::R
         case Id::FieldWidth:
         case Id::FieldHeight: return !quickplay && !snowball;
         case Id::AntiGravity: return !quickplay;
-        case Id::FieldInvisible: return !quickplay && !Runtime::enabled(config.quickPlay.invisible);
+        case Id::FieldInvisible:
+        case Id::InvisibilityDelay:
+        case Id::InvisibilityInterval:
+        case Id::InvisibilityDuration: return !quickplay && !Runtime::enabled(config.quickPlay.invisible);
         case Id::NextCount: return !quickplay && !reverseNoHold;
         case Id::HoldEnabled: return !Runtime::enabled(config.quickPlay.noHold);
         case Id::InfiniteHold: return config.field.holdEnabled;
@@ -150,9 +159,10 @@ bool setting_visible(Id id, const UserConfig::Settings& user, const Runtime::Run
 
 class TreeBuilder {
 public:
-    explicit TreeBuilder(UserConfig::Settings& settings) : user(settings),
+    explicit TreeBuilder(UserConfig::Settings& settings,std::shared_ptr<const Runtime::MapDefinition> mapOverride={}) : user(settings),
         config(Runtime::normalize_user_config(settings, Runtime::selected_game_mode(settings))) {
-        if(const auto map=UserConfig::Maps::find(settings.mapId)) Runtime::apply_map_config(config,*map);
+        if(mapOverride) Runtime::apply_map_config(config,*mapOverride);
+        else if(const auto map=UserConfig::Maps::find(settings.mapId)) Runtime::apply_map_config(config,*map);
     }
     bool when(Id id,bool condition) const {return Model::when(user,id,condition);}
     bool gravity_when(bool condition) const {
@@ -165,6 +175,9 @@ public:
         covered.insert(id);
         const auto& descriptor = UserConfig::setting_descriptor(id);
         auto choices = UserConfig::choice_options(descriptor.choice);
+        if(id==Id::Goal && !config.initialMap) {
+            choices.labels.pop_back();choices.values.pop_back();
+        }
         if(id==Id::RotationSystem && config.initialMap && config.initialMap->generator==Runtime::MapGenerator::CustomSequence) {
             choices.labels.push_back("Custom");choices.values.push_back(-1);
         }
@@ -233,6 +246,7 @@ void collect_fields(const SettingNode& node, std::set<Id>& fields) {
         fields.insert(node.item->id);
         if(node.item->id==Id::RotationSystem) fields.insert(Id::MapRotationSystem);
         if (node.item->id == Id::SoftDropFactor) fields.insert(Id::SoftDropFixed);
+        if (node.item->id == Id::ForcedSdf) fields.insert(Id::ForcedSdfFixed);
         if (node.item->part == ValuePart::GravityMode) {
             fields.insert(Id::InstantGravity);fields.insert(Id::GravityProgression);
         }
@@ -246,7 +260,7 @@ bool contains_part(const SettingNode& node, ValuePart part) {
     });
 }
 void add_subtree_resets(SettingNode& node) {
-    if (node.key=="presets" || node.key=="maps") return;
+    if (node.key=="presets" || node.key=="maps" || node.key=="challenges" || node.key=="recent-replays") return;
     for (auto& child : node.children) add_subtree_resets(child);
     if (node.kind != NodeKind::Group || node.key == "root" || node.children.empty()) return;
     if (std::any_of(node.children.begin(), node.children.end(), [](const auto& child) {
@@ -274,13 +288,15 @@ void add_subtree_resets(SettingNode& node) {
 }
 } // namespace
 
-SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, bool includeHidden) {
-    TreeBuilder b(user);
+SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, bool includeHidden,
+                      std::shared_ptr<const Runtime::MapDefinition> mapOverride) {
+    UserConfig::migrate_legacy_modes(user);
+    TreeBuilder b(user,std::move(mapOverride));
     using Part = ValuePart;
     const auto mode = Runtime::selected_game_mode(user);
     b.covered.insert(Id::GravityProgression);
-    const bool standardMode = mode == Runtime::GameMode::Zen || mode == Runtime::GameMode::Racing ||
-        mode == Runtime::GameMode::Blitz;
+    b.covered.insert(Id::MapGoal); // Historical profile/replay field; Goal replaces this control.
+    const bool standardMode = mode == Runtime::GameMode::Zen;
     SettingNode root{"root", "SETTINGS", "Choose a category; Right opens, Left goes back."};
     auto players = b.group("player", "Player", "Choose the player whose settings you are editing.", {
         {"player1", "Player 1", localVersus ? "Edit Player 1's independent settings." : "Only Player 1 is available outside Local Versus.", NodeKind::Player},
@@ -350,17 +366,26 @@ SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, 
         "Opening piece count; 0 disables protection. Within this count, pending garbage at least equal to previously sent garbage grants extra cancellation, never extra attack."));
     auto garbage = b.group("garbage-rules", "GARBAGE", "Garbage buffering, shape and opening cancellation protection.",
         std::move(sharedGarbageFields));
+    SettingNode recent{"recent-replays","Recent replays","The latest 30 games. Enter twice to watch without changing your mode or replay path."};
+    recent.visible=mode==Runtime::GameMode::Replay && !user.presetDefined;
+    if(recent.visible)for(const auto& entry:Replay::recent_replays()) {
+        SettingNode row{entry.path.generic_u8string(),entry.label,"Enter twice to play this replay.",NodeKind::RecentReplay};
+        row.literalTitle=true;row.replayPath=entry.path.generic_u8string();row.confirmTwice=true;recent.children.push_back(std::move(row));
+    }
+    if(recent.children.empty()) {SettingNode empty{"empty","No recent replays",{},NodeKind::Setting};empty.enabled=false;recent.children.push_back(std::move(empty));}
     auto model = b.section(Section::Model, {
         b.projected(Id::GameMode, Part::GameMode, "Model", options(
-            {"Zen", "Racing", "Blitz", "QuickPlay", "Multiplayer", "Local Versus", "Replay"},
-            {0, 1, 2, 3, 4, 6, 5}), "Choose a mode; its configuration appears below."),
-        b.field(Id::RacingDistance, b.when(Id::GameMode,mode == Runtime::GameMode::Racing)),
-        b.field(Id::MapGoal, b.when(Id::GameMode,mode==Runtime::GameMode::Racing) && b.when(Id::MapId,b.config.initialMap!=nullptr),
-            "OFF uses the racing line target. Clear map clears every starting cell. All clear field ends on ALL CLEAR."),
-        b.field(Id::BlitzTime, b.when(Id::GameMode,mode == Runtime::GameMode::Blitz), "Challenge duration in seconds; 0 ends the game immediately."),
-        b.projected(Id::GameMode, Part::BlitzSpeed, "Gravity policy",
-            options({"Increasing", "Fixed"}, {0, 1}), "Fixed keeps Blitz gravity from increasing.", b.when(Id::GameMode,mode == Runtime::GameMode::Blitz)),
+            {"Zen", "QuickPlay", "Multiplayer", "Local Versus", "Replay"},
+            {0, 3, 4, 6, 5}), "Choose a mode; its configuration appears below."),
+        b.field(Id::Goal,b.when(Id::GameMode,standardMode),"End the game when the selected goal is reached or you die. Clear initial cells requires a map."),
+        b.field(Id::BlitzTime,b.when(Id::GameMode,standardMode) && b.when(Id::Goal,user.goal==1),"Challenge duration: minutes:seconds or seconds; 60 seconds carry into one minute. 0 ends the game immediately."),
+        b.field(Id::RacingDistance,b.when(Id::GameMode,standardMode) && b.when(Id::Goal,user.goal==2)),
+        b.field(Id::GarbageTarget,b.when(Id::GameMode,standardMode) && b.when(Id::Goal,user.goal==3)),
+        b.field(Id::PieceTarget,b.when(Id::GameMode,standardMode) && b.when(Id::Goal,user.goal==4)),
+        b.field(Id::AttackTarget,b.when(Id::GameMode,standardMode) && b.when(Id::Goal,user.goal==5)),
+        b.field(Id::AllClearTarget,b.when(Id::GameMode,standardMode) && b.when(Id::Goal,user.goal==6)),
         b.field(Id::ReplayPath, b.when(Id::GameMode,mode == Runtime::GameMode::Replay)),
+        std::move(recent),
         std::move(modeQuickplay),
         std::move(modeGarbage)
     }, "Game mode and the options used by that mode.");
@@ -370,15 +395,24 @@ SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, 
     root.children.push_back(std::move(model));
     auto gravity = b.group("gravity", "Gravity", "Choose gravity behavior before setting its interval.", {
             b.projected(Id::GravityInterval, Part::GravityMode, "Gravity mode",
-                options({"Periodic", "Disabled", "Instant (20G)","NES progression","Marathon progression"}, {0, 1, 2,3,4}), "Gravity modes use words; no signed or sentinel numbers."),
-            b.projected(Id::GravityInterval, Part::GravitySeconds, gravity_mode(user)>=3 ? "Starting interval (seconds)" : "Interval (seconds)", {}, "Positive seconds between gravity steps; progressive modes use this as their starting interval.", b.gravity_when(gravity_mode(user) == 0 || gravity_mode(user)>=3)),
-            b.field(Id::GravityLevelLines,b.gravity_when(gravity_mode(user)>=3),"Cleared lines required for each speed level. Default 10; independent of presets."),
-            b.field(Id::GravityAcceleration,b.gravity_when(gravity_mode(user)>=3),"1 follows the reference curve; above 1 accelerates more, below 1 accelerates less. Range 0.01-100.")
+                options({"Periodic", "Disabled", "Instant (20G)","NES progression","Marathon progression","Increasing"}, {0, 1, 2,3,4,5}), "Gravity modes use words; no signed or sentinel numbers."),
+            b.projected(Id::GravityInterval, Part::GravitySeconds, gravity_mode(user)>=3 ? "Starting interval (seconds)" : "Interval (seconds)", {}, "Positive seconds between gravity steps; progressive modes use this as their starting interval.", b.gravity_when(gravity_mode(user) == 0 || gravity_mode(user)==3 || gravity_mode(user)==4)),
+            b.field(Id::GravityLevelLines,b.gravity_when(gravity_mode(user)==3 || gravity_mode(user)==4),"Cleared lines required for each speed level. Default 10; independent of presets."),
+            b.field(Id::GravityAcceleration,b.gravity_when(gravity_mode(user)==3 || gravity_mode(user)==4),"1 follows the reference curve; above 1 accelerates more, below 1 accelerates less. Range 0.01-100.")
         });
     // Mark the projected fields before constructing either category so the
     // storage schema cannot add a second gravity control under HANDLING.
     b.covered.insert(Id::InstantGravity);
     b.covered.insert(Id::SoftDropFixed);
+    b.covered.insert(Id::ForcedSdfFixed);
+    std::vector<SettingNode> forcedHandling;
+    for(const auto& entry:UserConfig::forced_handling_settings()) {
+        forcedHandling.push_back(b.field(entry.enabled,true,"Override only this handling parameter; keep personal handling settings."));
+        auto value=b.field(entry.value,b.when(entry.enabled,UserConfig::clamped_int(user,entry.enabled)!=0));
+        if(entry.personal==Id::SoftDropFactor || entry.personal==Id::Das || entry.personal==Id::Arr || entry.personal==Id::Dcd)
+            value.item->hint=value.description="Seconds: s/S; frames at 60 fps: f/F. SDF without a unit is a multiplier; 0 is instant.";
+        forcedHandling.push_back(std::move(value));
+    }
     root.children.push_back(b.section(Section::Handling, {
         b.field(Id::SoftDropFactor, true, "No unit: gravity multiplier (1 cell/s when gravity is disabled); s/S: fixed seconds per cell; f/F: frames at 60 fps. Uses the faster of soft drop and gravity. 0 means instant drop."),
         b.field(Id::Das, true, "Seconds (no unit or s/S), or decimal frames (f/F, 60 fps): 1.5f = 0.025s. 0 repeats immediately."),
@@ -389,7 +423,14 @@ SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, 
     }, "Soft drop and movement repeat controls."));
     auto game = b.section(Section::Game, {
         b.group("playfield", "Playfield", "Field dimensions and visibility.", {
-            b.field(Id::FieldWidth), b.field(Id::FieldHeight), b.field(Id::FieldInvisible), b.field(Id::AntiGravity)
+            b.field(Id::FieldWidth), b.field(Id::FieldHeight), b.field(Id::FieldInvisible),
+            b.field(Id::InvisibilityDelay,b.when(Id::FieldInvisible,user.fieldInvisible==1),
+                "Time after each piece locks before it becomes invisible; 0 hides it immediately."),
+            b.field(Id::InvisibilityInterval,b.when(Id::FieldInvisible,user.fieldInvisible==2),
+                "Time between flashes; the first flash begins after this interval. 0 keeps the field visible when flash duration is positive."),
+            b.field(Id::InvisibilityDuration,b.when(Id::FieldInvisible,user.fieldInvisible==2),
+                "How long each flash stays visible; 0 disables flashes."),
+            b.field(Id::AntiGravity)
         }),
         b.group("pieces", "Pieces", "Next, hold, ghost and piece rules.", {
             b.field(Id::NextCount, true, "Number of preview pieces; 0 hides NEXT."), b.field(Id::HoldEnabled),
@@ -421,6 +462,7 @@ SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, 
         std::move(gravity),
         std::move(garbage),
         b.group("attack-rules", "Attack rules", "B2B, clear rewards and garbage special attacks.", {
+            b.field(Id::AttackMultiplier, true, "Attack multiplier; 0 produces no attack garbage."),
             b.field(Id::SpinBonuses, true, "Choose spin reward rules; preview each option before applying."),
             b.group("b2b-reward", "B2B reward", "Choose B2B attack rewards and configure charge release when the chain breaks.", {
                 b.field(Id::B2BReward, true, "Fixed attack adds the configured bonus at displayed B2B >= 1; chaining follows TETR.IO's logarithmic bonus before combo scaling."),
@@ -439,7 +481,8 @@ SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, 
             }),
             b.field(Id::GarbageSpecialAttack, true, "Flat bonus for a B2B-eligible clear removing garbage; not multiplied by the number of garbage rows.")
         }),
-        std::move(quickplay)
+        std::move(quickplay),
+        b.group("forced-handling","Forced handling","Game rules can override selected handling values without replacing personal handling.",std::move(forcedHandling))
     }, "Field, piece rules, gravity, and timing options.");
     game.children.pop_back(); // GAME's reset covers shared shape and QuickPlay settings too.
     root.children.push_back(std::move(game));
@@ -457,10 +500,15 @@ SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, 
     }, "Keyboard bindings; select an action to capture a key."));
     root.children.push_back(b.section(Section::Network, {
         b.field(Id::ServerIp),
-        {"connect", "CONNECT / RECONNECT", "Connect to this server and show connection status.", NodeKind::Connect},
+        b.field(Id::Username,true,"Change your username before or after connecting; online changes sync with the server."),
+        {"network-connect-gap","",{},NodeKind::Separator},
+        {"connect", "CONNECT / RECONNECT", "Connection status is shown directly in Network.", NodeKind::Connect},
         {"disconnect", "DISCONNECT", "Disconnect from the server.", NodeKind::Disconnect},
-        {"rooms", "Rooms", "Create or join a room before starting a game.", NodeKind::Rooms},
-        b.field(Id::Username,true,"Change your username before or after connecting; online changes sync with the server.")
+        {"network-room-gap","",{},NodeKind::Separator},
+        {"room-create", "Create room", "Create or join a room before starting a game.", NodeKind::RoomAction},
+        {"room-join", "Join by name", "Enter the exact room name, including private rooms.", NodeKind::RoomAction},
+        {"room-list", "Room lobby", "Public rooms: select a room to join.", NodeKind::RoomAction},
+        {"network-reset-gap","",{},NodeKind::Separator}
     }, "Server address and connection actions."));
     root.children.push_back(b.section(Section::Others, {
         b.field(Id::SquareStyle), b.field(Id::ObscuredColors),
@@ -474,6 +522,7 @@ SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, 
     maps.children.push_back(b.field(Id::MapId,false));
     maps.children.push_back(b.field(Id::MapRotationSystem,false));
     root.children.push_back(std::move(maps));
+    if(!user.presetDefined) root.children.push_back(make_challenge_menu(user));
     root.children.push_back(make_preset_menu(user,localVersus));
     SettingNode copyOther{"copy-other-player", "Copy other player's settings",
         "Copy the other player's full configuration into the selected player, keeping this player's keyboard bindings. Confirm twice.",
@@ -514,6 +563,43 @@ SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, 
     return root;
 }
 
+SettingNode make_host_tree(UserConfig::Settings& host,std::shared_ptr<const Runtime::MapDefinition> map) {
+    auto root=make_tree(host,false,0,false,map);
+    root.children.erase(std::remove_if(root.children.begin(),root.children.end(),[](const auto& node){return node.key=="challenges";}),root.children.end());
+    root.title="Host configuration (read-only)";
+    root.description="Read-only host configuration. Personal handling, appearance and bindings are kept when copying.";
+    for(auto& category:root.children) if(category.key=="presets") {
+        category.summary.clear();category.description="Current preset values are shown in their setting categories.";
+        category.children={{"values","Current preset values are shown in their setting categories."}};
+    }
+    for(auto& category:root.children) if(category.key=="maps") {
+        category.children.clear();category.summary=map?map->name:"None";
+        if(map) {
+            SettingNode record{"host-map",map->name,"Read-only host configuration. Personal handling, appearance and bindings are kept when copying."};
+            record.literalTitle=true;record.mapPreview=map;
+            SettingNode size{"size","Playfield"};size.summary=std::to_string(map->width)+" x "+std::to_string(map->height);size.mapPreview=map;
+            record.children.push_back(std::move(size));
+            SettingNode generator{"generator",map->generator==Runtime::MapGenerator::CustomSequence?"Custom sequence":std::string(UserConfig::setting_descriptor(Id::RotationSystem).label)};
+            const auto rotations=UserConfig::choice_options(UserConfig::ChoiceKind::RotationSystem);
+            generator.summary=map->generator==Runtime::MapGenerator::CustomSequence?std::to_string(map->sequence.size()):rotations.labels.at(static_cast<std::size_t>(map->rotationSystem));
+            for(std::size_t start=0;start<map->sequence.size();start+=16) {
+                SettingNode row{"sequence-"+std::to_string(start),std::to_string(start+1)+"-"+std::to_string(std::min(start+16,map->sequence.size()))};
+                row.literalTitle=true;
+                for(std::size_t i=start;i<std::min(start+16,map->sequence.size());++i) row.summary+=std::string(Piece::metadata(map->sequence[i]).name)+" ";
+                generator.children.push_back(std::move(row));
+            }
+            record.children.push_back(std::move(generator));category.children.push_back(std::move(record));
+        } else category.children.push_back({"none","Do not use a map"});
+    }
+    const auto readonly=[&](auto&& self,SettingNode& node)->void {
+        if(node.item) node.item->readOnly=true;
+        if(node.kind!=NodeKind::Group && !node.item) node.enabled=false;
+        for(auto& child:node.children) self(self,child);
+    };
+    readonly(readonly,root);
+    root.children.push_back({"copy-host-config","Copy host configuration",root.description,NodeKind::CopyOtherPlayer});
+    return root;
+}
 std::vector<SettingId> item_fields(const SettingItem& item) {
     if(item.id==Id::RotationSystem && item.owner) {
         const auto map=UserConfig::Maps::find(item.owner->mapId);
@@ -521,6 +607,7 @@ std::vector<SettingId> item_fields(const SettingItem& item) {
     }
     std::vector<Id> fields{item.id};
     if(item.id==Id::SoftDropFactor) fields.push_back(Id::SoftDropFixed);
+    if(item.id==Id::ForcedSdf) fields.push_back(Id::ForcedSdfFixed);
     if(item.part==ValuePart::GravityMode) {fields.push_back(Id::InstantGravity);fields.push_back(Id::GravityProgression);}
     return fields;
 }
@@ -583,6 +670,8 @@ void reset_subtree(UserConfig::Settings& user, const SettingNode& reset, bool pl
 
 int choice_value(const SettingItem& item) {
     const auto& user = *item.owner;
+    if(item.id==Id::Goal && user.goal==7 &&
+        std::find(item.choice.values.begin(),item.choice.values.end(),7)==item.choice.values.end()) return 0;
     // Match gameplay normalization for historical/out-of-range style values.
     if (item.squarePreview) return UserConfig::clamped_int(user, Id::SquareStyle);
     if(item.id==Id::RotationSystem) {
@@ -593,7 +682,6 @@ int choice_value(const SettingItem& item) {
         return UserConfig::clamped_int(user, item.id);
     switch (item.part) {
         case ValuePart::GameMode: return std::abs(UserConfig::clamped_int(user, Id::GameMode));
-        case ValuePart::BlitzSpeed: return user.gameMode == -2 ? 1 : 0;
         case ValuePart::CheeseStyle: return cheese_style(user);
         case ValuePart::CheeseRefill: return user.cheesePattern >= 0 ? 1 : 0;
         case ValuePart::HoleLayout: return user.holeCount < 0 ? 1 : 0;
@@ -605,7 +693,7 @@ int choice_value(const SettingItem& item) {
     }
 }
 void apply_choice(SettingItem& item, int value) {
-    if (item.bothReadOnly) return;
+    if (item.bothReadOnly || item.readOnly) return;
     if (item.secondaryOwner) {
         auto first=*item.owner,second=*item.secondaryOwner;
         auto a=rebind_item(item,first),b=rebind_item(item,second);
@@ -621,13 +709,12 @@ void apply_choice(SettingItem& item, int value) {
         if(value<0) return;
     }
     switch (item.part) {
-        case ValuePart::GameMode: user.gameMode = value == 2 && user.gameMode == -2 ? -2 : value; break;
-        case ValuePart::BlitzSpeed: user.gameMode = value ? -2 : 2; break;
+        case ValuePart::GameMode: user.gameMode = value; break;
         case ValuePart::CheeseStyle: user.cheesePattern = (user.cheesePattern < 0 ? -1 : 1) * value; break;
         case ValuePart::CheeseRefill: user.cheesePattern = (value ? 1 : -1) * cheese_style(user); break;
         case ValuePart::HoleLayout: user.holeCount = (value ? -1 : 1) * holes(user); break;
         case ValuePart::GravityMode:
-            user.gravityProgression=value==3 ? 1 : value==4 ? 2 : 0;
+            user.gravityProgression=value==3 ? 1 : value==4 ? 2 : value==5 ? 3 : 0;
             if (value == 2) user.instantGravity = 1;
             else { user.gravityInterval = gravity_seconds(user) * (value == 1 ? -1 : 1); user.instantGravity = 0; }
             break;
@@ -645,15 +732,27 @@ std::size_t selected_choice(const SettingItem& item) {
     return static_cast<std::size_t>(found - item.choice.values.begin());
 }
 std::string scalar_value(const SettingItem& item) {
+    const auto duration=[&] {
+        switch(item.id) {
+            case Id::BlitzTime: return true;
+            default: return false;
+        }
+    }();
+    if(duration) {
+        const double seconds=item.part==ValuePart::GravitySeconds?gravity_seconds(*item.owner):
+            std::get<std::reference_wrapper<double>>(item.value).get();
+        return Util::format_time(seconds);
+    }
     std::ostringstream value;
     if (item.part == ValuePart::HoleMagnitude) value << holes(*item.owner);
     else if (item.part == ValuePart::GravitySeconds) value << gravity_seconds(*item.owner);
     else std::visit([&](auto reference) { value << reference.get(); }, item.value);
-    if (item.id == Id::SoftDropFactor && item.owner->softDropFixed) value << 's';
+    if(item.id==Id::SoftDropFactor && item.owner->softDropFixed) value << 's';
+    if(item.id==Id::ForcedSdf && item.owner->forcedSdfFixed) value << 's';
     return value.str();
 }
 static bool assign_scalar_value(SettingItem& item, const std::string& text) {
-    if (item.bothReadOnly) return false;
+    if (item.bothReadOnly || item.readOnly) return false;
     if (item.secondaryOwner) {
         auto first=*item.owner,second=*item.secondaryOwner;
         auto a=rebind_item(item,first),b=rebind_item(item,second);
@@ -665,6 +764,19 @@ static bool assign_scalar_value(SettingItem& item, const std::string& text) {
         UserConfig::Settings& user;
         ~RecordEdits(){UserConfig::Presets::record_edits(user);}
     } record{*item.owner};
+    const auto seconds_input=[&] {
+        auto number=std::string_view{text};
+        const auto end=number.find_last_not_of(" \t\r\n");
+        if(end!=std::string_view::npos) number=number.substr(0,end+1);
+        if(!number.empty() && (number.back()=='s' || number.back()=='S')) number.remove_suffix(1);
+        return Util::parse_time(number);
+    };
+    if(item.id==Id::BlitzTime || item.id==Id::GarbageInterval || item.id==Id::GarbageInTime ||
+       item.id==Id::GarbageRiseInterval || item.id==Id::LockDelay || item.id==Id::LineClearDelay || item.id==Id::EntryDelay) {
+        const auto value=seconds_input();
+        if(!value || *value<0 || *value>UserConfig::setting_descriptor(item.id).range.maximum) return false;
+        std::get<std::reference_wrapper<double>>(item.value).get()=*value;return true;
+    }
     if (item.id==Id::GravityLevelLines) {
         const auto value=Util::Text::parse_integer<int>(text);
         if(!value || *value<1 || *value>1000000) return false;
@@ -686,7 +798,7 @@ static bool assign_scalar_value(SettingItem& item, const std::string& text) {
         return true;
     }
     if (item.part == ValuePart::GravitySeconds || item.id == Id::SimulationPps || item.id == Id::TurnPieces) {
-        const auto value = Util::Text::parse_finite_real(text);
+        const auto value = item.part==ValuePart::GravitySeconds?seconds_input():Util::Text::parse_finite_real(text);
         const double upper = item.part == ValuePart::GravitySeconds ? 1e9 : 1e6;
         if (!value || *value <= (item.part == ValuePart::GravitySeconds ? 1e-7 : 0.0) || *value > upper) return false;
         if (item.part == ValuePart::GravitySeconds) item.owner->gravityInterval = *value;
@@ -696,7 +808,7 @@ static bool assign_scalar_value(SettingItem& item, const std::string& text) {
     return UserConfig::assign_setting_text(*item.owner, item.id, text);
 }
 bool assign_scalar(SettingItem& item,const std::string& text) {
-    if(item.bothReadOnly) return false;
+    if(item.bothReadOnly || item.readOnly) return false;
     if(item.owner->presetDefined && (text=="undefined" || text=="未定义" || text=="?")) {
         for(auto* owner:{item.owner,item.secondaryOwner}) if(owner) {
             const auto rebound=rebind_item(item,*owner);

@@ -10,7 +10,7 @@ namespace Runtime {
 // Preserve the historical Random=0/1 meanings in settings and recordings.
 enum class BagRandomizer : int {
     SevenBag=0, TotalMayhem=1, FourteenBag=2, SevenPlusOne=3,
-    SevenPlusTwo=4, SevenPlusX=5, Classic=6, Pairs=7
+    SevenPlusTwo=4, SevenPlusX=5, Classic=6, Pairs=7, Drought=8, Adversarial=9
 };
 struct BagRandomizerInfo {
     BagRandomizer value;
@@ -18,7 +18,7 @@ struct BagRandomizerInfo {
     std::string_view tetrioName;
     std::string_view hint;
 };
-inline constexpr std::array<BagRandomizerInfo,8> kBagRandomizers = {{
+inline constexpr std::array<BagRandomizerInfo,10> kBagRandomizers = {{
     {BagRandomizer::SevenBag,"7-BAG","7-bag","Keep shuffling a bag of the 7 tetrominoes."},
     {BagRandomizer::FourteenBag,"14-BAG","14-bag","Keep shuffling a bag of 2x the 7 tetrominoes."},
     {BagRandomizer::SevenPlusOne,"7+1-BAG","7+1-bag","Keep shuffling a bag of the 7 tetrominoes with one random extra tetromino."},
@@ -26,10 +26,12 @@ inline constexpr std::array<BagRandomizerInfo,8> kBagRandomizers = {{
     {BagRandomizer::SevenPlusX,"7+X-BAG","7+x-bag","Keep shuffling a bag of the 7 tetrominoes. The first few bags contain a few extras."},
     {BagRandomizer::Classic,"CLASSIC","classic","Random with repetition protection."},
     {BagRandomizer::Pairs,"PAIRS","pairs","Alternate between 2 tetrominoes."},
-    {BagRandomizer::TotalMayhem,"TOTAL MAYHEM","total mayhem","Completely random generation."}
+    {BagRandomizer::TotalMayhem,"TOTAL MAYHEM","total mayhem","Completely random generation."},
+    {BagRandomizer::Drought,"DROUGHT","drought","A shuffled bag without I pieces."},
+    {BagRandomizer::Adversarial,"ADVERSARIAL","adversarial","Choose a difficult next piece for the current field."}
 }};
 constexpr BagRandomizer bag_randomizer_from_index(int value) noexcept {
-    return value>=0 && value<=7 ? static_cast<BagRandomizer>(value) : BagRandomizer::SevenBag;
+    return value>=0 && value<=9 ? static_cast<BagRandomizer>(value) : BagRandomizer::SevenBag;
 }
 constexpr const BagRandomizerInfo& bag_randomizer_info(BagRandomizer mode) noexcept {
     for(const auto& info:kBagRandomizers) if(info.value==mode) return info;

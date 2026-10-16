@@ -11,6 +11,9 @@
 #include "tetr/util/text_codec.h"
 
 #include <array>
+#include <algorithm>
+#include <iomanip>
+#include <sstream>
 
 namespace Network {
 namespace {
@@ -21,22 +24,13 @@ bool valid_piece_id(int value) {
 
 std::vector<std::string_view> split_sections(std::string_view state){
     if(state.empty()||state.front()!='!') return {};
-    const std::string_view payload = state.substr(1);
-    if (const auto compact = Util::Text::split_exact<10>(payload, ';'))
-        return {compact->begin(), compact->end()};
-    if (const auto placement = Util::Text::split_exact<17>(payload, ';'))
-        return {placement->begin(), placement->end()};
-    if (const auto compact = Util::Text::split_exact<12>(payload, ';'))
-        return {compact->begin(), compact->end()};
-    if (const auto placement = Util::Text::split_exact<19>(payload, ';'))
-        return {placement->begin(), placement->end()};
-    if (const auto compact = Util::Text::split_exact<15>(payload, ';'))
-        return {compact->begin(), compact->end()};
-    if (const auto placement = Util::Text::split_exact<22>(payload, ';'))
-        return {placement->begin(), placement->end()};
-    if (const auto placement = Util::Text::split_exact<24>(payload, ';'))
-        return {placement->begin(), placement->end()};
-    return {};
+    state.remove_prefix(1);std::vector<std::string_view> fields;
+    for(;;) {
+        if(fields.size()==29) return {};
+        const auto end=state.find(';');fields.push_back(state.substr(0,end));
+        if(end==std::string_view::npos) return fields;
+        state.remove_prefix(end+1);
+    }
 }
 
 bool decode_piece_list(std::string_view text,std::vector<Piece::Type>& pieces){
@@ -105,9 +99,11 @@ bool decode_garbage(std::string_view text,int visibleHeight,std::vector<RemoteGa
 } // namespace
 
 std::uint64_t board_state_fingerprint(std::string_view state) {
-    const auto fields=split_sections(state);
+    auto fields=split_sections(state);
+    if(fields.size()>=13 && fields[fields.size()-3]=="clock-v1") fields.resize(fields.size()-3);
     if (fields.empty()) return 0;
     auto core=fields.size();
+    if (core>=12 && fields[core-2]=="visibility-v1") core-=2;
     if (core>=15 && fields[core-5]=="spawn-v1") core-=5;
     if (core>=12 && fields[core-2]=="hold-v1") core-=2;
     const bool placement=core==17;
@@ -120,6 +116,12 @@ std::uint64_t board_state_fingerprint(std::string_view state) {
     return hash;
 }
 
+RemoteClockSample capture_player_clock(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player) {
+    return {std::max(0.0,player.timing.completedGameTime.value_or(
+        Runtime::elapsed_game_time(context.session,context.now())*context.config.timeMultiplier).seconds()),
+        context.uses_piece_time() || context.pause.paused || context.session.turnWaitStarted ||
+            player.timing.completedGameTime ? 0.0 : context.config.timeMultiplier};
+}
 std::string encode_board_state(
     const Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player,
@@ -189,7 +191,17 @@ std::string encode_board_state(
                 std::to_string(pose.rotation.index());
         }
     }
-    return state;
+    if(context.config.field.invisible && !context.config.field.periodicInvisible &&
+        context.config.field.invisibilityDelay>Runtime::Duration{}) {
+        std::ostringstream times;times<<";visibility-v1;"<<std::setprecision(17);
+        for(int r=-Runtime::kDisplayHiddenRows;r<field.visibleHeight;++r)
+            for(int c=0;c<field.width;++c) if(field.field.cell(r,c).is_piece())
+                times<<(r+Runtime::kDisplayHiddenRows)*field.width+c<<':'<<field.field.cell_lock_time(r,c).seconds()<<',';
+        state+=times.str();
+    }
+    const auto clock=capture_player_clock(context,player);
+    std::ostringstream timing;timing<<std::setprecision(17)<<";clock-v1;"<<clock.elapsedSeconds<<';'<<clock.rate;
+    return state+timing.str();
 }
 
 std::optional<BoardStateSnapshot> decode_board_state(std::string_view state,int width,int visibleHeight){
@@ -197,6 +209,16 @@ std::optional<BoardStateSnapshot> decode_board_state(std::string_view state,int 
     if(sections.empty()) return std::nullopt;
 
     BoardStateSnapshot snapshot;
+    if(sections.size()>=13 && sections[sections.size()-3]=="clock-v1") {
+        const auto elapsed=Util::Text::parse_finite_real(sections[sections.size()-2]);
+        const auto rate=Util::Text::parse_finite_real(sections.back());
+        if(!elapsed || *elapsed<0 || *elapsed>1e18 || !rate || *rate<0 || *rate>1e18) return std::nullopt;
+        snapshot.clock=RemoteClockSample{*elapsed,*rate};sections.resize(sections.size()-3);
+    }
+    std::optional<std::string_view> visibility;
+    if(sections.size()>=12 && sections[sections.size()-2]=="visibility-v1") {
+        visibility=sections.back();sections.resize(sections.size()-2);
+    }
     if (sections.size()>=15 && sections[sections.size()-5]=="spawn-v1") {
         const auto begin=sections.size()-4;
         const auto type=Util::Text::parse_integer<int>(sections[begin]);
@@ -221,6 +243,23 @@ std::optional<BoardStateSnapshot> decode_board_state(std::string_view state,int 
         snapshot.holdAvailable=*available!=0;
     }
     if(!decode_board_cells(sections[0],width,visibleHeight,snapshot.field)) return std::nullopt;
+    if(visibility && !visibility->empty()) {
+        const auto entries=Util::Text::split(*visibility,',');
+        const int cellCount=width*(visibleHeight+Runtime::kDisplayHiddenRows);
+        if(entries.empty() || !entries.back().empty() || entries.size()>static_cast<std::size_t>(cellCount+1)) return std::nullopt;
+        std::vector<bool> seen(cellCount,false);
+        for(std::size_t i=0;i+1<entries.size();++i) {
+            const auto split=entries[i].find(':');
+            if(split==std::string_view::npos) return std::nullopt;
+            const auto index=Util::Text::parse_integer<int>(entries[i].substr(0,split));
+            const auto time=Util::Text::parse_finite_real(entries[i].substr(split+1));
+            if(!index || *index<0 || *index>=cellCount || seen[*index] || !time || *time<0 || *time>1e18) return std::nullopt;
+            seen[*index]=true;
+            const int row=*index/width-Runtime::kDisplayHiddenRows,col=*index%width;
+            if(!snapshot.field.cell(row,col).is_piece()) return std::nullopt;
+            snapshot.field.mark_cell_lock_time(row,col,Runtime::Duration::from_seconds(*time));
+        }
+    }
     if(!decode_garbage(sections[1],visibleHeight,snapshot.garbage)) return std::nullopt;
     std::vector<Piece::Type> wirePreview;
     if(!decode_piece_list(sections[2],wirePreview)||wirePreview.empty()) return std::nullopt;

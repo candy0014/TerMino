@@ -4,6 +4,7 @@
 #include "tetr/engine/piece_queue.h"
 #include "next_preview_presentation.h"
 #include "tetr/runtime/game_context.h"
+#include "tetr/runtime/construction.h"
 #include "tetr/network/board_state_codec.h"
 #include "tetr/network/multiplayer_channel.h"
 #include "tetr/rules/game_completion.h"
@@ -41,17 +42,16 @@ double test_seconds_limit() {
 }
 
 namespace Engine {
-static bool racing_goal_reached(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player) {
-    if(context.config.mode.mode!=Runtime::GameMode::Racing) return false;
-    if(context.config.initialMap && context.config.mode.mapGoal!=Runtime::MapGoal::Disabled)
-        return Rules::racing_map_goal_reached(context.config.mode.mapGoal,player.gameplay.playfield.field.remaining_initial_cells(),player.gameplay.scoring.mapAllClearReached);
-    const auto& scoring=player.gameplay.scoring;
-    return Rules::racing_goal_reached(context.config.mode.mode,context.config.garbage.mode,scoring.totalLines,scoring.totalGarbageLines,context.config.mode.racingDistance);
+static bool goal_reached(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player) {
+    const auto elapsed=context.config.mode.replayMode ? Replay::playback_game_elapsed(context,context.now()) :
+        Runtime::elapsed_game_time(context.session,context.now());
+    return Runtime::construction_map_matches(context.config,player.gameplay.playfield.field) || Rules::goal_reached(context.config,player.gameplay.scoring,
+        player.gameplay.playfield.field.remaining_initial_cells(),elapsed);
 }
 
 static bool should_show_multiplayer_round_message(
     const Runtime::GameContext& context) {
-    return context.config.mode.mode != Runtime::GameMode::LocalVersus;
+    return context.config.mode.mode != Runtime::GameMode::LocalVersus && !context.session.roomScene.enabled;
 }
 
 static void show_multiplayer_round_message(Runtime::GameContext& context,Runtime::PlayerSessionState& player,const char* headline){
@@ -87,12 +87,12 @@ GameLoopExit run_piece_loop(Runtime::GameContext& context,Runtime::PlayerSession
     bool holdContinuation=false;
     for(;;){
         poll_undo_key(context);
-        if(racing_goal_reached(context,player)) return GameLoopExit::GoalReached;
+        if(goal_reached(context,player)) return GameLoopExit::GoalReached;
         if(finite_map_sequence(context) && player.pieces.bag.empty()) {
             if(!hold.piece.valid()) {
                 if(!context.config.mode.replayMode && context.config.garbage.mode==Runtime::GarbageMode::Multiplayer)
                     Network::send_round_signal(context,Network::OutgoingRoundSignal::LeaveRound);
-                return context.config.mode.mode==Runtime::GameMode::Racing ? GameLoopExit::Dead : GameLoopExit::GoalReached;
+                return Runtime::active_goal(context.config)!=Runtime::GameGoal::None ? GameLoopExit::Dead : GameLoopExit::GoalReached;
             }
             Render::draw_board_hold(context,player,Render::PieceDrawMode::Erase);
             prepend_piece(player,hold.piece);
@@ -121,12 +121,12 @@ GameLoopExit run_piece_loop(Runtime::GameContext& context,Runtime::PlayerSession
 
         if(result==Rules::PlayResult::Dead){
             capture_undo_snapshot(context);
-            if(!context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer&&should_show_multiplayer_round_message(context)) show_multiplayer_round_message(context,player,"You lost this game!");
+            if(!context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer&&should_show_multiplayer_round_message(context)) show_multiplayer_round_message(context,player,"LOSE");
             return GameLoopExit::Dead;
         }
         if(result==Rules::PlayResult::OpenSettings) return GameLoopExit::OpenSettings;
         if(result==Rules::PlayResult::OpponentLeft){ if(should_show_multiplayer_round_message(context)) show_multiplayer_round_message(context,player,"Your opponent has left the game!"); return GameLoopExit::OpponentLeft; }
-        if(result==Rules::PlayResult::Won){ if(should_show_multiplayer_round_message(context)) show_multiplayer_round_message(context,player,"You won this game!"); return GameLoopExit::Won; }
+        if(result==Rules::PlayResult::Won){ if(should_show_multiplayer_round_message(context)) show_multiplayer_round_message(context,player,"WIN"); return GameLoopExit::Won; }
         if(result==Rules::PlayResult::Retry) return GameLoopExit::Retry;
 
         if(result==Rules::PlayResult::Hold){
@@ -142,13 +142,11 @@ GameLoopExit run_piece_loop(Runtime::GameContext& context,Runtime::PlayerSession
             capture_undo_snapshot(context);
         }
 
-        if(racing_goal_reached(context,player))
+        if(goal_reached(context,player))
             return GameLoopExit::GoalReached;
         const Runtime::Duration elapsed=context.config.mode.replayMode
             ? Replay::playback_elapsed(context,context.now())
             : Runtime::elapsed_game_time(context.session,context.now());
-        if(!finite_map_sequence(context) && Rules::blitz_goal_reached(context.config.mode.mode,elapsed,context.config.mode.blitzTime))
-            return GameLoopExit::GoalReached;
         if (!context.config.mode.replayMode &&
             ((pieceLimit > 0 && scoring.placedBlocks >= pieceLimit) ||
              (garbageLimit > 0 && scoring.totalGarbageLines >= garbageLimit) ||

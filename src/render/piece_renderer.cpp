@@ -10,6 +10,11 @@
 #include <iostream>
 
 namespace Render {
+bool active_piece_visible(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player) {
+    const auto rule=context.config.challengeRules;
+    if(rule==Runtime::ChallengeRules::Blind || rule==Runtime::ChallengeRules::Audio)return false;
+    return rule!=Runtime::ChallengeRules::Instinct || board_elapsed_seconds(context,player)<player.presentation.activePieceBorn.seconds()+.2;
+}
 PieceDrawMode hold_draw_mode(const Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player, int additionalUses) {
     const auto& hold=player.gameplay.hold;
@@ -23,14 +28,21 @@ void draw_block(const Runtime::GameContext& context,const Piece::Definition& pie
     if(mode==PieceDrawMode::Normal) set_cell_color(piece.color_id(),context.config.display.obscuredColors);
     else set_ui_color(ColorRole::Ghost,context.config.display.obscuredColors);
     for(const auto& det:piece.cells(pose.rotation)){
-        move_to(context,player,pose.position.row+det[0],pose.position.col+det[1]);
-        draw_square(context.config.display.squareStyle,mode==PieceDrawMode::Erase?SquareFill::Empty:SquareFill::Filled);
+        const int row=pose.position.row+det[0],column=pose.position.col+det[1];
+        if(mode==PieceDrawMode::Erase)draw_board_cell(context,player,row,column,player.gameplay.playfield.field.cell(row,column));
+        else {
+            move_to(context,player,row,column);
+            if(board_hint_cell(context,player,row,column))draw_spawn_square(context.config.display.squareStyle,
+                mode==PieceDrawMode::Normal?cell_colors(piece.color_id(),context.config.display.obscuredColors):ui_colors(ColorRole::Ghost,context.config.display.obscuredColors));
+            else draw_square(context.config.display.squareStyle);
+        }
     }
     move_to(context,player,context.config.field.height+2,0);
 }
 
 void draw_piece(const Runtime::GameContext& context,Piece::Definition& piece,Runtime::PlayerSessionState& player,Piece::Pose pose,Runtime::Playfield& field,PieceDrawMode mode){
     OutputGuard output(context);
+    if(mode!=PieceDrawMode::Erase && !active_piece_visible(context,player))mode=PieceDrawMode::Erase;
     Piece::Pose ghost=pose;
     if(context.config.field.ghost)
         while(piece.can_place(ghost.translated(1,0),field)) ++ghost.position.row;
@@ -51,6 +63,11 @@ void draw_piece(const Runtime::GameContext& context,Piece::Definition& piece,Run
 void draw_piece_transition(const Runtime::GameContext& context, const Piece::Definition& piece,
     Runtime::PlayerSessionState& player, Piece::Pose before, Piece::Pose after,
     const Runtime::Playfield& field) {
+    if(!active_piece_visible(context,player)) {
+        auto mutablePiece=piece;auto& mutableField=player.gameplay.playfield.field;
+        if(player.presentation.paintedActivePose)draw_piece(context,mutablePiece,player,*player.presentation.paintedActivePose,mutableField,PieceDrawMode::Erase);
+        return;
+    }
     OutputGuard output(context);
     struct Cell { int row; int col; PieceDrawMode mode; };
     const auto find = [](auto& cells, int row, int col) {
@@ -80,8 +97,7 @@ void draw_piece_transition(const Runtime::GameContext& context, const Piece::Def
     const auto oldCells = cellsAt(before), newCells = cellsAt(after);
     for (const auto& cell : oldCells) {
         if (find(newCells, cell.row, cell.col) != newCells.end()) continue;
-        move_to(context, player, cell.row, cell.col);
-        draw_square(context.config.display.squareStyle, SquareFill::Empty);
+        draw_board_cell(context,player,cell.row,cell.col,field.cell(cell.row,cell.col));
     }
     PieceDrawMode color = PieceDrawMode::Erase;
     for (const auto& cell : newCells) {
@@ -93,7 +109,9 @@ void draw_piece_transition(const Runtime::GameContext& context, const Piece::Def
             color = cell.mode;
         }
         move_to(context, player, cell.row, cell.col);
-        draw_square(context.config.display.squareStyle);
+        if(board_hint_cell(context,player,cell.row,cell.col))draw_spawn_square(context.config.display.squareStyle,
+            cell.mode==PieceDrawMode::Normal?cell_colors(piece.color_id(),context.config.display.obscuredColors):ui_colors(ColorRole::Ghost,context.config.display.obscuredColors));
+        else draw_square(context.config.display.squareStyle);
     }
     move_to(context, player, context.config.field.height + 2, 0);
     player.presentation.paintedActivePose=after;

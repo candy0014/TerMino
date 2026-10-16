@@ -28,7 +28,7 @@ void present_previous_all_spin_clear(
     }
 
     const auto& previous = *qp.lastOperation;
-    Render::move_to(context, player, 4 + player.presentation.hold_panel_height(), -7, 1);
+    Render::move_to(context, player, 2 + Render::board_info_top_row(player), -7, 1);
     Render::set_ui_color(
         context.config.display.obscuredColors ? Render::ColorRole::Ghost : Render::ColorRole::Text,
         context.config.display.obscuredColors);
@@ -72,7 +72,7 @@ void present_extended_all_spin_history_impl(
     const int operationCount = static_cast<int>(operations.size());
     static constexpr char names[2][16] = {"IJLOSTZ-", "ijlostz-"};
     for (int row = 0; row < 3; ++row) {
-        Render::move_to(context, player, row + 12, -7, 0);
+        Render::move_to(context, player, Render::board_info_top_row(player) + 3 + row, -7, 0);
         for (int index = row * 4; index < (row + 1) * 4; ++index) {
             if (index < operationCount) {
                 const auto& signature = operations[index];

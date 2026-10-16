@@ -8,13 +8,14 @@
 #include <algorithm>
 #include <numeric>
 #include <stdexcept>
+#include <limits>
 
 namespace Engine {
 
 Runtime::PieceQueueState& piece_queue(Runtime::PlayerSessionState& player){ return player.pieces; }
 const Runtime::PieceQueueState& piece_queue(const Runtime::PlayerSessionState& player){ return player.pieces; }
 bool finite_map_sequence(const Runtime::GameContext& context) {
-    return context.config.initialMap && context.config.initialMap->generator==Runtime::MapGenerator::CustomSequence;
+    return context.config.challengeRules!=Runtime::ChallengeRules::ConstructMap && context.config.initialMap && context.config.initialMap->generator==Runtime::MapGenerator::CustomSequence;
 }
 bool hold_replacement_available(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player) {
     return !finite_map_sequence(context) || player.pieces.bag.size()>1 || player.gameplay.hold.piece.valid();
@@ -84,6 +85,40 @@ void add_bag(Runtime::GameContext& context, Runtime::PlayerSessionState& player)
     if(pieces.allowedPieces.empty()) throw std::logic_error("cannot generate a bag from an empty piece set");
     ++pieces.bagCount;
     const auto mode=Runtime::effective_bag_randomizer(context.config);
+    if(mode==Runtime::BagRandomizer::Drought) {
+        std::vector<Piece::Type> bag;
+        for(auto type:pieces.allowedPieces)if(Piece::metadata(type).familyIndex!=0)bag.push_back(type);
+        if(bag.empty())throw std::logic_error("drought requires non-I pieces");
+        Util::deterministic_shuffle(bag,pieces.random);
+        for(std::size_t i=0;i<bag.size();++i)pieces.bag.push_back({bag[i],i==0});
+        return;
+    }
+    if(mode==Runtime::BagRandomizer::Adversarial) {
+        // For each piece find its best simple drop; supply the piece whose
+        // best resulting terrain is worst. Recompute as the board changes.
+        const auto& field=player.gameplay.playfield.field;
+        auto order=pieces.allowedPieces;Util::deterministic_shuffle(order,pieces.random);
+        Piece::Type worst=order.front();double worstValue=-std::numeric_limits<double>::infinity();
+        for(auto type:order) {
+            const auto piece=Piece::get_definition(type);double best=1e12;
+            if(field.initialized())for(int rotation=0;rotation<4;++rotation)for(int col=-4;col<field.width()+4;++col) {
+                auto pose=Piece::spawn_pose(field.width(),type);pose.rotation=Runtime::Rotation(rotation);pose.position.col=col;
+                if(!piece.can_place(pose,field))continue;
+                while(piece.can_place(pose.translated(1,0),field))++pose.position.row;
+                const auto occupied=[&](int y,int x){
+                    if(field.cell(y,x).occupied())return true;
+                    for(const auto& cell:piece.cells(pose.rotation))if(pose.position.row+cell[0]==y && pose.position.col+cell[1]==x)return true;
+                    return false;
+                };
+                int lines=0,holes=0,height=0,bump=0,last=0;
+                for(int y=0;y<field.height();++y){bool full=true;for(int x=0;x<field.width();++x)full=full && occupied(y,x);lines+=full;}
+                for(int x=0;x<field.width();++x){bool covered=false;int column=0;for(int y=0;y<field.height();++y){if(occupied(y,x)){if(!covered)column=field.height()-y;covered=true;}else if(covered)++holes;}height+=column;if(x)bump+=std::abs(column-last);last=column;}
+                best=std::min(best,height+8.0*holes+.5*bump-10.0*lines);
+            }
+            if(best>worstValue){worstValue=best;worst=type;}
+        }
+        pieces.bag.push_back({worst,true});return;
+    }
     if(pieces.tetrioRandom) {
         if(context.config.legacyRandomizerRules) {
             const auto bag=pieces.tetrioRandom->bag();

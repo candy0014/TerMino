@@ -59,6 +59,9 @@ SettingNode make_both_tree(UserConfig::Settings& first,UserConfig::Settings& sec
     auto tree=make_tree(first,true,2,true);
     const auto other=make_tree(second,true,2,true);
     merge(tree,other,second,true,true);
+    for(auto& node:tree.children)if(node.key=="challenges") {
+        node.enabled=false;node.description="Choose Player 1 or Player 2 to edit this item.";
+    }
     for (auto& node:tree.children) if(node.key=="presets") node=make_preset_menu(first,true,&second);
     for(auto& node:tree.children) if(node.key=="maps") {
         const auto secondTree=make_tree(second,true,2);
@@ -90,6 +93,8 @@ std::string hiding_control(const Node& node,const UserConfig::Settings& user) {
         return {};
     }
     const auto& item=*node.item;
+    for(const auto& entry:UserConfig::forced_handling_settings())
+        if(item.id==entry.value) return setting_key(entry.enabled);
     if (item.part==Part::GravitySeconds) return setting_key(Id::GravityInterval,Part::GravityMode);
     if (item.part==Part::CheeseRefill) return setting_key(Id::GarbageMode);
     if (item.id==Id::SimulationPps) return setting_key(Id::SimulationPps,Part::SimulationMode);
@@ -119,6 +124,11 @@ std::string hiding_control(const Node& node,const UserConfig::Settings& user) {
         case Id::SurvivalApm: return setting_key(Id::GarbageMode);
         case Id::BlitzTime:
         case Id::RacingDistance:
+        case Id::GarbageTarget:
+        case Id::PieceTarget:
+        case Id::AttackTarget:
+        case Id::AllClearTarget: return setting_key(Id::Goal);
+        case Id::Goal:
         case Id::MapGoal:
         case Id::GameMode: return setting_key(Id::GameMode,Part::GameMode);
         default: return {};

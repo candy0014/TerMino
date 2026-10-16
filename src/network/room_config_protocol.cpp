@@ -22,14 +22,19 @@ std::string encode_config_message(const ConfigMessage& m) {
         case ConfigMessageKind::Received: tag="!config-received"; break;
         case ConfigMessageKind::Applied: tag="!config-applied"; break;
     }
+    if(m.preview) tag.replace(1,6,"preview");
     auto wire=tag+";"+m.token+";"+std::to_string(m.epoch)+";";
     if (m.kind==ConfigMessageKind::Begin)
-        return wire+std::to_string(m.roomInstance)+";"+std::to_string(m.hostSlot)+";"+(m.policy.forceRules?"1":"0")+";"+(m.policy.forceHandling?"1":"0");
+        return wire+std::to_string(m.roomInstance)+";"+std::to_string(m.hostSlot)+";"+(m.policy.forceRules?"1":"0")+";0";
     if (m.kind==ConfigMessageKind::Part)
         return wire+std::to_string(m.bytes)+";"+std::to_string(m.digest)+";"+std::to_string(m.index)+";"+std::to_string(m.partDigest)+";"+m.data;
     return wire+std::to_string(m.digest)+";"+std::to_string(m.index);
 }
 std::optional<ConfigMessage> decode_config_message(std::string_view wire) {
+    if(wire.rfind("!preview-",0)==0) {
+        auto canonical=std::string(wire);canonical.replace(1,7,"config");
+        auto result=decode_config_message(canonical);if(result) result->preview=true;return result;
+    }
     if (wire.size()>1300) return std::nullopt;
     std::vector<std::string_view> fields;
     std::size_t at=0;
@@ -49,7 +54,7 @@ std::optional<ConfigMessage> decode_config_message(std::string_view wire) {
         const auto instance=Util::Text::parse_integer<std::uint64_t>(fields[3]);
         const auto slot=Util::Text::parse_integer<int>(fields[4]);
         if (!instance || !*instance || !slot || *slot<0 || *slot>255 || (fields[5]!="0" && fields[5]!="1") || (fields[6]!="0" && fields[6]!="1")) return std::nullopt;
-        m.roomInstance=*instance; m.hostSlot=*slot; m.policy={fields[5]=="1",fields[6]=="1"}; return m;
+        m.roomInstance=*instance; m.hostSlot=*slot; m.policy={fields[5]=="1"}; return m;
     }
     if (fields[0]=="!config-part" && fields.size()==8) {
         const auto bytes=Util::Text::parse_integer<std::size_t>(fields[3]);

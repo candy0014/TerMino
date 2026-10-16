@@ -36,6 +36,7 @@ bool apply_initial_movement(Runtime::GameContext& context, MovementInputState& i
     const auto candidate=state.pose.translated(0,Input::horizontal_delta(bindings.action_for(key)));
     if (!canPlace(candidate)) return false;
     state.pose=candidate;
+    ++state.inputActions;
     state.lastRotation=Runtime::RotationRecord::none();
     input.consumeInitialShift(key,now);
     const auto gravity=Runtime::current_gravity_interval(context);

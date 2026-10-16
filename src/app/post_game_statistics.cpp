@@ -1,12 +1,15 @@
+#include "single_player_challenges.h"
 #include "post_game_statistics.h"
 #include "settings_navigation.h"
 #include "ui_text.h"
+#include "ui_style.h"
 #include "tetr/app/post_game_interaction.h"
 #include "tetr/replay/playback_clock.h"
 #include "tetr/replay/session_state.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/runtime/player_session_state.h"
 #include "tetr/runtime/piece.h"
+#include "tetr/util/numeric.h"
 #include "tetr/util/terminal_text.h"
 #include <algorithm>
 #include <cmath>
@@ -34,12 +37,8 @@ std::string decimal(double value,int precision=3) {
     std::ostringstream out;out<<std::fixed<<std::setprecision(precision)<<nonnegative(value);return out.str();
 }
 double rate(double value,double denominator) { return denominator>0 ? value/denominator : 0.; }
-std::string time_text(Runtime::Duration time) {
-    const auto millis=static_cast<unsigned long long>(std::llround(std::min(nonnegative(time.seconds()),6e13)*1000));
-    const auto minutes=millis/60000;
-    std::ostringstream out;out<<std::setfill('0')<<std::setw(2)<<minutes<<':'
-        <<std::fixed<<std::setprecision(3)<<std::setw(6)<<(millis%60000)/1000.;return out.str();
-}
+std::string time_text(Runtime::Duration time) { return Util::format_time(nonnegative(time.seconds())); }
+
 void add(Runtime::ClearCounts& target,const Runtime::ClearCounts& source) {
     for (int i=0;i<3;++i) target[i]+=source[i];
 }
@@ -63,6 +62,7 @@ PostGameStatistics make_post_game_statistics(const Runtime::GameContext& c,
     PostGameStatistics result;const auto times=result_times(c,p);
     const double seconds=nonnegative(times.first.seconds());const auto& s=p.gameplay.scoring;
     const auto metric=[&](const std::string& name,const std::string& value) {result.metrics.emplace_back(name,value);};
+    metric("SCORE",std::to_string(s.score));
     metric("TIME",time_text(times.first));
     if (c.config.simulationPps>0) {
         const bool unknown=c.config.mode.replayMode && c.replay_component() &&
@@ -90,6 +90,12 @@ PostGameStatistics make_post_game_statistics(const Runtime::GameContext& c,
     // chain; the displayed combo/B2B counts the following extensions.
     metric("MAXIMUM COMBO",std::to_string(std::max(0,s.maxCombo-1)));
     metric("MAXIMUM BACK-TO-BACK CHAIN",std::to_string(std::max(0,s.maxB2B-1)));
+    if(c.config.mode.mode!=Runtime::GameMode::LocalVersus && c.config.mode.mode!=Runtime::GameMode::Multiplayer &&
+        c.config.garbage.mode!=Runtime::GarbageMode::Multiplayer) {
+        const auto* replay=c.replay_component();
+        metric("UNDO COUNT",std::to_string(replay?replay->undoCount:0));
+        metric("PAUSE COUNT",std::to_string(replay?replay->pauseCount:0));
+    }
 
     std::map<std::pair<std::string,int>,std::size_t> rows;
     std::set<std::string> usedNames;
@@ -146,9 +152,18 @@ PostGameStatistics make_post_game_statistics(const Runtime::GameContext& c,
 PostGameStatisticsView::PostGameStatisticsView(PostGameStatistics first,std::optional<PostGameStatistics> second) {
     players_.push_back(std::move(first));if (second) players_.push_back(std::move(*second));
 }
-void PostGameStatisticsView::next_page() {
-    page_=static_cast<PostGamePage>((static_cast<int>(page_)+1)%3);invalidate();
+PostGameStatisticsView::PostGameStatisticsView(std::vector<PostGameStatistics> players,std::vector<std::string> names)
+    :players_(std::move(players)),playerNames_(std::move(names)),roomResults_(true),page_(PostGamePage::Summary) {
+    if(players_.empty())players_.push_back({});playerNames_.resize(players_.size());
 }
+void PostGameStatisticsView::next_page() {
+    page_=page_==PostGamePage::Summary ? PostGamePage::Clears : page_==PostGamePage::Clears && !challenges_.empty() ?
+        PostGamePage::Challenges : PostGamePage::Summary;invalidate();
+}
+void PostGameStatisticsView::set_challenges(std::vector<Challenges::Outcome> outcomes,const std::string& notice) {
+    challenges_=std::move(outcomes);challengeNotice_=notice;challengeRow_=challengeScroll_=0;invalidate();
+}
+void PostGameStatisticsView::close() {page_=PostGamePage::Board;notice_.clear();invalidate();}
 void PostGameStatisticsView::select_player(int delta) {
     if (players_.size()<2 || !delta) return;
     player_=(player_+static_cast<int>(players_.size())+delta%static_cast<int>(players_.size()))%players_.size();
@@ -161,6 +176,8 @@ void PostGameStatisticsView::move(int rows,int columns) {
         selectedColumn_=std::clamp(selectedColumn_+columns,0,static_cast<int>(s.lines.size()));
     } else if (page_==PostGamePage::Summary)
         summaryRow_=std::clamp(summaryRow_+rows,0,std::max(0,static_cast<int>(s.metrics.size())-1));
+    else if(page_==PostGamePage::Challenges)
+        challengeRow_=std::clamp(challengeRow_+rows,0,std::max(0,static_cast<int>(challenges_.size())-1));
     dirty_=true;
 }
 bool PostGameStatisticsView::poll(Settings::NavigationInput& first,Settings::NavigationInput* second) {
@@ -168,11 +185,22 @@ bool PostGameStatisticsView::poll(Settings::NavigationInput& first,Settings::Nav
     const auto pressed=[&](K key,bool repeat) {
         const bool a=first.update(key,repeat);const bool b=second && second->update(key,repeat);return a||b;
     };
+    if(!roomResults_) {
+        const bool back=pressed(K::Back,false),backspace=pressed(K::Backspace,false);
+        if((back || backspace) && page_!=PostGamePage::Board) {close();return true;}
+    }
     bool changed=pressed(K::Tab,false);
     if (changed) next_page();
     const bool up=pressed(K::Up,true),down=pressed(K::Down,true),left=pressed(K::Left,true),right=pressed(K::Right,true);
     const bool prev=pressed(K::PageUp,true),next=pressed(K::PageDown,true);
     if (page_!=PostGamePage::Board) {
+        if(roomResults_) {
+            if(left || right)select_player(int(right)-int(left));
+            if(up || down)move(int(down)-int(up),0);
+            if(prev || next)move(page_==PostGamePage::Summary?10*(int(next)-int(prev)):0,
+                page_==PostGamePage::Clears?10*(int(next)-int(prev)):0);
+            return changed || up || down || left || right || prev || next;
+        }
         if (up || down || left || right) {move(int(down)-int(up),int(right)-int(left));changed=true;}
         if (prev || next) {
             if (players_.size()>1) select_player(int(next)-int(prev));
@@ -186,7 +214,7 @@ bool PostGameStatisticsView::reserves(int key) const {
     using N=Settings::NavigationInput;using K=Settings::NavigationKey;
     if (key==N::key_code(K::Tab)) return true;
     if (page_==PostGamePage::Board) return false;
-    for (const auto k:{K::Up,K::Down,K::Left,K::Right,K::PageUp,K::PageDown})
+    for (const auto k:{K::Up,K::Down,K::Left,K::Right,K::PageUp,K::PageDown,K::Back,K::Backspace})
         if (key==N::key_code(k)) return true;
     return false;
 }
@@ -205,36 +233,93 @@ void PostGameStatisticsView::render(Runtime::GameContext& context,const std::str
     if (shownFooter_!=footer) {dirty_=true;shownFooter_=footer;}
     if (!dirty_) return;
     Render::OutputGuard output(context);dirty_=false;
-    canvas_.columnsLimit=size.columns-1;canvas_.rowsLimit=size.rows;canvas_.begin_frame();
+    const auto insets=ui_insets(size);
+    canvas_.columnsLimit=size.columns-insets.right;canvas_.rowsLimit=size.rows;canvas_.begin_frame();
     const bool obscured=context.config.display.obscuredColors;
-    const auto normal=Render::ui_colors(Render::ColorRole::Text,obscured);
-    const auto heading=Render::ui_colors(Render::ColorRole::Accent,obscured);
+    auto style=ui_style(false);
+    if(obscured) {
+        style.heading={{232,232,232}};
+        style.selectedText={{12,12,12}};style.selectedBackground={{220,220,220}};
+    }
+    const Render::TerminalColors normal{style.text,style.background},heading{style.heading,style.background};
     const auto background=normal.background;
-    const TerminalCanvas::Color boxHeading=obscured ? TerminalCanvas::Color{{54,57,62}} : TerminalCanvas::Color{{237,109,0}};
-    const TerminalCanvas::Color selectedBackground=obscured ? TerminalCanvas::Color{{150,150,150}} : heading.foreground;
-    const TerminalCanvas::Color selectedText{{12,12,12}};
-    const int width=std::max(0,size.columns-2),left=size.columns>2 ? 1 : 0;
+    const auto boxHeading=style.heading,selectedBackground=style.selectedBackground,selectedText=style.selectedText;
+    const int left=insets.left,width=std::max(0,size.columns-left-insets.right);
     const auto line=[&](int row,const std::string& text,bool accent=false) {
         canvas_.write(row,left,text,width,accent ? heading.foreground : normal.foreground,background);
     };
     const auto& s=players_[player_];
+    const int footerRows=roomResults_ && size.columns<100?2:1;
+    const int footerTop=size.rows-insets.bottom-footerRows;
+    int bodyTop=insets.top+1;
+    if(roomResults_) {
+        const int shown=std::min({5,static_cast<int>(players_.size()),std::max(1,size.rows/4)});
+        const int first=std::clamp(player_-shown/2,0,std::max(0,static_cast<int>(players_.size())-shown));
+        const int available=std::max(1,width-4),nameWidth=std::clamp(available/3,6,32),valueWidth=std::clamp((available-nameWidth-4)/4,2,9);
+        const int rosterWidth=nameWidth+4*(valueWidth+1),x=left;
+        line(insets.top,UiText::tr(page_==PostGamePage::Summary?"Room result summary":"Room clear statistics")+
+            "  "+std::to_string(player_+1)+"/"+std::to_string(players_.size()),true);
+        canvas_.box(insets.top+2,x,rosterWidth,shown+1,UiText::tr("Player"),boxHeading,normal.foreground,background);
+        canvas_.write(insets.top+3,x+2,pad(UiText::tr("Player"),nameWidth)+" "+pad("PPS",valueWidth)+" "+pad("APM",valueWidth)+" "+
+            pad(UiText::tr(valueWidth<8?"In":"Received"),valueWidth)+" "+pad(UiText::tr(valueWidth<8?"Out":"Sent"),valueWidth),rosterWidth,heading.foreground,background);
+        const auto metric=[](const PostGameStatistics& p,const std::string& label) {
+            for(const auto& entry:p.metrics)if(entry.first==label)return entry.second;return std::string("--");
+        };
+        for(int row=0;row<shown;++row) {
+            const int index=first+row;const bool selected=index==player_;
+            const auto label=std::string(selected?"> ":"  ")+playerNames_[index];
+            const auto text=pad(label,nameWidth)+" "+pad(metric(players_[index],"PIECES PER SECOND"),valueWidth)+" "+
+                pad(metric(players_[index],"ATTACK PER MINUTE"),valueWidth)+" "+pad(metric(players_[index],"TOTAL RECEIVED"),valueWidth)+" "+
+                pad(metric(players_[index],"TOTAL ATTACK"),valueWidth);
+            canvas_.write(insets.top+4+row,x+2,text,rosterWidth,selected?selectedText:normal.foreground,selected?selectedBackground:background);
+        }
+        bodyTop=insets.top+shown+6;
+        if(size.rows<20) {
+            canvas_.begin_frame();
+            canvas_.box(insets.top,left,width-4,1,UiText::tr(page_==PostGamePage::Summary?"Room result summary":"Room clear statistics"),boxHeading,normal.foreground,background);
+            canvas_.write(insets.top+1,left+2,"> "+playerNames_[player_]+"  "+std::to_string(player_+1)+"/"+std::to_string(players_.size()),width-4,selectedText,selectedBackground);
+            bodyTop=insets.top+4;
+        }
+    }
     if (size.rows<10 || size.columns<28) {
         line(size.rows/2,UiText::tr("Enlarge the window to view statistics."));
+    } else if(roomResults_ && !s.metrics.empty() && s.metrics.front().first=="STATUS") {
+        const int panelWidth=std::min(width,56),x=left;
+        canvas_.box(bodyTop,x,panelWidth-4,3,UiText::tr("Statistics"),boxHeading,normal.foreground,background);
+        const auto rows=Util::TerminalText::wrap_words(s.metrics.front().second,panelWidth-4);
+        for(int i=0;i<std::min(3,int(rows.size()));++i)canvas_.write(bodyTop+1+i,x+2,rows[i],panelWidth-4,normal.foreground,background);
+    } else if (page_==PostGamePage::Challenges) {
+        const int span=width<64?2:1;
+        const int rows=std::max(1,(footerTop-bodyTop-5)/span);
+        if(challengeRow_<challengeScroll_)challengeScroll_=challengeRow_;
+        if(challengeRow_>=challengeScroll_+rows)challengeScroll_=challengeRow_-rows+1;
+        challengeScroll_=std::clamp(challengeScroll_,0,std::max(0,static_cast<int>(challenges_.size())-rows));
+        const int count=std::min(rows,static_cast<int>(challenges_.size())-challengeScroll_);
+        canvas_.box(bodyTop,left,width-4,count*span,UiText::tr("Completed challenges"),boxHeading,normal.foreground,background);
+        for(int i=0;i<count;++i) {
+            const int index=i+challengeScroll_;const auto& outcome=challenges_[index];const auto d=Challenges::lookup(outcome.challengeId);if(!d)continue;
+            const auto label=(outcome.player<0?std::string{}:UiText::tr("Player")+" "+std::to_string(outcome.player+1)+" / ")+challenge_name(*d,true),score=challenge_score(*d,outcome.score)+(outcome.personalBest?"  PB":"");
+            const bool selected=index==challengeRow_;const auto fg=selected?selectedText:normal.foreground,bg=selected?selectedBackground:background;
+            const int row=bodyTop+1+i*span,w=width-4;
+            if(span==2){canvas_.write(row,left+2,label,w,fg,bg);canvas_.write(row+1,left+2,"  "+score,w,normal.foreground,background);}
+            else {const int valueWidth=std::min(w/2,static_cast<int>(Util::TerminalText::width(score)));canvas_.write(row,left+2,pad(label,w-valueWidth-1)+" "+score,w,fg,bg);}
+        }
+        if(!challengeNotice_.empty())canvas_.write(bodyTop+count*span+3,left,challengeNotice_,width,normal.foreground,background);
     } else if (page_==PostGamePage::Summary) {
         // Metrics are grouped in model order. Keyboard navigation follows the
         // same top-to-bottom order in every window size.
-        const int panelWidth=std::min(width,56),x=left+(width-panelWidth)/2;
+        const int panelWidth=std::min(width,56),x=left;
         const int span=panelWidth<48 ? 2 : 1;
-        TerminalCanvas panels;panels.columnsLimit=size.columns-1;
+        TerminalCanvas panels;panels.columnsLimit=size.columns-insets.right;
         std::array<std::vector<int>,4> groups;
         for (int i=0;i<static_cast<int>(s.metrics.size());++i) {
             const auto& label=s.metrics[i].first;
-            const int group=label=="TIME" || label=="REAL TIME" || label=="FLOOR" || label.find("ALTITUDE")==0 ? 0
+            const int group=label=="SCORE" || label=="TIME" || label=="REAL TIME" || label=="FLOOR" || label.find("ALTITUDE")==0 ? 0
                 : label.find("ATTACK")==0 || label.find("TOTAL ")==0 || label=="MAXIMUM SPIKE" ? 1
                 : label.find("PIECES")==0 || label.find("LINES")==0 || label=="ALLCLEAR" ? 2 : 3;
             groups[group].push_back(i);
         }
-        const std::array<std::string,4> names{{"TIME & ALTITUDE","ATTACK","PIECES & LINES","CHAINS & HOLD"}};
+        const std::array<std::string,4> names{{"SCORE, TIME & ALTITUDE","ATTACK","PIECES & LINES","CHAINS & HOLD"}};
         int top=0,selectedAt=0;
         for (int group=0;group<4;++group) {
             if (groups[group].empty()) continue;
@@ -246,7 +331,8 @@ void PostGameStatisticsView::render(Runtime::GameContext& context,const std::str
                 if (selected) selectedAt=row;
                 const auto fg=selected ? selectedText : normal.foreground;
                 const auto bg=selected ? selectedBackground : background;
-                const auto shortLabel=label=="MAXIMUM BACK-TO-BACK CHAIN" ? "MAXIMUM B2B CHAIN" : label;
+                const auto shortLabel=label=="SCORE" || label=="UNDO COUNT" || label=="PAUSE COUNT" ? UiText::tr(label) :
+                    label=="MAXIMUM BACK-TO-BACK CHAIN" ? "MAXIMUM B2B CHAIN" : label;
                 const int w=panelWidth-4,valueWidth=std::min(w/2,static_cast<int>(Util::TerminalText::width(value)));
                 if (span==2) {
                     panels.write(row,x+2,shortLabel,w,fg,bg);
@@ -255,18 +341,18 @@ void PostGameStatisticsView::render(Runtime::GameContext& context,const std::str
             }
             top+=height+1;
         }
-        const int visible=size.rows;
+        const int visible=std::max(1,footerTop-bodyTop-1);
         if (selectedAt<summaryScroll_) summaryScroll_=selectedAt;
         if (selectedAt+span>summaryScroll_+visible) summaryScroll_=selectedAt+span-visible;
         summaryScroll_=std::clamp(summaryScroll_,0,std::max(0,top-1-visible));
         for (int i=0;i<visible && i+summaryScroll_<static_cast<int>(panels.pending.size());++i) {
-            if (canvas_.pending.size()<=static_cast<std::size_t>(i)) canvas_.pending.resize(i+1);
-            canvas_.pending[i]=std::move(panels.pending[i+summaryScroll_]);
+            if (canvas_.pending.size()<=static_cast<std::size_t>(bodyTop+i)) canvas_.pending.resize(bodyTop+i+1);
+            canvas_.pending[bodyTop+i]=std::move(panels.pending[i+summaryScroll_]);
         }
     } else {
-        const int top=0;
+        const int top=bodyTop;
         const int rows=static_cast<int>(s.pieces.size()),columns=static_cast<int>(s.lines.size());
-        const int bodyRows=std::max(1,size.rows-top-6);
+        const int bodyRows=std::max(1,footerTop-top-7);
         int nameWidth=5,cellWidth=5;
         for (const auto& name:s.pieces) nameWidth=std::max(nameWidth,static_cast<int>(Util::TerminalText::width(name)));
         nameWidth=std::min({nameWidth,12,std::max(5,width-19)});
@@ -287,17 +373,27 @@ void PostGameStatisticsView::render(Runtime::GameContext& context,const std::str
         for (int col=columnStart_;col<columns && col<columnStart_+visible;++col) shown.push_back(col);
         shown.push_back(columns);
         const int tableWidth=nameWidth+3+static_cast<int>(shown.size())*(cellWidth+3)+1;
-        const int x=left+std::max(0,(width-tableWidth)/2);
+        const int x=left;
+        // Table values must stay readable even for dark piece colors and
+        // obscured gameplay colors. Selection uses a light background.
+        using Color=TerminalCanvas::Color;
+        const Color textColor{{234,234,234}},mutedColor{{166,166,174}},headerColor{{242,183,119}};
+        const Color headerBackground{{39,29,22}},totalBackground{{29,23,18}},border{{174,130,91}};
+        const Color selectionText{{12,12,12}};
+        const Color selectionBackground{{241,188,133}};
         const auto rule=[&](int y,const std::string& l,const std::string& joint,const std::string& r) {
             const auto bar=[](int n) {std::string s;while(n-->0) s+="─";return s;};
             std::string text=l+bar(nameWidth+2);
             for (std::size_t i=0;i<shown.size();++i) text+=joint+bar(cellWidth+2);
-            text+=r;canvas_.write(y,x,text,tableWidth,heading.foreground,background);
+            text+=r;canvas_.write(y,x,text,tableWidth,border,background);
         };
         rule(top,"┌","┬","┐");
         const auto row=[&](int y,int index,bool header=false) {
-            canvas_.write(y,x,"│ "+pad(header ? "PIECE" : index==rows ? "SUM" : s.pieces[index],nameWidth)+" │",nameWidth+4,
-                header || index==rows ? heading.foreground : Render::cell_colors(s.pieceColors[index],obscured).foreground,background);
+            canvas_.write(y,x,"│",1,border,background);
+            canvas_.write(y,x+1," "+pad(header ? "PIECE" : index==rows ? "SUM" : s.pieces[index],nameWidth)+" ",nameWidth+2,
+                header || index==rows ? headerColor : textColor,
+                header ? headerBackground : index==rows ? totalBackground : background);
+            canvas_.write(y,x+nameWidth+3,"│",1,border,background);
             int at=x+nameWidth+4;
             for (const int col:shown) {
                 const Runtime::ClearCounts counts=header ? Runtime::ClearCounts{} : index==rows
@@ -305,10 +401,10 @@ void PostGameStatisticsView::render(Runtime::GameContext& context,const std::str
                 const bool selected=!header && index==selectedRow_ && col==selectedColumn_;
                 const auto text=header ? (col==columns ? "SUM" : std::to_string(s.lines[col])) : counts_text(counts);
                 canvas_.write(y,at," "+pad(text,cellWidth)+" ",cellWidth+2,
-                    selected ? selectedText : header || col==columns || index==rows ? heading.foreground
-                        : counts==Runtime::ClearCounts{} ? Render::ui_colors(Render::ColorRole::Ghost,obscured).foreground : normal.foreground,
-                    selected ? selectedBackground : background);
-                at+=cellWidth+2;canvas_.write(y,at++,"│",1,heading.foreground,background);
+                    selected ? selectionText : header || col==columns || index==rows ? headerColor
+                        : counts==Runtime::ClearCounts{} ? mutedColor : textColor,
+                    selected ? selectionBackground : header ? headerBackground : col==columns || index==rows ? totalBackground : background);
+                at+=cellWidth+2;canvas_.write(y,at++,"│",1,border,background);
             }
         };
         row(top+1,0,true);rule(top+2,"├","┼","┤");
@@ -317,21 +413,26 @@ void PostGameStatisticsView::render(Runtime::GameContext& context,const std::str
         rule(top+3+count,"├","┼","┤");row(top+4+count,rows);
         rule(top+5+count,"└","┴","┘");
     }
+    if(roomResults_) {
+        const auto navigation=UiText::tr("Left/Right Player  Tab Page  Esc Back"),scroll=UiText::tr("Up/Down Scroll  PgUp/PgDn Page");
+        if(footerRows==1)line(footerTop,navigation+"   "+scroll);
+        else {line(footerTop,navigation);line(footerTop+1,scroll);}
+    } else line(footerTop,UiText::tr(players_.size()>1?"Tab Page  Esc Back  Arrows Select  PgUp/PgDn Player":"Tab Page  Esc Back  Arrows Select  PgUp/PgDn Page"));
     if (!notice_.empty()) {
         const int columns=std::min(width,static_cast<int>(Util::TerminalText::width(notice_)));
-        canvas_.write(size.rows-1,left+(width-columns)/2,notice_,columns,normal.foreground,background);
+        canvas_.write(footerTop,left,notice_,columns,normal.foreground,background);
     }
     std::optional<std::pair<int,int>> cursor;
     if (savePrompt_ && size.columns>=6 && size.rows>=6) {
-        const int w=std::min(width,72),x=left+(width-w)/2,top=std::max(0,size.rows-6);
+        const int w=std::min(width,72),x=left,top=std::max(0,size.rows-insets.bottom-6);
         canvas_.box(top,x,w-4,4,UiText::tr("Save Replay"),boxHeading,normal.foreground,background);
         const int content=std::max(1,w-4);
-        canvas_.write(top+1,x+2,UiText::tr("Replay file [replay/")+savePrompt_->defaultName+"]",content,normal.foreground,background);
-        canvas_.write(top+2,x+2,UiText::tr("Enter: default name   Esc / /cancel: cancel"),content,normal.foreground,background);
+        canvas_.write(top+1,x+2,UiText::tr("Replay file [.tetr/replay/")+savePrompt_->defaultName+"]",content,normal.foreground,background);
+        canvas_.write(top+2,x+2,UiText::tr("Enter Default name   Esc Cancel"),content,normal.foreground,background);
         const auto text=UiText::tr("Custom replay name: ")+savePrompt_->value;
         const int caret=static_cast<int>(Util::TerminalText::width(UiText::tr("Custom replay name: ")+savePrompt_->value.substr(0,savePrompt_->caret)));
         const int scroll=std::max(0,caret-content+1);
-        canvas_.write(top+3,x+2,Util::TerminalText::slice(text,scroll,content),content,heading.foreground,background);
+        canvas_.write(top+3,x+2,Util::TerminalText::slice(text,scroll,content),content,selectedText,selectedBackground);
         cursor=std::pair{top+3,x+2+caret-scroll};
     }
     canvas_.present(cursor,obscured);

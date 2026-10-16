@@ -8,12 +8,17 @@ namespace Runtime {
 
 enum class GameMode : int {
     Zen = 0,
+    // Reserved IDs for importing historical profiles and recordings.
     Racing = 1,
     Blitz = 2,
     QuickPlay = 3,
     Multiplayer = 4,
     Replay = 5,
     LocalVersus = 6,
+};
+
+enum class GameGoal : int {
+    None, Time, Lines, Garbage, Pieces, Attack, AllClear, InitialCells
 };
 
 enum class GarbageMode : int {

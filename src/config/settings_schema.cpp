@@ -1,3 +1,4 @@
+#include "tetr/challenges/challenges.h"
 #include "tetr/config/settings_schema.h"
 #include "tetr/config/presets.h"
 
@@ -7,12 +8,47 @@
 #include "tetr/runtime/bag_randomizer.h"
 #include "tetr/compat/legacy_text.h"
 #include "tetr/util/text_codec.h"
+#include "tetr/util/numeric.h"
 
 #include <algorithm>
 #include <stdexcept>
 #include <type_traits>
 
 namespace UserConfig {
+void migrate_legacy_modes(Settings& settings) {
+    const bool racing=settings.gameMode==1 || settings.gameMode==-1;
+    const bool blitz=settings.gameMode==2 || settings.gameMode==-2;
+    if(!racing && !blitz) return;
+    settings.goal=racing ? 2 : 1;
+    if(racing && settings.mapId && settings.mapGoal) settings.goal=settings.mapGoal==1 ? 7 : 6;
+    if(blitz && settings.gameMode==2) settings.gravityProgression=3;
+    settings.gameMode=0;
+}
+const std::vector<ForcedHandlingSetting>& forced_handling_settings() {
+    using Id=SettingId;
+    static const std::vector<ForcedHandlingSetting> entries={
+        {Id::SoftDropFactor,Id::ForceSdf,Id::ForcedSdf}, {Id::Das,Id::ForceDas,Id::ForcedDas},
+        {Id::Arr,Id::ForceArr,Id::ForcedArr}, {Id::Dcd,Id::ForceDcd,Id::ForcedDcd},
+        {Id::PreMove,Id::ForcePreMove,Id::ForcedPreMove},
+        {Id::DasPrecharge,Id::ForceDasPrecharge,Id::ForcedDasPrecharge}};
+    return entries;
+}
+SettingId personal_handling_id(SettingId id) {
+    for (const auto& entry:forced_handling_settings()) if(entry.value==id) return entry.personal;
+    return id;
+}
+Settings effective_handling_settings(const Settings& settings) {
+    auto result=settings;
+    for(const auto& entry:forced_handling_settings()) if(clamped_int(settings,entry.enabled)) {
+        const auto& target=setting_descriptor(entry.personal);
+        const auto& value=setting_descriptor(entry.value);
+        if(const auto member=std::get_if<int Settings::*>(&target.member))
+            result.**member=clamped_int(settings,value.id);
+        else result.*std::get<double Settings::*>(target.member)=clamped_real(settings,value.id);
+        if(entry.personal==SettingId::SoftDropFactor) result.softDropFixed=clamped_int(settings,SettingId::ForcedSdfFixed);
+    }
+    return result;
+}
 QuickPlayModeSnapshot snapshot_quick_play_mods(const Settings& s) {
     return {s.gameMode,{s.qpExpert,s.qpNoHold,s.qpMessy,s.qpGravity,s.qpVolatile,
         s.qpDoubleHole,s.qpInvisible,s.qpAllSpin,s.qpBackfire,s.qpSnakeEyes,
@@ -69,8 +105,14 @@ std::vector<int> sequential_values(std::size_t count) {
 const std::vector<SettingDescriptor>& setting_schema() {
     static const std::vector<SettingDescriptor> schema = {
         INT_SETTING(GameMode, Model, "Model", "Model", gameMode, GameMode, -6, 6, false),
-        INT_SETTING(RacingDistance, Model, "Racing Distance", "Racing Distance", racingDistance, None, 1, 1000000000, false),
-        REAL_SETTING(BlitzTime, Model, "Blitz Time", "Blitz Time", blitzTime, 0.0, 1e18),
+        INT_SETTING(ChallengeRules, Game, "Challenge rules", "Challenge rules", challengeRules, ChallengeRules, 0, 15, false),
+        INT_SETTING(RacingDistance, Model, "Racing Distance", "Line count", racingDistance, None, 1, 1000000000, false),
+        REAL_SETTING(BlitzTime, Model, "Blitz Time", "Time limit", blitzTime, 0.0, 1e18),
+        INT_SETTING(Goal, Model, "Goal", "Goal", goal, Goal, 0, 7, false),
+        INT_SETTING(GarbageTarget, Model, "Garbage Target", "Garbage lines to clear", garbageTarget, None, 1, 1000000000, false),
+        INT_SETTING(PieceTarget, Model, "Piece Target", "Piece count", pieceTarget, None, 1, 1000000000, false),
+        INT_SETTING(AttackTarget, Model, "Attack Target", "Attack count", attackTarget, None, 1, 1000000000, false),
+        INT_SETTING(AllClearTarget, Model, "All Clear Target", "All clear count", allClearTarget, None, 1, 1000000000, false),
         TEXT_SETTING(ReplayPath, Model, "Replay", "Replay", replayPath),
         REAL_SETTING(ReplayTimeMultiplier, Model, "Time Multiplier", "Time Multiplier", replayTimeMultiplier, 0.0, 1e18),
 
@@ -101,6 +143,20 @@ const std::vector<SettingDescriptor>& setting_schema() {
         INT_SETTING(QpFool, QuickPlay, "Fool", "Fool", qpFool, Fool, 0, 4, true),
         INT_SETTING(QpDefaultFloor, QuickPlay, "Default floor", "Default floor", qpDefaultFloor, None, 1, 10, false),
 
+        INT_SETTING(ForceSdf, Game, "Force SDF", "Force SDF", forceSdf, Boolean, 0, 1, true),
+        REAL_SETTING(ForcedSdf, Game, "Forced SDF", "SDF", forcedSdf, 0.0, 1e18),
+        INT_SETTING(ForcedSdfFixed, Game, "Forced SDF Fixed", "SDF Fixed", forcedSdfFixed, Boolean, 0, 1, false),
+        INT_SETTING(ForceDas, Game, "Force DAS", "Force DAS", forceDas, Boolean, 0, 1, true),
+        REAL_SETTING(ForcedDas, Game, "Forced DAS", "DAS", forcedDas, 0.0, 1e18),
+        INT_SETTING(ForceArr, Game, "Force ARR", "Force ARR", forceArr, Boolean, 0, 1, true),
+        REAL_SETTING(ForcedArr, Game, "Forced ARR", "ARR", forcedArr, 0.0, 1e18),
+        INT_SETTING(ForceDcd, Game, "Force DCD", "Force DCD", forceDcd, Boolean, 0, 1, true),
+        REAL_SETTING(ForcedDcd, Game, "Forced DCD", "DCD", forcedDcd, 0.0, 1e18),
+        INT_SETTING(ForcePreMove, Game, "Force Pre-move", "Force Pre-move", forcePreMove, Boolean, 0, 1, true),
+        INT_SETTING(ForcedPreMove, Game, "Forced Pre-move", "Pre-move", forcedPreMove, Boolean, 0, 1, true),
+        INT_SETTING(ForceDasPrecharge, Game, "Force DAS Precharge", "Force DAS Precharge", forceDasPrecharge, Boolean, 0, 1, true),
+        INT_SETTING(ForcedDasPrecharge, Game, "Forced DAS Precharge", "DAS Precharge", forcedDasPrecharge, Boolean, 0, 1, true),
+
         REAL_SETTING_NR(GravityInterval, Handling, "Speed", "Speed", gravityInterval),
         REAL_SETTING(SoftDropFactor, Handling, "SDF", "SDF", softDropFactor, 0.0, 1e18),
         INT_SETTING(SoftDropFixed, Handling, "SDF Fixed", "SDF Fixed", softDropFixed, Boolean, 0, 1, false),
@@ -114,14 +170,18 @@ const std::vector<SettingDescriptor>& setting_schema() {
         INT_SETTING(FieldHeight, Game, "Height", "Height", fieldHeight, None, 2, 100, false),
         INT_SETTING(NextCount, Game, "Num of Next", "Num of Next", nextCount, None, 0, 100, false),
         INT_SETTING(HoldEnabled, Game, "Open Hold", "Open Hold", holdEnabled, Boolean, 0, 1, true),
-        INT_SETTING(FieldInvisible, Game, "Invisible", "Invisible", fieldInvisible, Boolean, 0, 1, true),
+        INT_SETTING(FieldInvisible, Game, "Invisible", "Invisible", fieldInvisible, Invisibility, 0, 2, true),
+        REAL_SETTING(InvisibilityDelay, Game, "Invisibility Delay", "Invisibility delay (seconds)", invisibilityDelay, 0.0, 1e18),
+        REAL_SETTING(InvisibilityInterval, Game, "Invisibility Interval", "Flash interval (seconds)", invisibilityInterval, 0.0, 1e18),
+        REAL_SETTING(InvisibilityDuration, Game, "Invisibility Duration", "Flash duration (seconds)", invisibilityDuration, 0.0, 1e18),
         INT_SETTING(AntiGravity, Game, "Anti Gravity", "Anti Gravity", antiGravity, Boolean, 0, 1, true),
         INT_SETTING(Ghost, Game, "Ghost", "Ghost", ghost, Boolean, 0, 1, true),
         REAL_SETTING(LockDelay, Game, "EPLD", "EPLD", lockDelay, 0.0, 1e18),
         INT_SETTING(LockResetLimit, Game, "Limit of EPLD", "Limit of EPLD", lockResetLimit, None, 0, 1000000000, false),
         INT_SETTING(RotationSystem, Game, "Rotation System", "Rotation System", rotationSystem, RotationSystem, 0, 11, false),
         INT_SETTING(SpinBonuses, Game, "Spin Bonuses", "Spin bonuses", spinBonuses, SpinBonuses, 0, 9, false),
-        INT_SETTING(RandomPieces, Game, "Random", "Random rules", randomPieces, BagRandomizer, 0, 7, false),
+        REAL_SETTING(AttackMultiplier, Game, "Attack Multiplier", "Attack multiplier", attackMultiplier, 0.0, 1000.0),
+        INT_SETTING(RandomPieces, Game, "Random", "Random rules", randomPieces, BagRandomizer, 0, 9, false),
         INT_SETTING(InstantGravity, Game, "20G", "20G", instantGravity, Boolean, 0, 1, true),
         REAL_SETTING(LineClearDelay, Game, "Line Clear Delay", "Line Clear Delay", lineClearDelay, 0.0, 1e18),
         INT_SETTING(InfiniteMovement, Game, "Infinite Movement", "Infinite movement", infiniteMovement, Boolean, 0, 1, true),
@@ -189,7 +249,7 @@ const std::vector<SettingDescriptor>& setting_schema() {
         INT_SETTING(UiLanguage, Others, "UI Language", "Interface language", uiLanguage, Language, 0, 1, false),
         INT_SETTING(ShowSpawnPosition, Others, "Show Spawn Position", "Show spawn position", showSpawnPosition, Boolean, 0, 1, true),
         INT_SETTING(ContinueInputUnfocused, Others, "Continue Input Unfocused", "Continue input when unfocused", continueInputUnfocused, Boolean, 0, 1, true),
-        INT_SETTING(GravityProgression, Game, "Gravity Progression", "Gravity progression", gravityProgression, GravityProgression, 0, 2, true),
+        INT_SETTING(GravityProgression, Game, "Gravity Progression", "Gravity progression", gravityProgression, GravityProgression, 0, 3, true),
         INT_SETTING(GravityLevelLines, Game, "Gravity Level Lines", "Lines per level", gravityLevelLines, None, 1, 1000000, false),
         REAL_SETTING(GravityAcceleration, Game, "Gravity Acceleration", "Acceleration factor", gravityAcceleration, 0.01, 100.0),
         INT_SETTING(MapId, Maps, "Selected", "Selected map", mapId, None, 0, 2147483646, false),
@@ -278,8 +338,9 @@ SettingReference bind_setting(Settings& settings, const SettingDescriptor& descr
 
 bool assign_setting_text(Settings& settings, const SettingDescriptor& descriptor, std::string_view text) {
     if (descriptor.keyBinding || std::holds_alternative<std::monostate>(descriptor.member)) return false;
-    if (descriptor.id == SettingId::Das || descriptor.id == SettingId::Arr ||
-        descriptor.id == SettingId::Dcd || descriptor.id == SettingId::SoftDropFactor) {
+    const auto personalId=personal_handling_id(descriptor.id);
+    if (personalId == SettingId::Das || personalId == SettingId::Arr ||
+        personalId == SettingId::Dcd || personalId == SettingId::SoftDropFactor) {
         const auto trim = [](std::string_view value) {
             const auto first = value.find_first_not_of(" \t\r\n");
             return first == std::string_view::npos ? std::string_view{}
@@ -292,16 +353,20 @@ bool assign_setting_text(Settings& settings, const SettingDescriptor& descriptor
             unit = number.back(); number = trim(number.substr(0,number.size()-1));
         }
         if (!number.empty() && number.front()=='+') number.remove_prefix(1);
-        const auto parsed = Util::Text::parse_finite_real(number);
+        const bool clock=number.find(':')!=std::string_view::npos;
+        if(clock && (unit=='f' || unit=='F')) return false;
+        const auto parsed = clock?Util::parse_time(number):Util::Text::parse_finite_real(number);
         if (!parsed || *parsed < 0) return false;
         const double value = unit=='f' || unit=='F' ? *parsed/60.0 : *parsed;
         if (value > descriptor.range.maximum) return false;
         settings.*std::get<double Settings::*>(descriptor.member) = value;
-        if (descriptor.id == SettingId::SoftDropFactor) settings.softDropFixed = unit != 0;
+        if (descriptor.id == SettingId::SoftDropFactor) settings.softDropFixed = unit != 0 || clock;
+        if (descriptor.id == SettingId::ForcedSdf) settings.forcedSdfFixed = unit != 0 || clock;
         return true;
     }
     if (descriptor.id == SettingId::SimulationPps || descriptor.id == SettingId::TurnPieces ||
-        descriptor.id == SettingId::HitMultiplier || descriptor.id == SettingId::CancellationMultiplier) {
+        descriptor.id == SettingId::HitMultiplier || descriptor.id == SettingId::CancellationMultiplier ||
+        descriptor.id == SettingId::AttackMultiplier) {
         const auto value = Util::Text::parse_finite_real(text);
         if (!value) return false;
         settings.*std::get<double Settings::*>(descriptor.member) = *value;
@@ -332,13 +397,16 @@ ChoiceOptions choice_options(ChoiceKind kind) {
     switch (kind) {
         case ChoiceKind::None:
             break;
+        case ChoiceKind::Goal:
+            options.labels={"None","Time","Lines","Clear garbage","Placed pieces","Attack","All clear","Clear initial cells"};
+            break;
         case ChoiceKind::GameMode:
             options.labels = {
-                "Zen", "Racing", "Blitz", "QuickPlay", "Multiplayer",
+                "Zen", "QuickPlay", "Multiplayer",
                 "Local Versus", "Replay"};
             // Display order is independent from the stable persisted enum
             // values: Replay remains 5 and Local Versus remains 6.
-            options.values = {0, 1, 2, 3, 4, 6, 5};
+            options.values = {0, 3, 4, 6, 5};
             break;
         case ChoiceKind::GarbageMode:
             options.labels = {"None", "Backfire", "Cheese-layer", "Cheese-timer", "Survival"};
@@ -358,6 +426,9 @@ ChoiceOptions choice_options(ChoiceKind kind) {
             break;
         case ChoiceKind::Boolean:
             options.labels = {"OFF", "ON"};
+            break;
+        case ChoiceKind::Invisibility:
+            options.labels = {"OFF", "Delayed invisibility", "Periodic flashing"};
             break;
         case ChoiceKind::MapGoal:
             options.labels={"OFF","Clear map","All clear field"};
@@ -389,6 +460,9 @@ ChoiceOptions choice_options(ChoiceKind kind) {
                 options.values.push_back(static_cast<int>(mode.value));
             }
             break;
+        case ChoiceKind::ChallengeRules:
+            options.labels={"None","Instinct (active piece hidden)","Blind play","Audio play","PC puzzle","PC puzzle series","Stage master","Delayed clear stack","Finesse sprint","Finesse research","49-player Bot royale","99-player Bot royale","Secret grade construction","Checkerboard construction","Map construction","Symmetry construction"};
+            options.values=sequential_values(options.labels.size());break;
         case ChoiceKind::BagRandomizer:
             for(const auto& mode:Runtime::kBagRandomizers) {
                 options.labels.emplace_back(mode.label);
@@ -399,7 +473,7 @@ ChoiceOptions choice_options(ChoiceKind kind) {
             options.labels = {"Fixed attack", "B2B chaining", "None"};
             break;
         case ChoiceKind::GravityProgression:
-            options.labels = {"Fixed", "NES progression", "Marathon progression"};
+            options.labels = {"Fixed", "NES progression", "Marathon progression", "Increasing"};
             break;
     }
     if (!options.labels.empty() && options.values.empty()) options.values = sequential_values(options.labels.size());
@@ -429,6 +503,7 @@ double clamped_real(const Settings& settings, SettingId id) {
 }
 
 void reset_settings(Settings& settings, bool playerTwo) {
+    Challenges::restore_replay(settings);Challenges::restore_adjustment(settings);
     (void)playerTwo; // Bindings are preserved, including Player 2 customizations.
     const bool localVersus=settings.gameMode==static_cast<int>(Runtime::GameMode::LocalVersus);
     const bool multiplayer=settings.gameMode==static_cast<int>(Runtime::GameMode::Multiplayer) ||

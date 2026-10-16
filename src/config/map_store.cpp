@@ -101,9 +101,19 @@ int renumbered_id(int id,const IdChanges& changes) {
     for(const auto& change:changes) if(change.first==id) return change.second;
     return id;
 }
+void select(Settings& settings,const Runtime::MapDefinition* map) {
+    settings.mapId=map ? map->id : 0;
+    settings.mapRotationSystem=-1;
+    settings.mapGoal=map ? static_cast<int>(map->goal) : 0;
+    if(map) {
+        if(map->goal==Runtime::MapGoal::ClearInitial) settings.goal=7;
+        else if(map->goal==Runtime::MapGoal::AllClear) settings.goal=6;
+        if(map->goal==Runtime::MapGoal::AllClear) settings.allClearTarget=1;
+    } else if(settings.goal==7) settings.goal=0;
+}
 void remap_selection(Settings& settings,const IdChanges& changes) {
     const auto id=renumbered_id(settings.mapId,changes);
-    if(settings.mapId && !id) {settings.mapGoal=0;settings.mapRotationSystem=-1;}
+    if(settings.mapId && !id) {settings.mapGoal=0;settings.mapRotationSystem=-1;if(settings.goal==7) settings.goal=0;}
     settings.mapId=id;
     const auto remap=[&](PresetFields& fields) {
         const auto selected=fields.find(SettingId::MapId);
@@ -112,11 +122,20 @@ void remap_selection(Settings& settings,const IdChanges& changes) {
         selected->second=after;
         if(before && !after) {
             if(fields.count(SettingId::MapGoal)) fields[SettingId::MapGoal]=0;
+            if(fields.count(SettingId::Goal) && std::get<int>(fields[SettingId::Goal])==7) fields[SettingId::Goal]=0;
             if(fields.count(SettingId::MapRotationSystem)) fields[SettingId::MapRotationSystem]=-1;
         }
     };
     remap(settings.presets.base);
     for(auto& layer:settings.presets.layers) {remap(layer.reference);remap(layer.values);}
+    if(settings.challengeAdjustment) {
+        remap(settings.challengeAdjustment->before);
+        if(settings.challengeAdjustment->snapshot) {
+            auto snapshot=*settings.challengeAdjustment->snapshot;
+            remap_selection(snapshot,changes);
+            settings.challengeAdjustment->snapshot=std::make_shared<const Settings>(std::move(snapshot));
+        }
+    }
 }
 bool remove(int id,const std::filesystem::path& path,IdChanges* changes) {
     Collection collection;if(!load(collection,path)) return false;

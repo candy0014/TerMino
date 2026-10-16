@@ -1,4 +1,5 @@
 #include "tetr/config/normalization.h"
+#include "tetr/runtime/challenge_puzzles.h"
 
 #include "tetr/config/user_config.h"
 #include "tetr/config/settings_schema.h"
@@ -24,11 +25,23 @@ Runtime::Duration seconds(double value) {
 } // namespace
 
 GameMode selected_game_mode(const UserConfig::Settings& settings) {
-    return Compat::game_mode_from_legacy(std::abs(UserConfig::clamped_int(settings, UserConfig::SettingId::GameMode)));
+    const int mode=std::abs(UserConfig::clamped_int(settings, UserConfig::SettingId::GameMode));
+    return mode==1 || mode==2 ? GameMode::Zen : Compat::game_mode_from_legacy(mode);
 }
 
-RuntimeConfig normalize_user_config(const UserConfig::Settings& user, GameMode selectedMode) {
+RuntimeConfig normalize_user_config(const UserConfig::Settings& personal, GameMode selectedMode) {
+    auto mechanisms=personal;
+    UserConfig::migrate_legacy_modes(mechanisms);
+    // rSB is a mechanism-owned DAS/ARR override, with the same precedence and
+    // recovery as explicit forced handling. Personal handling stays untouched.
+    if(UserConfig::clamped_int(mechanisms,UserConfig::SettingId::QpSnowball)==2) {
+        mechanisms.forceDas=mechanisms.forceArr=1;
+        mechanisms.forcedDas=mechanisms.forcedArr=0;
+    }
+    const auto user=UserConfig::effective_handling_settings(mechanisms);
     RuntimeConfig config;
+    config.challengeRules=selectedMode==GameMode::Zen
+        ? static_cast<ChallengeRules>(UserConfig::clamped_int(user,UserConfig::SettingId::ChallengeRules)) : ChallengeRules::None;
     config.movement = {
         UserConfig::clamped_int(user, UserConfig::SettingId::DisableLeft) != 0,
         UserConfig::clamped_int(user, UserConfig::SettingId::DisableRight) != 0,
@@ -39,11 +52,16 @@ RuntimeConfig normalize_user_config(const UserConfig::Settings& user, GameMode s
         UserConfig::clamped_int(user, UserConfig::SettingId::DisableHardDrop) != 0};
     config.disableUndo = UserConfig::clamped_int(user, UserConfig::SettingId::DisableUndo) != 0;
     config.disablePause = UserConfig::clamped_int(user, UserConfig::SettingId::DisablePause) != 0;
-    config.mode.mode = selectedMode;
+    config.mode.mode = selectedMode==GameMode::Racing || selectedMode==GameMode::Blitz ? GameMode::Zen : selectedMode;
     config.mode.replayMode = false;
     config.mode.fixedBlitzSpeed = user.gameMode == -2;
     config.mode.racingDistance = UserConfig::clamped_int(user, UserConfig::SettingId::RacingDistance);
     config.mode.blitzTime = seconds(UserConfig::clamped_real(user, UserConfig::SettingId::BlitzTime));
+    config.mode.goal=static_cast<GameGoal>(UserConfig::clamped_int(user,UserConfig::SettingId::Goal));
+    config.mode.garbageTarget=UserConfig::clamped_int(user,UserConfig::SettingId::GarbageTarget);
+    config.mode.pieceTarget=UserConfig::clamped_int(user,UserConfig::SettingId::PieceTarget);
+    config.mode.attackTarget=UserConfig::clamped_int(user,UserConfig::SettingId::AttackTarget);
+    config.mode.allClearTarget=UserConfig::clamped_int(user,UserConfig::SettingId::AllClearTarget);
 
     config.handling.gravityInterval = user.gravityInterval < 0
         ? GravityInterval::disabled()
@@ -67,6 +85,10 @@ RuntimeConfig normalize_user_config(const UserConfig::Settings& user, GameMode s
     config.field.nextCount = UserConfig::clamped_int(user, UserConfig::SettingId::NextCount);
     config.field.holdEnabled = UserConfig::clamped_int(user, UserConfig::SettingId::HoldEnabled) != 0;
     config.field.invisible = UserConfig::clamped_int(user, UserConfig::SettingId::FieldInvisible) != 0;
+    config.field.periodicInvisible = UserConfig::clamped_int(user, UserConfig::SettingId::FieldInvisible) == 2;
+    config.field.invisibilityDelay = seconds(UserConfig::clamped_real(user, UserConfig::SettingId::InvisibilityDelay));
+    config.field.invisibilityInterval = seconds(UserConfig::clamped_real(user, UserConfig::SettingId::InvisibilityInterval));
+    config.field.invisibilityDuration = seconds(UserConfig::clamped_real(user, UserConfig::SettingId::InvisibilityDuration));
     config.field.antiGravity = UserConfig::clamped_int(user, UserConfig::SettingId::AntiGravity) != 0;
     config.field.ghost = UserConfig::clamped_int(user, UserConfig::SettingId::Ghost) != 0;
     config.field.lineClearDelay = seconds(UserConfig::clamped_real(user, UserConfig::SettingId::LineClearDelay));
@@ -114,6 +136,7 @@ RuntimeConfig normalize_user_config(const UserConfig::Settings& user, GameMode s
             ? UserConfig::SettingId::CheeseDensity : UserConfig::SettingId::CheeseMessiness);
     config.garbage.attackMultiplier = UserConfig::clamped_real(user, UserConfig::SettingId::HitMultiplier);
     config.garbage.hitMultiplier = config.garbage.attackMultiplier;
+    config.garbage.sendMultiplier = UserConfig::clamped_real(user,UserConfig::SettingId::AttackMultiplier);
     config.garbage.cancelMultiplier = UserConfig::clamped_real(user, UserConfig::SettingId::CancellationMultiplier);
     config.garbage.singleMessiness = UserConfig::clamped_real(user, UserConfig::SettingId::MessinessWithinAttack);
     config.garbage.avoidSameColumn = UserConfig::clamped_int(user, UserConfig::SettingId::AvoidSameColumn) != 0;
@@ -178,7 +201,6 @@ RuntimeConfig normalize_user_config(const UserConfig::Settings& user, GameMode s
             config.garbage.holePattern=GarbageHolePattern::scattered(1);
         config.garbage.singleMessiness = 0.0;
         config.garbage.attackMultiplier = 1.0;
-        config.garbage.sendMultiplier = 1.0;
         config.garbage.avoidSameColumn = false;
         config.garbage.cap = 8;
         config.garbage.survivalApm = 0.0;
@@ -201,7 +223,13 @@ RuntimeConfig normalize_user_config(const UserConfig::Settings& user, GameMode s
         config.handling.gravityInterval = GravityInterval::instant();
         config.handling.epld = seconds(0.4);
     }
-    if (enabled(config.quickPlay.invisible)) config.field.invisible = true;
+    if (enabled(config.quickPlay.invisible)) {
+        config.field.invisible = true;
+        config.field.periodicInvisible = config.garbage.mode==GarbageMode::QuickPlay && !reverse(config.quickPlay.invisible);
+        config.field.invisibilityDelay = {};
+        config.field.invisibilityInterval = seconds(5);
+        config.field.invisibilityDuration = seconds(1);
+    }
     if (enabled(config.quickPlay.doubleHole)) {
         config.garbage.layerHeight = 4;
         config.garbage.cheeseModel = config.garbage.cheeseModel < 0 ? -1 : 1;
@@ -240,10 +268,6 @@ RuntimeConfig normalize_user_config(const UserConfig::Settings& user, GameMode s
         config.field.width = 4;
         config.field.height = 4;
         config.garbage.layerHeight = std::min(config.garbage.layerHeight, 4);
-        if (reverse(config.quickPlay.snowball)) {
-            config.handling.das = Duration{};
-            config.handling.arr = Duration{};
-        }
     }
 
     if (user.instantGravity != 0 ||
@@ -254,6 +278,8 @@ RuntimeConfig normalize_user_config(const UserConfig::Settings& user, GameMode s
 
     config.field.infiniteHold = UserConfig::clamped_int(user, UserConfig::SettingId::InfiniteHold) != 0;
     config.field.holdCount = UserConfig::clamped_int(user, UserConfig::SettingId::HoldCount);
+    if(config.challengeRules==ChallengeRules::PerfectClearPuzzle || config.challengeRules==ChallengeRules::PerfectClearSeries)
+        apply_map_config(config,challenge_puzzle(0));
     return config;
 }
 

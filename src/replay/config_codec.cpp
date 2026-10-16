@@ -57,6 +57,11 @@ double legacy_real(std::string_view value) {
     return Compat::LegacyText::parse_real(value);
 }
 
+Runtime::Duration visibility_duration(std::string_view value,double fallback) {
+    const double seconds=legacy_real(value);
+    return Runtime::Duration::from_seconds(std::isfinite(seconds)?std::clamp(seconds,0.0,1e18):fallback);
+}
+
 #define INT_FIELD(NAME, ENCODE_EXPR, DECODE_STMT) \
     FieldCodec{NAME, \
         [](std::string& output, const Config& config) { append(output, NAME, (ENCODE_EXPR)); }, \
@@ -72,6 +77,7 @@ double legacy_real(std::string_view value) {
 
 const std::vector<FieldCodec>& field_codecs() {
     static const std::vector<FieldCodec> codecs = {
+        INT_FIELD("ChallengeRules",static_cast<int>(config.challengeRules),config.challengeRules=static_cast<Runtime::ChallengeRules>(std::clamp(integer,0,15))),
         FieldCodec{"DisableUndo",
             [](std::string& output, const Config& config) {
                 if (config.disableUndo) append(output, "DisableUndo", 1);
@@ -94,6 +100,16 @@ const std::vector<FieldCodec>& field_codecs() {
         INT_FIELD("flagBlitz", config.mode.fixedBlitzSpeed ? 1 : 0, config.mode.fixedBlitzSpeed = integer != 0),
         INT_FIELD("RacingDistance", config.mode.racingDistance, config.mode.racingDistance = integer),
         REAL_FIELD("BlitzTime", config.mode.blitzTime.seconds(), config.mode.blitzTime = Runtime::Duration::from_seconds(real)),
+        FieldCodec{"Goal",[](std::string& output,const Config& config) {
+            if(config.mode.goal!=Runtime::GameGoal::None) append(output,"Goal",static_cast<int>(config.mode.goal));
+        },[](Config& config,std::string_view value) {config.mode.goal=static_cast<Runtime::GameGoal>(std::clamp(legacy_int(value),0,7));}},
+        INT_FIELD("GarbageTarget",config.mode.garbageTarget,config.mode.garbageTarget=std::clamp(integer,1,1000000000)),
+        INT_FIELD("PieceTarget",config.mode.pieceTarget,config.mode.pieceTarget=std::clamp(integer,1,1000000000)),
+        INT_FIELD("AttackTarget",config.mode.attackTarget,config.mode.attackTarget=std::clamp(integer,1,1000000000)),
+        INT_FIELD("AllClearTarget",config.mode.allClearTarget,config.mode.allClearTarget=std::clamp(integer,1,1000000000)),
+        FieldCodec{"LegacyBlitzScoring",[](std::string& output,const Config& config) {
+            if(config.mode.legacyBlitzScoring) append(output,"LegacyBlitzScoring",1);
+        },[](Config& config,std::string_view value) {config.mode.legacyBlitzScoring=legacy_int(value)!=0;}},
         INT_FIELD("GarbageModel", Compat::to_legacy(config.garbage.mode), config.garbage.mode = Compat::garbage_mode_from_legacy(integer)),
         INT_FIELD("CheeseModel", config.garbage.cheeseModel, config.garbage.cheeseModel = integer),
         INT_FIELD("GarbageShapeVersion", config.garbage.legacyShapeRules ? 0 : 1, config.garbage.legacyShapeRules = integer < 1),
@@ -103,7 +119,12 @@ const std::vector<FieldCodec>& field_codecs() {
         REAL_FIELD("CheeseMessiness", config.garbage.cheeseMessiness, config.garbage.cheeseMessiness = real),
         REAL_FIELD("SingleMessiness", config.garbage.singleMessiness, config.garbage.singleMessiness = real),
         REAL_FIELD("GarbageMultiple", config.garbage.attackMultiplier, config.garbage.attackMultiplier = real),
-        REAL_FIELD("SendGarbageMultiplier", config.garbage.sendMultiplier, config.garbage.sendMultiplier = std::clamp(real,0.0,1000.0)),
+        FieldCodec{"SendGarbageMultiplier",
+            [](std::string& output,const Config& config) { append_precise(output,"SendGarbageMultiplier",config.garbage.sendMultiplier); },
+            [](Config& config,std::string_view value) {
+                const auto real=Util::Text::parse_finite_real(value);
+                config.garbage.sendMultiplier=real ? std::clamp(*real,0.0,1000.0) : 1.0;
+            }},
         FieldCodec{"HitMultiplier",
             [](std::string& output,const Config& config) { append_precise(output,"HitMultiplier",config.garbage.hitMultiplier); },
             [](Config& config,std::string_view value) {
@@ -166,7 +187,7 @@ const std::vector<FieldCodec>& field_codecs() {
                     append(output,"GravityProgression",static_cast<int>(config.handling.gravityProgression));
             },
             [](Config& config,std::string_view value) {
-                config.handling.gravityProgression=static_cast<Runtime::GravityProgression>(std::clamp(legacy_int(value),0,2));
+                config.handling.gravityProgression=static_cast<Runtime::GravityProgression>(std::clamp(legacy_int(value),0,3));
             }},
         FieldCodec{"GravityLevelLines",
             [](std::string& output,const Config& config) {
@@ -206,7 +227,17 @@ const std::vector<FieldCodec>& field_codecs() {
                 if (config.field.holdCount!=1) append(output,"HoldCount",config.field.holdCount);
             },
             [](Config& config, std::string_view value) { config.field.holdCount=std::clamp(legacy_int(value),0,1000000000); }},
-        INT_FIELD("Invisible", config.field.invisible ? 1 : 0, config.field.invisible = integer != 0),
+        INT_FIELD("Invisible", config.field.invisible ? (config.field.periodicInvisible ? 2 : 1) : 0,
+            config.field.invisible = integer != 0; config.field.periodicInvisible = integer == 2),
+        FieldCodec{"InvisibilityDelay",
+            [](std::string& output,const Config& config) { append_precise(output,"InvisibilityDelay",config.field.invisibilityDelay.seconds()); },
+            [](Config& config,std::string_view value) { config.field.invisibilityDelay=visibility_duration(value,0); }},
+        FieldCodec{"InvisibilityInterval",
+            [](std::string& output,const Config& config) { append_precise(output,"InvisibilityInterval",config.field.invisibilityInterval.seconds()); },
+            [](Config& config,std::string_view value) { config.field.invisibilityInterval=visibility_duration(value,5); }},
+        FieldCodec{"InvisibilityDuration",
+            [](std::string& output,const Config& config) { append_precise(output,"InvisibilityDuration",config.field.invisibilityDuration.seconds()); },
+            [](Config& config,std::string_view value) { config.field.invisibilityDuration=visibility_duration(value,1); }},
         INT_FIELD("AntiGravity", config.field.antiGravity ? 1 : 0, config.field.antiGravity = integer != 0),
         INT_FIELD("Ghost", config.field.ghost ? 1 : 0, config.field.ghost = integer != 0),
         REAL_FIELD("EPLD", config.handling.epld.seconds(), config.handling.epld = Runtime::Duration::from_seconds(real)),
@@ -299,8 +330,10 @@ const FieldCodec* find_codec(std::string_view name) {
 } // namespace
 
 std::string encode_config_prefix(const Runtime::RuntimeConfig& config) {
+    auto canonical=config;
+    Runtime::redirect_legacy_mode(canonical);
     std::string result = "{";
-    for (const FieldCodec& codec : field_codecs()) codec.encode(result, config);
+    for (const FieldCodec& codec : field_codecs()) codec.encode(result, canonical);
     return result;
 }
 
@@ -311,10 +344,20 @@ bool decode_config_prefix(std::string_view replay, Runtime::RuntimeConfig& confi
     config.initialMap.reset();
     config.mapRotationSystem=-1;
     config.mode.mapGoal=Runtime::MapGoal::Disabled;
+    config.mode.goal=Runtime::GameGoal::None;
+    config.mode.garbageTarget=40;
+    config.mode.pieceTarget=100;
+    config.mode.attackTarget=100;
+    config.mode.allClearTarget=1;
+    config.mode.legacyBlitzScoring=false;
     config.simulationPps = 0.0;
     config.turnPieces = 0.0;
     config.field.infiniteHold = false;
     config.field.holdCount = 1;
+    config.field.periodicInvisible = false;
+    config.field.invisibilityDelay = {};
+    config.field.invisibilityInterval = Runtime::Duration::from_seconds(5);
+    config.field.invisibilityDuration = Runtime::Duration::from_seconds(1);
     config.movement = {}; // Old recordings permit all movement actions.
     config.disableUndo = false;
     config.disablePause = false;
@@ -361,6 +404,7 @@ bool decode_config_prefix(std::string_view replay, Runtime::RuntimeConfig& confi
     bool hasOpenerPhase = false;
     bool hasLegacyOpenerPhase = false;
     bool hasHitMultiplier = false;
+    bool hasFieldVisibility = false;
 
     std::size_t position = 1;
     while (position < outerEnd) {
@@ -379,6 +423,7 @@ bool decode_config_prefix(std::string_view replay, Runtime::RuntimeConfig& confi
         if (name == "OpenerPhase") hasOpenerPhase = true;
         if (name == "LegacyOpenerPhase") hasLegacyOpenerPhase = true;
         if (name == "HitMultiplier") hasHitMultiplier = true;
+        if (name == "InvisibilityDelay" || name == "InvisibilityInterval" || name == "InvisibilityDuration") hasFieldVisibility = true;
         if (name == "block_seed") {
             const auto seed = Util::Text::parse_integer<unsigned int>(value);
             if (!seed) return false;
@@ -429,6 +474,10 @@ bool decode_config_prefix(std::string_view replay, Runtime::RuntimeConfig& confi
         config.garbage.hitMultiplier=config.garbage.attackMultiplier;
         config.garbage.legacyIncomingRounding=true;
     }
+    Runtime::redirect_legacy_mode(config);
+    if(!hasFieldVisibility && config.field.invisible && config.garbage.mode==Runtime::GarbageMode::QuickPlay &&
+        config.quickPlay.invisible==Runtime::ModifierMode::Enabled)
+        config.field.periodicInvisible=true;
     return position == outerEnd;
 }
 

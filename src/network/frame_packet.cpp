@@ -30,7 +30,7 @@ std::optional<FramePacket> decode_attack_packet(std::string_view text) {
 
 bool is_gameplay_extension(std::string_view text) noexcept {
     for (const auto prefix : {std::string_view("!piece-turn;"),std::string_view("!motion-v1;"),
-                              std::string_view("!snapshot-v1;"),std::string_view("!snapshot-request;")})
+                              std::string_view("!snapshot-v1;"),std::string_view("!snapshot-request;"),std::string_view("!board-v1;")})
         if (text.substr(0,prefix.size())==prefix) return true;
     if (text.size() < 2 || text.front() != '!') return false;
     // Historical board snapshots begin with their first cell, rather than a
@@ -148,17 +148,16 @@ AppliedFramePacket apply_frame_packet(
            state.pendingSentAttacks.front().sequenceId <= packet.sendId) {
         state.pendingSentAttacks.pop_front();
     }
-    while (!state.pendingSentAttacks.empty() && attack) {
+    for(auto it=state.pendingSentAttacks.begin();it!=state.pendingSentAttacks.end() && attack;) {
+        if(packet.multiplayer && it->targetSlot!=packet.sourceSlot) {++it;continue;}
         const int cancelled = std::min(
-            state.pendingSentAttacks.front().attack,
+            it->attack,
             attack);
         attack -= cancelled;
-        state.pendingSentAttacks.front().attack -= cancelled;
-        if (!state.pendingSentAttacks.front().attack) {
-            state.pendingSentAttacks.pop_front();
-        }
+        it->attack-=cancelled;
+        if(!it->attack) it=state.pendingSentAttacks.erase(it);else ++it;
     }
-    state.receiveId = packet.receiveId;
+    if(!packet.multiplayer || packet.receiveId.value()>0) state.receiveId = packet.receiveId;
     result.incomingAttack = attack;
     return result;
 }

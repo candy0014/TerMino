@@ -1,6 +1,8 @@
 #include "tetr/engine/game_terminal_layout.h"
 #include "tetr/engine/replay_playback_controls.h"
 #include "tetr/engine/garbage_service.h"
+#include "tetr/engine/multiplayer_scene.h"
+#include "tetr/network/network_services.h"
 #include "tetr/app/application_state.h"
 #include "tetr/render/board_renderer.h"
 #include "tetr/replay/session_state.h"
@@ -26,7 +28,8 @@ void mass(Layout& value,double left,double top,double width,double height,double
     value.visualY+=(top+height/2)*weight;
     value.weight+=weight;
 }
-Layout layout(Runtime::GameContext& context, Runtime::GameContext* second, bool maximum) {
+Layout layout(Runtime::GameContext& context, Runtime::GameContext* second, bool maximum,
+    Runtime::PlayerSessionState* primary=nullptr,Runtime::PlayerSessionState* peer=nullptr,bool single=false) {
     Layout result;
     const auto append=[&](Runtime::GameContext& owner,Runtime::PlayerSessionState& player) {
         const auto bounds=Render::board_horizontal_extent(owner,player,maximum);
@@ -48,15 +51,16 @@ Layout layout(Runtime::GameContext& context, Runtime::GameContext* second, bool 
         // Keep the field as the main focus. NEXT's repeated colored pieces
         // carry more visual weight than the sparse HOLD/statistics panel.
         mass(result,offset,0,width,height,2);
-        mass(result,offset+left+optional,0,-left-optional,player.presentation.hold_panel_height()+16,0.5);
+        mass(result,offset+left+optional,0,-left-optional,player.presentation.hold_panel_height()+1,0.5);
+        mass(result,offset+left+optional,Render::board_info_top_row(player),-left-optional,15,0.5);
         if (player.gameplay.playfield.nextCount>0)
             mass(result,offset+width+1,0,right-width-1,
                 player.presentation.next_panel_height(player.gameplay.playfield.nextCount),1);
     };
-    append(context,context.session.player);
+    append(context,primary?*primary:context.session.player);
     if (second) append(*second,second->session.player);
-    else if (!context.config.mode.replayMode && context.config.garbage.mode==Runtime::GarbageMode::Multiplayer)
-        append(context,context.session.opponent);
+    else if (!single && !context.config.mode.replayMode && context.config.garbage.mode==Runtime::GarbageMode::Multiplayer)
+        append(context,peer?*peer:context.session.opponent);
     for (const auto& slot:result.slots) {
         if (slot.player!=&slot.context->session.player) continue;
         const auto replay=replay_playback_terminal_size(*slot.context,*slot.player,true,maximum);
@@ -110,6 +114,13 @@ void position(Slot slot,int dx,int dy,Render::TerminalSize size,std::uint64_t re
     p.layoutNextCount=slot.player->gameplay.playfield.nextCount;
     p.terminalLayoutRevision=revision;
 }
+void position_layout(const Layout& value,int dx,int dy,Render::TerminalSize size,std::uint64_t revision) {
+    for(std::size_t index=0;index<value.slots.size();++index) {
+        const auto& slot=value.slots[index];
+        const int top=index==0?dy:aligned_opponent_top(*value.slots.front().player,*slot.player,dy,size.rows);
+        position(slot,dx,top,size,revision);
+    }
+}
 Runtime::GameContext* local_second(Runtime::GameContext& primary) {
     const auto* app=primary.app_component();
     return app && (primary.config.mode.mode==Runtime::GameMode::LocalVersus ||
@@ -118,8 +129,24 @@ Runtime::GameContext* local_second(Runtime::GameContext& primary) {
 }
 }
 
+int aligned_opponent_top(const Runtime::PlayerSessionState& primary,const Runtime::PlayerSessionState& peer,
+    int primaryTop,int terminalRows) {
+    const int desired=primaryTop+Render::board_info_top_row(primary)-Render::board_info_top_row(peer);
+    const auto& field=peer.gameplay.playfield;const auto& p=peer.presentation;
+    const int bottom=std::max({field.visibleHeight+1,Render::board_info_top_row(peer)+14,p.hold_panel_height(),
+        field.nextCount>0?p.next_panel_height(field.nextCount):0});
+    const int highest=terminalRows-bottom-1;
+    if(highest>=0)return std::clamp(desired,0,highest);
+    const int fieldHighest=terminalRows-field.visibleHeight-2;
+    // Extra-tall NEXT/HUD panels must not hide a field that can fit. When
+    // the field itself is too tall, keep its floor and name and crop above.
+    return fieldHighest>=0?std::clamp(desired,0,fieldHighest):fieldHighest;
+}
+
 GameTerminalRequirements game_terminal_requirements(Runtime::GameContext& context,Runtime::GameContext* second) {
-    const auto value=layout(context,second,true);
+    const bool room=context.session.roomScene.enabled || (context.network_component() && context.network_component()->multiplayerRoom &&
+        context.config.mode.mode==Runtime::GameMode::Multiplayer && !context.config.mode.replayMode);
+    const auto value=layout(context,second,true,nullptr,nullptr,room);
     const Render::TerminalSize minimum{value.columns-value.optionalLeft+2,value.coreBottom+2};
     const int fullWidth=static_cast<int>(std::ceil(2*std::max(value.visualX+1,value.columns-value.visualX+1)));
     const int fullHeight=static_cast<int>(std::ceil(2*std::max(value.visualY+Runtime::kDisplayHiddenRows,
@@ -145,20 +172,31 @@ Render::TerminalSize required_game_terminal_size(Runtime::GameContext& context,
 }
 
 void center_game_boards(Runtime::GameContext& context,Render::TerminalSize size,Runtime::GameContext* second) {
+    if(context.session.roomScene.enabled) {position_multiplayer_scene(context,size);return;}
     const auto value=layout(context,second,false);
     auto revision=context.session.player.presentation.terminalLayoutRevision+1;
     if (auto* app=context.app_component()) {
         app->gameTerminalLayout=signature(value,size);
         revision=++app->gameTerminalLayoutRevision;
     }
-    const int dx=horizontal_translation(value,size.columns),dy=vertical_translation(value,size.rows);
-    for (const auto& slot:value.slots) {
-        position(slot,dx,dy,size,revision);
-        slot.player->presentation.terminalPaintRevision=revision;
+    int dx=horizontal_translation(value,size.columns),dy=vertical_translation(value,size.rows);
+    if(value.slots.size()==2) {
+        const auto anchor=multiplayer_left_anchor(context,*value.slots.front().player,size);
+        dy=anchor.row;if(value.columns>size.columns-2)dx=anchor.column-value.slots.front().offset;
     }
+    position_layout(value,dx,dy,size,revision);
+    for(const auto& slot:value.slots)slot.player->presentation.terminalPaintRevision=revision;
 }
 
 bool refresh_game_terminal_layout(Runtime::GameContext& context) {
+    if(context.session.roomScene.enabled) {
+        const auto size=Render::terminal_size();const auto& p=context.session.player.presentation;
+        if(size && (p.terminalColumns!=size->columns || p.terminalRows!=size->rows || p.layoutBoardWidth!=context.session.player.gameplay.playfield.width ||
+            p.layoutBoardHeight!=context.session.player.gameplay.playfield.visibleHeight || p.layoutNextCount!=context.session.player.gameplay.playfield.nextCount)) {
+            position_multiplayer_scene(context,*size);draw_multiplayer_scene(context,true);return true;
+        }
+        return false;
+    }
     if (Render::output_suppressed()) return false;
     Render::OutputGuard output(context);
     const auto size=Render::terminal_size();
@@ -182,11 +220,15 @@ bool refresh_game_terminal_layout(Runtime::GameContext& context) {
         if (app) { app->gameTerminalLayout=sig; ++app->gameTerminalLayoutRevision; }
     }
     if (app) revision=app->gameTerminalLayoutRevision;
-    const int dx=horizontal_translation(value,size->columns),dy=vertical_translation(value,size->rows);
+    int dx=horizontal_translation(value,size->columns),dy=vertical_translation(value,size->rows);
+    if(value.slots.size()==2) {
+        const auto anchor=multiplayer_left_anchor(primary,*value.slots.front().player,*size);
+        dy=anchor.row;if(value.columns>size->columns-2)dx=anchor.column-value.slots.front().offset;
+    }
     // Move both workers' render coordinates atomically under the shared lock.
     // Their next incremental draw cannot paint at the old position; each worker
     // still owns the full redraw of its gameplay state.
-    for (const auto& slot:value.slots) position(slot,dx,dy,*size,revision);
+    position_layout(value,dx,dy,*size,revision);
     for (const auto& slot:value.slots) {
         if (second && slot.context!=&context) continue;
         Render::redraw_player_board(*slot.context,*slot.player);

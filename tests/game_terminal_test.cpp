@@ -3,6 +3,7 @@
 #include "../src/app/settings_model.h"
 #include "tetr/app/application_state.h"
 #include "tetr/app/init.h"
+#include "tetr/app/start_screen_navigation.h"
 #include "tetr/config/user_config.h"
 #include "tetr/engine/replay_playback_controls.h"
 #include "tetr/engine/pause.h"
@@ -81,6 +82,11 @@ void geometry() {
             p.gameplay.playfield.visibleHeight=p.gameplay.playfield.activeHeight=height;
             p.gameplay.playfield.nextCount=next;
             p.gameplay.playfield.holdEnabled=hold;
+            // Each capture represents a fresh terminal, so it has no old
+            // statistics region to erase after changing the map height.
+            p.presentation.messageTopMargin=-1;
+            p.presentation.messageWidths={};
+            p.presentation.messageText={};
             const auto required=App::InitDetail::required_game_terminal_size(a.context);
             Capture capture;
             Render::print_border(a.context,p);
@@ -96,6 +102,9 @@ void geometry() {
             a.input.keyStateProvider=[](int) { return false; };
             Test::TerminalScreen screen;
             screen.feed(capture.output.str());
+            if(!(screen.columns()<required.columns-1 && screen.rows()<required.rows-1))
+                std::cerr<<"geometry width="<<width<<" height="<<height<<" next="<<next<<" hold="<<hold
+                    <<" screen="<<screen.columns()<<","<<screen.rows()<<" required="<<required.columns<<","<<required.rows<<'\n';
             assert(screen.columns()<required.columns-1 && screen.rows()<required.rows-1);
         }
     p.gameplay.playfield.width=4;
@@ -127,12 +136,25 @@ void geometry() {
     assert(App::InitDetail::required_game_terminal_size(a.context).columns>=90+64+12+2);
 }
 
-struct Step {
-    TerminalSize size;
-    std::set<int> first,second;
-    int tap=0;
-};
-
+void information_aligned_duels() {
+    Player a,b;a.context.config.mode.mode=Runtime::GameMode::LocalVersus;
+    a.context.config.garbage.mode=b.context.config.garbage.mode=Runtime::GarbageMode::Multiplayer;
+    auto& own=a.session->player;auto& peer=b.session->player;
+    own.presentation.blockMaxHeight=peer.presentation.blockMaxHeight=2;
+    own.gameplay.playfield.nextCount=peer.gameplay.playfield.nextCount=2;
+    own.gameplay.playfield.visibleHeight=own.gameplay.playfield.activeHeight=20;
+    int fixedTop=-1;
+    for(int height:{12,40,60,100}) {
+        peer.gameplay.playfield.visibleHeight=peer.gameplay.playfield.activeHeight=height;
+        Engine::center_game_boards(a.context,{180,80},&b.context);
+        if(fixedTop<0)fixedTop=own.presentation.topMargin;
+        assert(own.presentation.topMargin==fixedTop && fixedTop>=0 && fixedTop+20<80);
+        if(height<=60) {
+            assert(peer.presentation.topMargin>=0 && peer.presentation.topMargin+height+1<80);
+            assert(fixedTop+Render::board_info_top_row(own)==peer.presentation.topMargin+Render::board_info_top_row(peer));
+        } else assert(peer.presentation.topMargin+height+1==79);
+    }
+}
 void centered_geometry() {
     Player a,b;
     auto& p=a.session->player;
@@ -179,7 +201,8 @@ void centered_geometry() {
         const auto left=Render::board_horizontal_extent(a.context,p,false);
         const auto right=Render::board_horizontal_extent(b.context,b.session->player,false);
         assert(left.left>=1 && right.right<=columns-1 && right.left-left.right==4);
-        assert(p.presentation.topMargin==b.session->player.presentation.topMargin);
+        assert(p.presentation.topMargin+Render::board_info_top_row(p)==
+            b.session->player.presentation.topMargin+Render::board_info_top_row(b.session->player));
         if (columns==300) {
             const int x=p.presentation.margin;
             Engine::center_game_boards(a.context,{302,100},&b.context);
@@ -344,279 +367,188 @@ void native_local_resize() {
     assert(::dup2(saved,STDOUT_FILENO)>=0); ::close(saved); ::close(terminal);
 #endif
 }
-struct ScenarioResult {
-    TerminalCheckResult result=TerminalCheckResult::Ready;
-    bool escaped=false;
-    std::size_t steps=0;
-    std::string text;
-};
-
-ScenarioResult scenario(Player& a, const std::vector<Step>& steps, Player* b=nullptr) {
-    Capture capture;
-    a.session->player.presentation.dynamicLayout=false;
-    if (b) b->session->player.presentation.dynamicLayout=false;
-    std::size_t queries=0,index=0;
-    Input::KeyEventBuffer events;
-    a.input.keyEventSource=&events;
-    a.input.keyStateProvider=[&](int key) { return steps[index].first.count(key)!=0; };
-    if (b) b->input.keyStateProvider=[&](int key) { return steps[index].second.count(key)!=0; };
-    const auto required=Engine::game_terminal_requirements(a.context,b ? &b->context : nullptr);
-    ScenarioResult result;
-    const auto validate_frame=[&] {
-        const auto bytes=capture.output.str();
-        if (bytes.empty()) return;
-        Test::TerminalScreen screen;
-        screen.feed(bytes);
-        assert(screen.columns()<=steps[index].size.columns-1 && screen.rows()<=steps[index].size.rows-1);
-        for (const auto frame:{required.minimum,required.full}) {
-            if (frame.columns<=steps[index].size.columns && frame.rows<=steps[index].size.rows) {
-                const auto corner=screen.at(frame.rows-1,frame.columns-1).glyph;
-                assert(corner=="┘" || corner=="┤" || corner=="┴");
-            }
+void confirmed_clipping() {
+    Player a,b;App::ApplicationState app;a.context.attach_app(app);app.primaryContext=&a.context;
+    a.input.keyStateProvider=[](int){assert(false && "Terminal size must not consume controls");return false;};
+    for(bool room:{false,true})for(int width:{10,40,100})for(int height:{20,100})
+        for(const auto size:{TerminalSize{1,1},TerminalSize{40,16},TerminalSize{120,40}}) {
+            auto& p=a.session->player;p.gameplay.playfield.width=width;p.gameplay.playfield.visibleHeight=p.gameplay.playfield.activeHeight=height;
+            p.gameplay.playfield.field.initialize(width,height);
+            a.session->roomScene.enabled=room;a.session->roomScene.ownSlot=0;a.session->roomScene.selfAlive=true;a.session->roomScene.survivors={0};
+            app.acceptedGameTerminalSize={{size.columns,size.rows}};
+            const auto required=Engine::game_terminal_requirements(a.context);
+            app.acceptedGameTerminalRequirements={{required.full.columns,required.full.rows}};
+            Capture capture;int queries=0;
+            const auto result=App::InitDetail::wait_for_game_terminal(a.context,nullptr,[&]() -> std::optional<TerminalSize>{++queries;return size;});
+            assert(result==TerminalCheckResult::Ready && queries==1 && capture.output.str().empty());
+            assert(p.gameplay.playfield.width==width && p.gameplay.playfield.visibleHeight==height);
+            assert(p.presentation.terminalColumns==size.columns && p.presentation.terminalRows==size.rows);
+            Render::print_border(a.context,p);Render::print_message(a.context,p);Render::print_score(a.context,p);
+            Test::TerminalScreen screen;screen.feed(capture.output.str());assert(screen.columns()<=size.columns && screen.rows()<=size.rows);
+            assert(screen.text().find("请放大终端")==std::string::npos);
         }
-        result.text+=screen.text();
-        capture.output.str("");
-    };
-    const auto query=[&]() -> std::optional<TerminalSize> {
-        if (queries>1) validate_frame();
-        index=queries ? queries-1 : 0;
-        assert(index<steps.size()); // The wait must complete at the expected input boundary.
-        ++queries;
-        if (steps[index].tap) { events.update(steps[index].tap,true); events.update(steps[index].tap,false); }
-        return steps[index].size;
-    };
-    try { result.result=App::InitDetail::wait_for_game_terminal(a.context,b ? &b->context : nullptr,query); }
-    catch (const App::StartScreenRequested&) { result.escaped=true; }
-    validate_frame();
-    result.steps=index+1;
-    assert(!a.session->gameStartTime && !a.replay.playback.started);
-    assert(!a.input.gameplay_input_active() && (!b || !b->input.gameplay_input_active()));
-    a.input.keyEventSource=nullptr;
-    a.input.keyStateProvider=[](int) { return false; };
-    if (b) b->input.keyStateProvider=[](int) { return false; };
-    return result;
-}
-
-void resize_and_controls() {
-    Player a,b;
-    const int retry=a.user.keyCodes[8], settings=a.user.keyCodes[9];
-    const auto required=Engine::game_terminal_requirements(a.context);
-    const TerminalSize narrow{required.minimum.columns-1,required.minimum.rows};
-    assert(scenario(a,{{required.full,{}}}).steps==1);
-    const TerminalSize enlarged{required.full.columns+20,required.full.rows+10};
-    const auto confirmed=scenario(a,{{narrow,{}},{required.full,{}},{enlarged,{}},
-        {enlarged,{}},{enlarged,{retry}},{enlarged,{}}});
-    assert(confirmed.result==TerminalCheckResult::Ready && confirmed.steps==6);
-    assert(confirmed.text.find("最小布局：")!=std::string::npos && confirmed.text.find("完整布局：")!=std::string::npos);
-    assert(confirmed.text.find("├")!=std::string::npos);
-    assert(confirmed.text.find("终端尺寸已足够。")!=std::string::npos);
-    assert(confirmed.text.find("按重开键开始游戏。")!=std::string::npos);
-    const TerminalSize bothWidths{required.full.columns,required.minimum.rows};
-    const auto junctions=scenario(a,{{bothWidths,{}},{bothWidths,{escape}}});
-    assert(junctions.text.find(required.full.columns==required.minimum.columns ? "┤" : "┬")!=std::string::npos);
-    const auto override=scenario(a,{{narrow,{retry}},{narrow,{}},{narrow,{retry}},{narrow,{}}});
-    assert(override.steps==4 && !override.escaped);
-    assert(override.text.find("按重开键仍可直接开始游戏")!=std::string::npos);
-    for (const auto size:{narrow,required.minimum,required.full,enlarged}) {
-        assert(scenario(a,{{narrow,{}},{size,{escape}}}).escaped);
-        assert(scenario(a,{{narrow,{}},{size,{settings}}}).result==TerminalCheckResult::OpenSettings);
-    }
-    a.user.keyCodes[8]=a.user.keyCodes[9]=-1;
-    a.user.additionalKeyCodes[8]={alternateRetry}; a.user.additionalKeyCodes[9]={alternateSettings};
-    Input::refresh_bindings(a.input,a.user.keyCodes,a.user.additionalKeyCodes);
-    const auto tap=scenario(a,{{narrow,{}},{narrow,{}, {},alternateRetry}});
-    assert(tap.steps==2 && tap.text.find("F4")!=std::string::npos && tap.text.find("F5")!=std::string::npos);
-    assert(scenario(a,{{narrow,{}},{narrow,{}, {},escape}}).escaped);
-    for (const auto tiny:{TerminalSize{1,1},TerminalSize{2,2},TerminalSize{5,8},TerminalSize{15,4}})
-        assert(scenario(a,{{tiny,{}},{tiny,{alternateRetry}},{tiny,{}}}).steps==3);
-    b.user.keyCodes=UserConfig::default_player_two_key_codes();
-    Input::refresh_bindings(b.input,b.user.keyCodes);
-    assert(scenario(a,{{narrow,{}},{narrow,{}, {b.user.keyCodes[8]}},{narrow,{}}},&b).steps==3);
-    const auto localFull=Engine::game_terminal_requirements(a.context,&b.context).full;
-    assert(scenario(a,{{narrow,{}},{localFull,{}},{localFull,{}},
-        {localFull,{}, {b.user.keyCodes[8]}},{localFull,{}}},&b).steps==5);
-    App::UiText::set_language(App::UiText::Language::English);
-    const auto english=scenario(a,{{narrow,{}},{required.full,{}},{enlarged,{}},
-        {enlarged,{}, {},alternateRetry}});
-    assert(english.steps==4);
-    assert(english.text.find("Minimum layout:")!=std::string::npos);
-    assert(english.text.find("Terminal size is sufficient.")!=std::string::npos);
-    assert(english.text.find("Press the restart key to start")!=std::string::npos); // The prompt can wrap.
-    App::UiText::set_language(App::UiText::Language::Chinese);
-    a.session->player.presentation.dynamicLayout=false;
+    a.session->roomScene.enabled=false;
     Capture capture;
-    int queries=0;
-    assert(App::InitDetail::wait_for_game_terminal(a.context,nullptr,[&]() -> std::optional<TerminalSize> {
-        ++queries; return std::nullopt;
-    })==TerminalCheckResult::Ready && queries==1 && capture.output.str().empty());
+    app.acceptedGameTerminalSize={{30,12}};
+    const auto required=Engine::game_terminal_requirements(a.context,&b.context);
+    app.acceptedGameTerminalRequirements={{required.full.columns,required.full.rows}};
+    assert(App::InitDetail::wait_for_game_terminal(a.context,&b.context,[]()->std::optional<TerminalSize>{return TerminalSize{30,12};})==TerminalCheckResult::Ready);
+    assert(capture.output.str().empty());
+    assert(App::InitDetail::wait_for_game_terminal(a.context,nullptr,[]()->std::optional<TerminalSize>{return {};})==TerminalCheckResult::Ready);
     Render::begin_output_suppression();
-    assert(App::InitDetail::wait_for_game_terminal(a.context,nullptr,[&]() -> std::optional<TerminalSize> {
-        assert(false); return std::nullopt;
-    })==TerminalCheckResult::Ready);
+    assert(App::InitDetail::wait_for_game_terminal(a.context,nullptr,[]()->std::optional<TerminalSize>{assert(false);return {};})==TerminalCheckResult::Ready);
     Render::end_output_suppression();
 }
 
-void restart_confirmation_requirements() {
-    Player a,b;
-    App::ApplicationState app;
-    a.context.attach_app(app);
-    auto& field=a.session->player.gameplay.playfield;
-    field.width=14;
-    const auto required=Engine::game_terminal_requirements(a.context).full;
-    const TerminalSize narrow{required.columns-1,required.rows-1};
-    const int retry=a.user.keyCodes[8];
-    const auto confirm=[&](Player* second=nullptr) {
-        const auto result=scenario(a,{{narrow,{}},{narrow,{}, {},retry}},second);
-        assert(result.result==TerminalCheckResult::Ready && result.steps==2);
-        assert(result.text.find("请放大终端")!=std::string::npos);
+void size_confirmation_controls() {
+    Player a;App::ApplicationState app;a.context.attach_app(app);app.primaryContext=&a.context;
+    a.user.additionalKeyCodes[8]={alternateRetry};
+    Input::refresh_bindings(a.input,a.user.keyCodes,a.user.additionalKeyCodes);
+    const auto required=Engine::game_terminal_requirements(a.context);
+    const TerminalSize small{50,20},large{required.full.columns+4,required.full.rows+4};
+    int queries=0;
+    a.input.keyStateProvider=[&](int key) {
+        return key==alternateRetry && (queries<=2 || queries==6 || queries==7);
     };
-    const auto skip=[&] {
-        const auto result=scenario(a,{{narrow,{}}});
-        assert(result.result==TerminalCheckResult::Ready && result.steps==1 && result.text.empty());
-    };
-    confirm();
-    skip(); // Identical window and requirements across restarts.
-
-    field.width+=6;
-    assert(Engine::game_terminal_requirements(a.context).full.columns>required.columns);
-    confirm(); // A wider layout needs a new confirmation without a window resize.
-    skip();
-    field.width-=6;
-    skip(); // Smaller requirements do not prompt, but become the new baseline.
-    field.width+=6;
-    confirm();
-
-    const auto beforeHeight=Engine::game_terminal_requirements(a.context).full;
-    field.visibleHeight=field.activeHeight=60;
-    field.width-=6;
-    const auto taller=Engine::game_terminal_requirements(a.context).full;
-    assert(taller.columns<beforeHeight.columns && taller.rows>beforeHeight.rows);
-    confirm(); // Height growth still prompts when width shrinks.
-    skip();
-    field.visibleHeight=field.activeHeight=20;
-    skip();
-
-    confirm(&b); // Switching to two boards increases the shared requirements.
-    skip();
-    app.observe_terminal_size(narrow.columns+1,narrow.rows);
-    app.observe_terminal_size(narrow.columns,narrow.rows);
-    confirm(); // Resizing away and back still invalidates confirmation.
-
-    field.width=10;
-    const auto ample=Engine::game_terminal_requirements(a.context).full;
-    assert(scenario(a,{{ample,{}}}).text.empty());
-    field.width=14;
-    const auto wider=Engine::game_terminal_requirements(a.context).full;
-    assert(wider.columns>ample.columns);
-    const auto afterAutomatic=scenario(a,{{ample,{}},{ample,{}, {},retry}});
-    assert(afterAutomatic.steps==2 && afterAutomatic.text.find("请放大终端")!=std::string::npos);
-    const auto full=Engine::game_terminal_requirements(a.context).full;
-    assert(scenario(a,{{{full.columns+20,full.rows+20},{}}}).text.empty());
-    field.width+=1;
-    assert(scenario(a,{{{full.columns+20,full.rows+20},{}}}).text.empty());
+    {
+        Capture capture;
+        const auto result=App::InitDetail::wait_for_game_terminal(a.context,nullptr,[&]()->std::optional<TerminalSize>{
+            assert(++queries<12);return queries<4?small:large;
+        });
+        assert(result==TerminalCheckResult::Ready && queries==8);
+        assert(capture.output.str().find("请放大终端")!=std::string::npos);
+        assert(capture.output.str().find("终端尺寸已足够")!=std::string::npos);
+        assert((app.acceptedGameTerminalSize==std::optional<std::array<int,2>>({{large.columns,large.rows}})));
+    }
+    // A sufficient terminal starts directly without reading controls.
+    a.input.keyStateProvider=[](int){assert(false);return false;};
+    {Capture capture;assert(App::InitDetail::wait_for_game_terminal(a.context,nullptr,[&]()->std::optional<TerminalSize>{return large;})==TerminalCheckResult::Ready);assert(capture.output.str().empty());}
+    app.acceptedGameTerminalSize.reset();a.session->player.presentation.dynamicLayout=false;
+    for(bool back:{false,true}) {
+        int frame=0;
+        a.user.additionalKeyCodes[9]={alternateSettings};
+        Input::refresh_bindings(a.input,a.user.keyCodes,a.user.additionalKeyCodes);
+        a.input.keyStateProvider=[&](int key){return frame>=3 && key==(back?escape:alternateSettings);};
+        Capture capture;bool returned=false;
+        try {
+            returned=App::InitDetail::wait_for_game_terminal(a.context,nullptr,[&]()->std::optional<TerminalSize>{assert(++frame<6);return small;})==TerminalCheckResult::OpenSettings;
+            assert(!back && returned);
+        } catch(const App::StartScreenRequested&) {assert(back && app.startScreenRequested);}
+    }
+    // Either local player can confirm with their own retry binding.
+    Player first,second;int frame=0;
+    second.user.keyCodes[8]=alternateRetry;Input::refresh_bindings(second.input,second.user.keyCodes);
+    second.input.keyStateProvider=[&](int key){return key==alternateRetry && frame==3;};
+    Capture capture;
+    assert(App::InitDetail::wait_for_game_terminal(first.context,&second.context,[&]()->std::optional<TerminalSize>{assert(++frame<6);return small;})==TerminalCheckResult::Ready);
+    assert(frame==4);
 }
 
-void native_init_wait() {
+void restart_repaints_information() {
+    for(int goal=0;goal<=6;++goal) {
+        Player a;
+        a.user.goal=goal;
+        a.user.blitzTime=64;
+        for(int round=0;round<2;++round) {
+            Capture capture;
+            a.session->player.gameplay.scoring.score=12345;
+            App::initialize_game(a.context);
+            assert(a.session->player.gameplay.scoring.score==0);
+            Test::TerminalScreen screen;
+            screen.feed(capture.output.str());
+            assert(screen.position_of(goal==4?"0/100 P":"0 P").first>0);
+            assert(screen.position_of(goal==5?"0/100 A":"0 A").first>0);
+            assert(screen.position_of("0.00 PPS").first>0);
+            assert(screen.position_of("0.00 APM").first>0);
+            assert(screen.position_of(goal==1?"01:04.000":"00:00.000").first>0);
+        }
+    }
+}
+
+void native_init_confirms_before_starting() {
 #ifdef __linux__
     Capture capture;
-    const int saved=::dup(STDOUT_FILENO), terminal=::posix_openpt(O_RDWR|O_NOCTTY);
+    const int saved=::dup(STDOUT_FILENO),terminal=::posix_openpt(O_RDWR|O_NOCTTY);
     assert(saved>=0 && terminal>=0 && ::dup2(terminal,STDOUT_FILENO)>=0);
-    winsize size{}; size.ws_col=80; size.ws_row=10;
-    assert(::ioctl(terminal,TIOCSWINSZ,&size)==0);
-    Player a;
-    std::set<int> down;
-    a.input.keyStateProvider=[&](int key) { return down.count(key)!=0; };
-    int phase=0;
-    a.services.clock.waitInterrupt=[&] {
-        const auto output=capture.output.str();
-        if (phase==0 && output.find("请放大终端")!=std::string::npos) {
-            size.ws_col=size.ws_row=200;
-            assert(::ioctl(terminal,TIOCSWINSZ,&size)==0);
-            phase=1;
-        } else if (phase==1 && output.find("终端尺寸已足够。")!=std::string::npos) {
-            assert(!a.session->gameStartTime && !a.replay.playback.started);
-            phase=2;
-        } else if (phase==2) {
-            down={a.user.keyCodes[8]}; phase=3;
-        } else if (phase==3) {
-            down.clear(); phase=4;
-        }
-    };
+    winsize size{};size.ws_col=80;size.ws_row=10;assert(::ioctl(terminal,TIOCSWINSZ,&size)==0);
+    Player a;int waits=0;
+    a.input.keyStateProvider=[&](int key){return key==a.user.keyCodes[8] && waits>0 && waits<3;};
+    a.services.clock.waitInterrupt=[&]{++waits;assert(waits<10);};
     App::initialize_game(a.context);
-    assert(phase==4 && !a.session->gameStartTime);
-    const auto output=capture.output.str();
-    assert(output.find("按重开键仍可直接开始游戏")!=std::string::npos);
-    assert(output.rfind("\x1b[2J")>output.find("按重开键开始游戏。")); // Game drawn after confirmation.
-    assert(::dup2(saved,STDOUT_FILENO)>=0);
-    ::close(saved); ::close(terminal);
+    assert(waits>=3);
+    assert(!a.session->gameStartTime);
+    Test::TerminalScreen screen;screen.feed(capture.output.str());
+    assert(screen.columns()<=80 && screen.rows()<=10);
+    assert(capture.output.str().find("请放大终端")!=std::string::npos);
+    assert(::dup2(saved,STDOUT_FILENO)>=0);::close(saved);::close(terminal);
 #endif
 }
 
-void native_settings_recalculation() {
+void native_room_checks_before_preparation() {
 #ifdef __linux__
     Capture capture;
-    const int saved=::dup(STDOUT_FILENO), terminal=::posix_openpt(O_RDWR|O_NOCTTY);
+    const int saved=::dup(STDOUT_FILENO),terminal=::posix_openpt(O_RDWR|O_NOCTTY);
     assert(saved>=0 && terminal>=0 && ::dup2(terminal,STDOUT_FILENO)>=0);
-    winsize size{}; size.ws_col=80; size.ws_row=10;
-    assert(::ioctl(terminal,TIOCSWINSZ,&size)==0);
-    Player a;
-    App::ApplicationState app;
-    app.primaryContext=&a.context;
-    a.context.attach_app(app);
-    app.settingsCategoryIndex=3;
-    app.settingsMenu.path={"GAME","playfield"};
-    const auto tree=App::Settings::Model::make_tree(a.user,false,0);
-    app.settingsMenu.selectedEntries["root/GAME/playfield"]=tree.children[3].children[0].children[0].key;
-    std::set<int> down;
-    Input::KeyEventBuffer events;
-    a.input.keyEventSource=&events;
-    a.input.keyStateProvider=[&](int key) { return down.count(key)!=0; };
-    int phase=0;
+    winsize size{};size.ws_col=70;size.ws_row=20;assert(::ioctl(terminal,TIOCSWINSZ,&size)==0);
+    Player a;App::ApplicationState app;a.context.attach_app(app);app.primaryContext=&a.context;
+    a.user.gameMode=4;
+    auto& network=a.network;network.initialized=true;network.connection=Network::ConnectionState::Connected;
+    network.serverIp=a.user.serverIp;network.multiplayerRoom=true;network.room={"SIZE-CHECK",true,1,32};
+    network.roomPlayerIndex=0;network.roomInstance=network.roleRoomInstance=1;
+    network.roomOnlineMode=true;network.roomGameMode=4;
+    network.roomMembers={{0,"Host",true}};
+    struct PromptReached {};
     a.services.clock.waitInterrupt=[&] {
-        const auto output=capture.output.str();
-        if (phase==0 && output.find("请放大终端")!=std::string::npos) {
-            down={a.user.keyCodes[9]}; phase=1;
-        } else if (phase==1 && output.find("场地宽度")!=std::string::npos) {
-            a.user.fieldWidth=24;
-            down.clear(); phase=2;
-        } else if (phase==2) {
-            down={a.user.keyCodes[8]}; phase=3;
-        } else if (phase==3) {
-            down.clear(); phase=4;
-        } else if (phase==4 && a.context.config.field.width==24 &&
-            output.rfind("请放大终端")>output.find("场地宽度")) {
-            const auto required=App::InitDetail::required_game_terminal_size(a.context,nullptr,true);
-            assert(output.find("完整布局："+std::to_string(required.columns))!=std::string::npos);
-            size.ws_col=size.ws_row=200;
-            assert(::ioctl(terminal,TIOCSWINSZ,&size)==0);
-            phase=5;
-        } else if (phase==5 && output.find("终端尺寸已足够。")!=std::string::npos) {
-            // Both callbacks may run within one sleep; retain the press edge.
-            events.update(a.user.keyCodes[8],true);
-            down={a.user.keyCodes[8]}; phase=6;
-        } else if (phase==6) {
-            events.update(a.user.keyCodes[8],false);
-            down.clear(); phase=7;
-        }
+        assert(capture.output.str().find("请放大终端")!=std::string::npos);
+        assert(!network.pendingRoomRequest && !network.queuedMatchControl);
+        assert(network.matchPhase==Network::RoomMatchPhase::Idle);
+        throw PromptReached{};
     };
-    App::initialize_game(a.context);
-    assert(phase==7 && a.context.config.field.width==24 && !a.session->gameStartTime);
-    assert(::dup2(saved,STDOUT_FILENO)>=0);
-    ::close(saved); ::close(terminal);
+    bool checked=false;
+    try {App::initialize_game(a.context);} catch(const PromptReached&) {checked=true;}
+    assert(checked);
+    assert(capture.output.str().find("Preparing player configuration")==std::string::npos);
+    assert(::dup2(saved,STDOUT_FILENO)>=0);::close(saved);::close(terminal);
 #endif
 }
+
+}
+
+void positioned_output_batches_console_writes() {
+    Player a;auto& p=a.session->player;
+    p.presentation.dynamicLayout=true;p.presentation.terminalColumns=120;p.presentation.terminalRows=40;
+    struct Counter : std::stringbuf {
+        int writes=0;
+        std::streamsize xsputn(const char* text,std::streamsize size) override {
+            ++writes;return std::stringbuf::xsputn(text,size);
+        }
+    } counter;
+    auto* previous=std::cout.rdbuf(&counter);
+    {
+        Render::OutputGuard output(a.context);
+        for(int col=0;col<4;++col) Render::draw_board_cell(a.context,p,10,col,Runtime::BoardCell::garbage());
+    }
+    std::cout.rdbuf(previous);
+    assert(!counter.str().empty());
+#ifdef _WIN32
+    assert(counter.writes==1);
+#endif
+    std::cerr<<"positioned output writes="<<counter.writes<<" bytes="<<counter.str().size()<<'\n';
 }
 
 int main() {
+    positioned_output_batches_console_writes();
     App::UiText::set_language(App::UiText::Language::Chinese);
     geometry();
     centered_geometry();
+    information_aligned_duels();
     vertical_priorities();
     native_game_resize();
     native_resize_during_live_piece();
     native_local_resize();
-    resize_and_controls();
-    restart_confirmation_requirements();
-    native_init_wait();
-    native_settings_recalculation();
+    confirmed_clipping();
+    size_confirmation_controls();
+    restart_repaints_information();
+    native_init_confirms_before_starting();
+    native_room_checks_before_preparation();
 }

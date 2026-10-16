@@ -8,7 +8,6 @@
 namespace Engine {
 
 bool periodic_event_due(Runtime::TimePoint now, Runtime::TimePoint last, Runtime::Duration interval);
-bool qp_invisible_flash(Runtime::Duration elapsedGameTime) noexcept;
 
 // Preserves the legacy QP one-second gravity acceleration formula. Disabled
 // gravity stays disabled in live play; replay can explicitly request the old

@@ -39,6 +39,11 @@ void settings_and_replays() {
     assert(!r.halfClearEnabled && r.halfClearAttack==0 && r.halfClearCharge==0 && r.garbageSpecialAttack==1);
     auto tree=App::Settings::Model::make_tree(user,false,0);
     const auto& attack=group(group(tree,"GAME"),"attack-rules");
+    assert(find(attack,Id::AttackMultiplier));
+    auto multiplierItem=*find(attack,Id::AttackMultiplier)->item;
+    assert(App::Settings::Model::assign_scalar(multiplierItem,"1.123456789"));
+    assert(Runtime::normalize_user_config(user,Runtime::GameMode::Multiplayer).garbage.sendMultiplier==1.123456789);
+    user.attackMultiplier=1;
     const auto& reward=group(attack,"b2b-reward");
     assert(reward.title=="B2B reward");
     assert(std::none_of(attack.children.begin(),attack.children.end(),[](const Node& node) {
@@ -75,6 +80,7 @@ void settings_and_replays() {
     user.b2bReward=1; user.b2bRewardAmount=3; user.b2bChargeThreshold=9; user.b2bChargeReduction=-2;
     user.perfectClearAttack=17; user.perfectClearCharge=3;
     user.halfClearAttack=7; user.halfClearCharge=2; user.garbageSpecialAttack=4;
+    user.attackMultiplier=1.123456789;
     assert(UserConfig::assign_setting_text(user,Id::B2BChargeReduction,"-3"));
     assert(user.b2bChargeReduction==-3);
     user.persistencePath=(std::filesystem::temp_directory_path()/"termino_attack_rules.ini").string();
@@ -85,10 +91,12 @@ void settings_and_replays() {
     assert(loaded.b2bReward==1 && loaded.b2bRewardAmount==3 && loaded.b2bCharging==0 && loaded.b2bChargeThreshold==9 && loaded.b2bChargeReduction==-3);
     assert(loaded.perfectClearEnabled==0 && loaded.perfectClearAttack==17 && loaded.perfectClearCharge==3);
     assert(loaded.halfClearEnabled==1 && loaded.halfClearAttack==7 && loaded.halfClearCharge==2 && loaded.garbageSpecialAttack==4);
+    assert(loaded.attackMultiplier==user.attackMultiplier);
     config=Runtime::normalize_user_config(loaded,Runtime::GameMode::Zen);
     Runtime::RuntimeConfig decoded;
     Replay::ConfigPrefixResult prefix;
     assert(Replay::decode_config_prefix(Replay::encode_config_prefix(config)+"}",decoded,prefix));
+    assert(decoded.garbage.sendMultiplier==user.attackMultiplier);
     const auto& d=decoded.attackRules;
     assert(!d.legacy && d.b2bReward==Runtime::B2BReward::Chaining && d.b2bRewardAmount==3 && !d.b2bCharging && d.b2bChargeReduction==-3);
     assert(d.b2bChargeThreshold==9 && !d.perfectClearEnabled && d.perfectClearAttack==17 && d.perfectClearCharge==3);
@@ -101,6 +109,7 @@ void settings_and_replays() {
     assert(loaded.b2bReward==0 && loaded.b2bRewardAmount==1 && loaded.b2bCharging==1 && loaded.b2bChargeReduction==0 && loaded.b2bChargeThreshold==4);
     assert(loaded.perfectClearEnabled==1 && loaded.perfectClearAttack==5 && loaded.perfectClearCharge==1);
     assert(loaded.halfClearEnabled==0 && loaded.halfClearAttack==0 && loaded.halfClearCharge==0 && loaded.garbageSpecialAttack==1);
+    assert(loaded.attackMultiplier==1);
     user.b2bReward=1; user.b2bRewardAmount=8; user.spinBonuses=2;
     tree=App::Settings::Model::make_tree(user,false,0);
     const auto& reset=group(group(group(tree,"GAME"),"attack-rules"),"b2b-reward").children.back();
@@ -192,6 +201,8 @@ void chains_and_damage() {
     attack.perfectClear=true;
     const auto scaled=Rules::calculate_attack(attack);
     assert(scaled.attack==4 && scaled.perfectClearAttack==2);
+    attack.clearedGarbageLines=1;attack.garbageMultiplier=0;
+    assert(Rules::calculate_attack(attack).attack==0);
     attack={}; attack.linesCleared=2;
     attack.perfectClear=false; attack.halfClear=true; attack.attackRules.halfClearEnabled=true;
     attack.attackRules.halfClearAttack=7;

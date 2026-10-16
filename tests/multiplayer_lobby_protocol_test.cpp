@@ -125,15 +125,30 @@ void room_codec_validation() {
     RoomResponse expanded{"abc123",0,RoomResult::Joined,{"Big room",true,4,8},3,{},20,{{0,"A",false},{1,"B",true},{2,"C",false},{3,"D",false}}};
     const auto four = decode_room_response(encode_room_response(expanded));
     assert(four && four->members.size() == 4 && four->room.capacity == 8);
-    expanded.hasPolicy=true; expanded.policy={false,true};
+    assert(!decode_room_response("!room-reply;a;0;1;41;1;2;0;1;32;0;32"));
+    expanded.multiplayer=true;expanded.battleLimit=6;expanded.matchPhase=RoomMatchPhase::Preparing;expanded.matchEpoch=11;
+    expanded.members[2].role=PlayerRole::Spectator;expanded.members[3].ready=true;
+    const auto modern=decode_room_response(encode_room_response(expanded));
+    assert(modern && modern->multiplayer && modern->battleLimit==6 && modern->members[2].role==PlayerRole::Spectator && modern->members[3].ready);
+    expanded.multiplayer=false;
+    expanded.hasPolicy=true; expanded.policy={false};
     const auto policy=decode_room_response(encode_room_response(expanded));
-    assert(policy && policy->hasPolicy && !policy->policy.forceRules && policy->policy.forceHandling);
+    assert(policy && policy->hasPolicy && !policy->policy.forceRules);
     RoomRequest transfer{"abc123",43,RoomOperation::TransferHost,"",true,3};
     const auto target=decode_room_request(encode_room_request(transfer));
     assert(target && target->operation==RoomOperation::TransferHost && target->targetSlot==3);
-    transfer.operation=RoomOperation::SetPolicy; transfer.policy={true,true};
+    transfer.operation=RoomOperation::SetPolicy; transfer.policy={true};
     const auto changed=decode_room_request(encode_room_request(transfer));
-    assert(changed && changed->policy.forceRules && changed->policy.forceHandling);
+    assert(changed && changed->policy.forceRules);
+    transfer.operation=RoomOperation::SetMemberRole;transfer.name="玩家; A";
+    for(auto role:{PlayerRole::Battle,PlayerRole::Spectator,PlayerRole::Offline}) {
+        transfer.memberRole=role;
+        const auto managed=decode_room_request(encode_room_request(transfer));
+        assert(managed && managed->operation==RoomOperation::SetMemberRole && managed->targetSlot==3 &&
+            managed->name==transfer.name && managed->memberRole==role);
+    }
+    for(const auto* wire:{"!room;abc;1;13;;1;round-v1;3;3;0","!room;abc;1;13;;1;round-v1;3;-1;0","!room;abc;1;13;;1;round-v1;3;2x;0"})
+        assert(!decode_room_request(wire));
     const auto username = decode_username_update(encode_username_update({"abc123","玩家; A",12}));
     assert(username && username->username == "玩家; A" && username->revision == 12);
     assert(!decode_username_update("!username;abc;1B"));

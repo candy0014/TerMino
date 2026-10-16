@@ -6,8 +6,8 @@
 
 namespace Render {
 void TerminalViewportBuffer::move(int row,int column) {
-    // A positioned update or filename prompt can span an OS resize.
-    if (const auto current=terminal_size()) size_=*current;
+    // OutputGuard captures the size once for this update. Querying the
+    // Windows console for every cursor move adds synchronous console calls.
     row_=row; column_=column; lastVisible_=false;
     // Visible cursor-only updates matter during replay filename editing.
     if (row>=0 && row<size_.rows && column>=0 && column<size_.columns) {

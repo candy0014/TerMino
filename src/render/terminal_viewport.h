@@ -3,6 +3,7 @@
 #include "tetr/render/terminal_renderer.h"
 #include <array>
 #include <streambuf>
+#include <sstream>
 #include <string>
 
 namespace Render {
@@ -30,8 +31,14 @@ private:
 };
 struct TerminalViewportState {
     std::streambuf* previous;
+    std::unique_ptr<std::stringbuf> pending;
     TerminalViewportBuffer buffer;
-    TerminalViewportState(std::streambuf* target,TerminalSize size) : previous(target),buffer(target,size) {}
+    TerminalViewportState(std::streambuf* target,TerminalSize size,bool batch=false)
+        : previous(target),pending(batch?std::make_unique<std::stringbuf>():nullptr),buffer(pending?pending.get():target,size) {}
+    void commit() {
+        buffer.pubsync();
+        if(pending) {const auto text=pending->str();previous->sputn(text.data(),text.size());previous->pubsync();}
+    }
 };
 }
 #endif

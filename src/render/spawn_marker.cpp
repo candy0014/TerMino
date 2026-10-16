@@ -4,6 +4,7 @@
 #include "tetr/runtime/game_context.h"
 #include "tetr/runtime/player_session_state.h"
 #include "tetr/runtime/piece.h"
+#include "tetr/runtime/construction.h"
 
 #include <algorithm>
 #include <iostream>
@@ -28,12 +29,15 @@ bool spawn_marker_cell(const Runtime::GameContext& context,const Runtime::Player
     return context.config.display.showSpawnPosition && player.gameplay.playfield.nextCount>0 &&
         !player.pieces.nextPreview.empty() && contains(player.presentation.spawnMarkerCells,row,column);
 }
+bool board_hint_cell(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player,int row,int column) {
+    return spawn_marker_cell(context,player,row,column) || Runtime::construction_cell(context.config,player.gameplay.playfield.field,row,column);
+}
 
 void draw_empty_board_cell(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player,
     int row,int column) {
     OutputGuard output(context);
     move_to(context,player,row,column);
-    if (spawn_marker_cell(context,player,row,column)) {
+    if (board_hint_cell(context,player,row,column)) {
         set_rgb(64,68,74);
         std::cout<<(context.config.display.squareStyle==0 ? " ." : ". ");
     } else {
@@ -77,7 +81,7 @@ void refresh_spawn_marker(const Runtime::GameContext& context,Runtime::PlayerSes
     for (const auto& cell:affected) {
         if (cell.row < -Runtime::kDisplayHiddenRows || cell.row>=field.visibleHeight ||
             cell.col<0 || cell.col>=field.width) continue;
-        const bool marked=spawn_marker_cell(context,player,cell.row,cell.col);
+        const bool marked=board_hint_cell(context,player,cell.row,cell.col);
         const bool activeCell=active && covers(*active,*p.paintedActivePose,cell.row,cell.col);
         const bool ghostCell=active && ghost && covers(*active,*ghost,cell.row,cell.col);
         if (activeCell || ghostCell) {

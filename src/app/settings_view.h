@@ -25,9 +25,13 @@ public:
     TerminalSettingsView(const Runtime::GameContext& context, bool localVersus, int player, bool fromStart = false,
                         std::shared_ptr<TerminalSettingsSurface> surface = {}, TerminalSizeQuery terminalSizeQuery = {},bool mapEditor = false);
     bool terminal_size_changed() const;
+    std::size_t page_rows() const { return visibleRows_; }
     void invalidate() const;
+    void set_read_only(bool enabled) {readOnly_=enabled;}
     void prepare_layout(std::size_t entries, const std::string& breadcrumb) const;
     void set_menu_path(const Model::SettingNode& root, const std::vector<std::string>& path, std::size_t selected);
+    void set_submenu_path(const TerminalSettingsView& parent, const Model::SettingNode& root,
+                          const std::vector<std::string>& path, std::size_t selected);
     void set_text_color() const;
     void set_selection_color(bool active = true) const;
     void print_menu(const Model::SettingNode& menu, std::size_t selected, const std::string& breadcrumb,bool render = true) const;
@@ -39,7 +43,6 @@ public:
                              const std::string& value, std::size_t caret) const;
     void print_choices(const Model::SettingItem& item, std::size_t selected,
                        const std::string& breadcrumb) const;
-    void print_connection(std::size_t selected, const std::string& breadcrumb) const;
     void print_reset_confirmation(bool pending) const;
     void print_message(const std::string& message) const;
 private:
@@ -60,13 +63,14 @@ private:
     void print_box(std::size_t index, const std::string& title) const;
     void print_box(const ColumnBox& box, const std::string& title) const;
     void print_map_preview(const Model::SettingNode& node) const;
-    std::string row_text(const Model::SettingNode& node, bool selected) const;
+    std::string row_text(const Model::SettingNode& node, bool selected, int availableWidth = 0,bool showSummary=true) const;
     int menu_width(const Model::SettingNode& menu) const;
     std::string value_text(const Model::SettingItem& item) const;
     const Runtime::GameContext& context_;
     int player_;
     bool localVersus_;
     bool mapEditor_;
+    bool readOnly_=false;
     std::shared_ptr<TerminalSettingsSurface> surface_;
     TerminalSizeQuery terminalSizeQuery_;
     mutable std::optional<Render::TerminalSize> terminalSize_;
@@ -82,6 +86,7 @@ private:
     mutable int firstRow_ = 5;
     mutable std::size_t visibleRows_ = kVisibleSettingsRows;
     mutable int hintRow_ = 21;
+    mutable int hintLines_ = 4;
     mutable int entryColumn_ = 4;
     mutable int entryWidth_ = 52;
     mutable int frameWidth_ = 52;

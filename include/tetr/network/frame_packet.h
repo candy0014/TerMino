@@ -32,6 +32,8 @@ struct FramePacket {
     std::uint64_t completedTurns = 0;
     std::optional<BoardFrameStamp> checkpoint;
     std::optional<PieceMotionFrame> motion;
+    int sourceSlot = -1;
+    bool multiplayer = false;
 };
 
 // Gameplay records that share the ! prefix with connection/room controls.

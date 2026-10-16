@@ -60,6 +60,8 @@ void contents() {
             }
             if(info.value==Mode::Pairs) {assert(size==6 && counts.size()==2);for(const auto& entry:counts)assert(entry.second==3);}
             if(info.value==Mode::Classic || info.value==Mode::TotalMayhem) assert(size==7);
+            if(info.value==Mode::Drought){assert(size==6);for(auto type:bag)assert(Piece::metadata(Piece::Type::from_index(type)).familyIndex!=0);}
+            if(info.value==Mode::Adversarial)assert(size==1);
         }
         if(info.value==Mode::SevenPlusX) for(const auto& entry:firstFour) assert(entry.second==5);
     }
@@ -94,7 +96,7 @@ void settings_and_replays() {
     UserConfig::Settings user;
     user.persistencePath=(std::filesystem::temp_directory_path()/"termino_bag_randomizer_test.ini").string();
     const auto choices=UserConfig::choice_options(UserConfig::ChoiceKind::BagRandomizer);
-    assert(choices.labels.size()==8 && choices.values.size()==8);
+    assert(choices.labels.size()==Runtime::kBagRandomizers.size() && choices.values.size()==Runtime::kBagRandomizers.size());
     for(std::size_t i=0;i<Runtime::kBagRandomizers.size();++i) {
         const auto& info=Runtime::kBagRandomizers[i];
         assert(choices.labels[i]==info.label && choices.values[i]==static_cast<int>(info.value));
@@ -126,6 +128,8 @@ void restarting() {
         dirty.session.player.pieces.bagCount=123;
         dirty.session.player.pieces.randomizerState.lastGenerated=5;
         dirty.session.player.pieces.randomizerState.extras={0,0,0,0,0,0,0};
+        dirty.session.player.gameplay.playfield.field.initialize(10,20);
+        dirty.session.player.gameplay.playfield.field.set_cell(19,0,Runtime::BoardCell::piece(3));
         Engine::initialize_board(fresh.context,fresh.session.player);
         Engine::initialize_board(dirty.context,dirty.session.player);
         assert(fresh.session.player.pieces.bag==dirty.session.player.pieces.bag);
@@ -133,13 +137,14 @@ void restarting() {
         assert(fresh.session.player.pieces.randomizerState.extras==dirty.session.player.pieces.randomizerState.extras);
         assert(fresh.session.player.pieces.randomizerState.lastGenerated==dirty.session.player.pieces.randomizerState.lastGenerated);
         assert(fresh.session.player.pieces.bag.size()>5 && fresh.session.player.pieces.nextPreview.size()==5);
-        assert(fresh.session.player.pieces.bagCount==1); // Do not fill six 14-bags as though this were a boolean.
+        assert(fresh.session.player.pieces.bagCount==(info.value==Mode::Adversarial?6:1)); // Board-dependent generation supplies one piece at a time.
     }
     std::cout.rdbuf(previous);
 }
 void fixtures() {
     std::cout<<'[';bool first=true;
     for(const auto& info:Runtime::kBagRandomizers) for(const unsigned seed:{1u,2u,17u,12345u,20261006u,2147483646u}) {
+        if(info.value==Mode::Drought || info.value==Mode::Adversarial)continue; // Native extensions have no official TETR.IO counterpart.
         Fixture f(info.value,seed,true);
         if(!first)std::cout<<',';first=false;
         std::cout<<"{\"mode\":\""<<info.tetrioName<<"\",\"seed\":"<<seed<<",\"bags\":[";

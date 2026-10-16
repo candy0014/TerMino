@@ -1,4 +1,5 @@
 #include "tetr/engine/remote_board_state_adapter.h"
+#include "tetr/engine/frame_coordinator.h"
 #include "tetr/network/board_state_codec.h"
 #include "tetr/network/hybrid_protocol.h"
 #include "tetr/render/board_renderer.h"
@@ -9,9 +10,23 @@
 
 namespace Engine {
 using namespace Render;
+namespace {
+void update_clock(const Runtime::GameContext& context,Runtime::PlayerSessionState& player,
+    const std::optional<Network::RemoteClockSample>& clock) {
+    if(!clock) return;
+    player.timing.remoteGameTime=Runtime::Duration::from_seconds(clock->elapsedSeconds);
+    player.timing.remoteTimeRate=clock->rate;player.timing.remoteTimeUpdated=context.services.clock.now();
+    if(player.timing.completedGameTime && clock->rate==0)
+        player.timing.completedGameTime=player.timing.remoteGameTime;
+}
+}
+
+void apply_remote_clock_sample(Runtime::GameContext& context,Runtime::PlayerSessionState& player,const Network::RemoteClockSample& sample) {
+    update_clock(context,player,sample);
+}
 
 bool apply_remote_piece_motion(Runtime::GameContext& context,Runtime::PlayerSessionState& player,
-                              const Network::PieceMotionFrame& motion) {
+                              const Network::PieceMotionFrame& motion,bool render) {
     const auto piece=Piece::get_definition(motion.piece);
     Piece::Pose pose=motion.result;
     if (player.presentation.activePose && player.presentation.activePieceType==motion.piece) {
@@ -22,8 +37,10 @@ bool apply_remote_piece_motion(Runtime::GameContext& context,Runtime::PlayerSess
         if (computed==motion.result) pose=computed;
     }
     if (!piece.can_place(pose,player.gameplay.playfield.field)) return false;
+    update_clock(context,player,motion.clock);
     const bool changed=player.presentation.activePose!=pose || player.presentation.activePieceType!=motion.piece;
     if (!changed) return true;
+    if(!render) {player.presentation.activePose=pose;player.presentation.activePieceType=motion.piece;return true;}
     OutputGuard output(context);
     if (player.presentation.activePose && player.presentation.activePieceType)
         draw_board_piece(context,player,*player.presentation.activePieceType,*player.presentation.activePose,PieceDrawMode::Erase);
@@ -33,19 +50,47 @@ bool apply_remote_piece_motion(Runtime::GameContext& context,Runtime::PlayerSess
 }
 
 void apply_remote_board_state(Runtime::GameContext& context,Runtime::PlayerSessionState& player,
-                              const Network::BoardStateSnapshot& snapshot) {
+                              const Network::BoardStateSnapshot& snapshot,bool render) {
+    update_clock(context,player,snapshot.clock);
+    const bool activeValid=!snapshot.placement && snapshot.currentPiece.valid() &&
+        Piece::get_definition(snapshot.currentPiece).can_place(snapshot.activePose,snapshot.field);
+    if(!render) {
+        player.gameplay.playfield.field=snapshot.field;
+        player.gameplay.playfield.width=snapshot.field.width();player.gameplay.playfield.visibleHeight=snapshot.field.height();
+        player.gameplay.playfield.activeHeight=snapshot.field.height();
+        player.gameplay.scoring.wins=snapshot.score.wins;player.gameplay.scoring.placedBlocks=snapshot.score.placedBlocks;
+        player.gameplay.scoring.totalAttack=snapshot.score.totalAttack;
+        player.gameplay.hold.piece=snapshot.hold;player.gameplay.hold.remoteAvailable=snapshot.holdAvailable.value_or(true);
+        player.pieces.nextPreview=snapshot.nextPreview;
+        player.presentation.activePose=activeValid?std::optional<Piece::Pose>{snapshot.activePose}:std::nullopt;
+        player.presentation.activePieceType=activeValid?std::optional<Piece::Type>{snapshot.currentPiece}:std::nullopt;
+        if(!player.presentation.activePieceType) player.presentation.activePose.reset();
+        player.presentation.nextSpawnType=snapshot.nextSpawnType;player.presentation.nextSpawnPose=snapshot.nextSpawnPose;
+        if(snapshot.placement) {
+            const auto& placement=*snapshot.placement;
+            player.gameplay.scoring.combo=placement.combo;player.gameplay.scoring.b2b=placement.b2b;
+            auto& p=player.presentation;++p.remotePlacementRevision;
+            p.remoteSpinPiece=placement.spin?placement.piece:Piece::Type::none();p.remoteMini=placement.mini;
+            p.remoteClearLines=placement.clearedLines;p.remotePerfectClear=placement.perfectClear;p.remoteHalfClear=placement.halfClear;
+        }
+        player.presentation.garbageBufferDisplay.clear();
+        for(const auto cell:snapshot.garbage) player.presentation.garbageBufferDisplay.push_back(static_cast<int>(cell));
+        return;
+    }
     OutputGuard output(context);
+    const bool visibilityChanged=synchronize_field_visibility(context,player);
     auto& field=player.gameplay.playfield;
     auto& presentation=player.presentation;
-    bool boardChanged=false;
+    bool boardChanged=visibilityChanged;
     for (int row=field.visibleHeight-1;row>=-Runtime::kDisplayHiddenRows && !boardChanged;--row)
         for (int col=0;col<field.width;++col)
-            if (field.field.cell(row,col)!=snapshot.field.cell(row,col)) {boardChanged=true; break;}
+            if (field.field.cell(row,col)!=snapshot.field.cell(row,col) ||
+                field.field.cell_lock_time(row,col)!=snapshot.field.cell_lock_time(row,col)) {boardChanged=true; break;}
     const bool activeChanged=snapshot.placement || boardChanged || presentation.activePose!=snapshot.activePose ||
         presentation.activePieceType!=snapshot.currentPiece;
     if (activeChanged && presentation.activePose && presentation.activePieceType)
         draw_board_piece(context,player,*presentation.activePieceType,*presentation.activePose,PieceDrawMode::Erase);
-    if (snapshot.placement) {presentation.activePose.reset(); presentation.activePieceType.reset();}
+    if (!activeValid) {presentation.activePose.reset(); presentation.activePieceType.reset();}
 
     player.gameplay.scoring.wins=snapshot.score.wins;
     player.gameplay.scoring.placedBlocks=snapshot.score.placedBlocks;
@@ -73,23 +118,15 @@ void apply_remote_board_state(Runtime::GameContext& context,Runtime::PlayerSessi
     for (int row=field.visibleHeight-1;row>=-Runtime::kDisplayHiddenRows;--row) {
         for (int col=0;col<field.width;++col) {
             const auto cell=snapshot.field.cell(row,col);
-            const bool changed=field.field.cell(row,col)!=cell;
+            const auto lockedAt=snapshot.field.cell_lock_time(row,col);
+            const bool changed=visibilityChanged || field.field.cell(row,col)!=cell || field.field.cell_lock_time(row,col)!=lockedAt;
             field.field.set_cell(row,col,cell);
+            field.field.mark_cell_lock_time(row,col,lockedAt);
             if (!changed) continue;
-            move_to(context,player,row,col);
-            set_board_cell_color(cell,context.config.display.obscuredColors);
-            const bool marked=spawn_marker_cell(context,player,row,col);
-            const auto colors=board_cell_colors(cell,context.config.display.obscuredColors);
-            if (cell.is_timed_number()) {
-                if (marked) draw_spawn_number(context.config.display.squareStyle,cell.timed_countdown(),colors);
-                else draw_number(context.config.display.squareStyle,cell.timed_countdown());
-            } else if (cell.occupied()) {
-                if (marked) draw_spawn_square(context.config.display.squareStyle,colors);
-                else draw_square(context.config.display.squareStyle);
-            } else draw_empty_board_cell(context,player,row,col);
+            draw_board_cell(context,player,row,col,cell);
         }
     }
-    if (!snapshot.placement && activeChanged) {
+    if (activeValid && activeChanged) {
         presentation.activePose=snapshot.activePose; presentation.activePieceType=snapshot.currentPiece;
         draw_board_piece(context,player,snapshot.currentPiece,snapshot.activePose);
     }

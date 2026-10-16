@@ -5,6 +5,8 @@
 #include "tetr/runtime/piece_turn.h"
 
 #include <cstdint>
+#include <vector>
+#include <map>
 
 namespace Network {
 
@@ -16,8 +18,17 @@ struct PieceTurnState {
     std::uint64_t peerCompleted = 0;
     double piecesPerTurn = 1.0;
     Runtime::TimePoint lastSent{};
+    std::vector<int> participants;
+    std::map<int,std::uint64_t> peers;
 
     bool can_play() const noexcept {
+        if(enabled && !participants.empty()) {
+            for(int slot:participants) if(slot!=playerIndex) {
+                const auto it=peers.find(slot);const auto value=it==peers.end()?0:it->second;
+                if(slot<playerIndex?value<=completed:value<completed) return false;
+            }
+            return true;
+        }
         return !enabled || (playerIndex == 0 ? peerCompleted >= completed
                                             : peerCompleted > completed);
     }

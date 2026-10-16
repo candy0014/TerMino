@@ -3,9 +3,11 @@
 
 #include "piece_replay.h"
 #include "tetr/engine/player_input.h"
+#include "tetr/render/audio_cues.h"
 #include "tetr/engine/piece_queue.h"
 #include "tetr/engine/undo.h"
 #include "tetr/network/multiplayer_channel.h"
+#include "tetr/network/network_services.h"
 #include "tetr/render/board_renderer.h"
 #include "tetr/render/piece_renderer.h"
 #include "tetr/replay/recorder.h"
@@ -43,7 +45,8 @@ Rules::PlayResult command_signal(
     Runtime::GameContext& context,
     PlayerInputCommand command) {
     if (command == PlayerInputCommand::Retry || command == PlayerInputCommand::OpenSettings) {
-        if (context.config.garbage.mode == Runtime::GarbageMode::Multiplayer) {
+        if(!Network::handle_room_game_control(context,command==PlayerInputCommand::Retry)) return Rules::PlayResult::ContinueFrame;
+        if (context.config.garbage.mode == Runtime::GarbageMode::Multiplayer && !context.session.roomScene.enabled) {
             Network::send_round_signal(context, Network::OutgoingRoundSignal::LeaveRound);
         }
     }
@@ -112,7 +115,8 @@ LivePieceControlResult process_live_piece_controls(
             context.config.movement,
             context.config.handling.dcd,
             context.config.handling.softDropFixed,
-            context.config.disableUndo};
+            context.config.disableUndo,
+            false};
     auto& services = context.input_services();
     const auto recordMovement = [&] {
         if (recordedPose == movementState.pose) return;
@@ -128,6 +132,8 @@ LivePieceControlResult process_live_piece_controls(
             config, [&](int key) { return services.key_down(key); },
             [&context] { return context.real_now(); });
     player.gameplay.scoring.score += inputResult.scoreDelta;
+    if(context.config.challengeRules==Runtime::ChallengeRules::Audio && (movementState.pose!=poseBeforeInput || inputResult.command==PlayerInputCommand::HardDrop))
+        Render::play_audio_cue(Render::AudioCue::Position,movementState.pose.position.col,movementState.pose.rotation.index());
     if (inputResult.command == PlayerInputCommand::Undo && undo_enabled(context) && undo_snapshot_count(context)>0)
         throw UndoRequested{};
 

@@ -1,4 +1,5 @@
 #include "local_versus.h"
+#include "single_player_challenges.h"
 
 #include "tetr/app/application_state.h"
 #include "tetr/app/place.h"
@@ -154,6 +155,7 @@ void run_local_versus(Runtime::GameContext& first, Runtime::GameContext& second)
 
     const int firstWinsBefore = firstPlayer.gameplay.scoring.wins;
     const int secondWinsBefore = secondPlayer.gameplay.scoring.wins;
+    begin_single_player_challenges(first);begin_single_player_challenges(second);
     std::array<Engine::GameLoopExit, 2> outcomes{
         Engine::GameLoopExit::Retry,
         Engine::GameLoopExit::Retry};
@@ -212,6 +214,10 @@ void run_local_versus(Runtime::GameContext& first, Runtime::GameContext& second)
     }
 
     print_batch_summary(first, second, outcomes);
+    if(!first.config.mode.replayMode) {
+        finish_single_player_challenges(first,firstPlayer,outcomes[0]==Engine::GameLoopExit::Won);
+        finish_single_player_challenges(second,secondPlayer,outcomes[1]==Engine::GameLoopExit::Won);
+    }
     if (std::getenv("TETR_TEST_METRICS") && !first.config.mode.replayMode) {
         std::cerr << "TETR_TEST_DURATION"
                   << " first=" << Runtime::elapsed_game_time(first.session, first.now()).seconds()

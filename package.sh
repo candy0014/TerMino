@@ -12,7 +12,8 @@ generator=
 usage() {
     printf '%s\n' 'Usage: bash package.sh [--parallel N] [--build-dir DIR] [--output-dir DIR]' \
         '                       [--data-dir DIR] [--generator NAME] [--dynamic]' \
-        'Defaults: Release, fully static runtimes, game + server only, output in dist/.'
+        'Defaults: Release, fully static runtimes, game + server only, output in dist/.' \
+        'Each new package uses built-in player settings and key bindings.'
 }
 while (( $# )); do
     case "$1" in
@@ -67,7 +68,7 @@ if [[ -f "$build_dir/CMakeCache.txt" ]]; then
     fi
 fi
 configure_args=(-S "$project_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE=Release
-    -DBUILD_TESTING=OFF -DTETR_PORTABLE_BUILD=ON
+    -DBUILD_TESTING=OFF -DTETR_PORTABLE_BUILD=ON -DTETR_PORTABLE_RESET_SETTINGS=ON
     "-DTETR_PORTABLE_FULL_STATIC=$full_static" "-DTETR_PORTABLE_DATA_DIR=$data_dir")
 if [[ -n "$generator" ]]; then configure_args+=(-G "$generator"); fi
 cmake "${configure_args[@]}"
@@ -78,7 +79,7 @@ package_name="TerMino-$platform-$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -p -- "$output_dir"
 output_dir=$(cd -- "$output_dir" && pwd -P)
 package_dir="$output_dir/$package_name"
-# Refuse to overwrite an existing distribution and its edited player settings.
+# Each package starts fresh; preserve edited settings in existing distributions.
 mkdir -- "$package_dir"
 cmake --install "$build_dir" --config Release --component Portable --prefix "$package_dir"
 tar -czf "$package_dir.tar.gz" -C "$output_dir" -- "$package_name"

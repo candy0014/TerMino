@@ -12,6 +12,7 @@
 #include <algorithm>
 #include "tetr/autoplay/strategy.h"
 #include "tetr/render/piece_renderer.h"
+#include "tetr/network/multiplayer_channel.h"
 #include "tetr/replay/recorder.h"
 #include "tetr/replay/tetrio_recorder.h"
 #include "tetr/runtime/game_context.h"
@@ -142,7 +143,7 @@ AutoplayStepResult run_autoplay_step(
     const auto service=[&]() {
         poll_undo_key(context);
         const int activeHeightBefore=player.gameplay.playfield.activeHeight;
-        if (periodic_event_due(context.real_now(),player.timing.framePoll,Runtime::Duration::from_seconds(.05))) {
+        if (periodic_event_due(context.real_now(),player.timing.framePoll,Network::multiplayer_frame_poll_interval(context))) {
             result.signal=pumpFrame();
             if (result.signal!=Rules::PlayResult::ContinueFrame) return false;
         }
@@ -199,6 +200,8 @@ AutoplayStepResult run_autoplay_step(
                 if (player.presentation.paintedActivePose)
                     Render::draw_piece_transition(context,piece,player,*player.presentation.paintedActivePose,movementState.pose,field);
                 else Render::draw_piece(context,piece,player,movementState.pose,field);
+                if(context.config.garbage.mode==Runtime::GarbageMode::Multiplayer)
+                    Network::send_piece_motion_frame(context,player,movementState.pose,true);
             }
         };
         for (const char code:script) {
@@ -221,6 +224,8 @@ AutoplayStepResult run_autoplay_step(
                     if (player.presentation.paintedActivePose)
                         Render::draw_piece_transition(context,piece,player,*player.presentation.paintedActivePose,movementState.pose,field);
                     else Render::draw_piece(context,piece,player,movementState.pose,field);
+                    if(context.config.garbage.mode==Runtime::GarbageMode::Multiplayer)
+                        Network::send_piece_motion_frame(context,player,movementState.pose,true);
                 }
                 break;
             }

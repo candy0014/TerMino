@@ -38,13 +38,18 @@ int main(int argc,char** argv) {
         return std::find(c.network.onlineInbox.begin(),c.network.onlineInbox.end(),wire)!=c.network.onlineInbox.end();
     };
     auto pump=[&] {
-        if (server) server->poll(1ms);
+        if (server) {
+            server->poll(1ms);
+            // Uploads arrive in 32-part bursts. Drain them as the real relay
+            // does, rather than building a backlog behind the fixture's sleep.
+            for(int i=0;i<63;++i)server->poll(0ms);
+        }
         for (auto* client:{&a,&b}) {
             poll_connection(client->network);
             auto& state=client->network.roomConfig;
             if (state.incoming.payload && !state.applied && !(deferGuest && client==&a)) {
                 const auto config=UserConfig::decode_multiplayer_config(*state.incoming.payload); assert(config);
-                client->context.config=UserConfig::apply_multiplayer_config(client->user,client->context.config,*config,state.policy.forceRules,state.policy.forceHandling);
+                client->context.config=UserConfig::apply_multiplayer_config(client->user,client->context.config,*config,state.policy.forceRules);
                 accept_room_config(client->network);
             }
         }
@@ -59,12 +64,12 @@ int main(int argc,char** argv) {
     const auto request=[&](Client& c,RoomOperation op,const std::string& name="") {
         request_room(c.network,op,name,false); wait([&] {return !c.network.pendingRoomRequest;});
     };
-    initialize_network_services(a.context,address); initialize_network_services(b.context,address);
+    initialize_network_services(a.context,address,3); initialize_network_services(b.context,address,3);
     wait([&] {return a.network.connection==ConnectionState::Connected && b.network.connection==ConnectionState::Connected;});
     const auto room="HostConfig-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     request(a,RoomOperation::Create,room); request(b,RoomOperation::Join,room);
     wait([&] {return a.network.roomMembers.size()==2 && b.network.roomMembers.size()==2 && a.network.roomPolicyAvailable && b.network.roomPolicyAvailable;});
-    assert(a.network.roomPolicy.forceRules && !a.network.roomPolicy.forceHandling && is_room_host(a.network));
+    assert(a.network.roomPolicy.forceRules && is_room_host(a.network));
     transfer_room_host(b.network,0); wait([&] {return !b.network.pendingRoomRequest;});
     assert(b.network.roomMessage==room_result_message(RoomResult::HostOnly) && is_room_host(a.network));
     transfer_room_host(a.network,7); wait([&] {return !a.network.pendingRoomRequest;});
@@ -74,10 +79,10 @@ int main(int argc,char** argv) {
     const auto retryId=a.network.nextRoomRequest;
     RoomRequest retry{a.network.connectionToken,retryId,RoomOperation::TransferHost,"",true,1};
     send_online(a.network,encode_room_request(retry)); pump(); // Exactly-once UDP command retry.
-    set_room_policy(a.network,{false,true}); wait([&] {return !a.network.pendingRoomRequest;});
-    assert(a.network.roomMessage==room_result_message(RoomResult::HostOnly) && a.network.roomPolicy.forceRules && !a.network.roomPolicy.forceHandling);
+    set_room_policy(a.network,{false}); wait([&] {return !a.network.pendingRoomRequest;});
+    assert(a.network.roomMessage==room_result_message(RoomResult::HostOnly) && a.network.roomPolicy.forceRules);
     a.user.fieldWidth=10; a.user.nextCount=5; a.user.das=.42; a.user.arr=.03; a.user.squareStyle=0;
-    b.user.fieldWidth=14; b.user.nextCount=2; b.user.das=.07; b.user.arr=0; b.user.squareStyle=1; b.user.hitMultiplier=3.5;
+    b.user.forceDas=1;b.user.forcedDas=.025; b.user.fieldWidth=14; b.user.nextCount=2; b.user.das=.07; b.user.arr=0; b.user.squareStyle=1; b.user.hitMultiplier=3.5;
     Runtime::MapDefinition map; map.name="Host-only map"; map.id=891;
     map.generator=Runtime::MapGenerator::CustomSequence; map.rows.back()[0]='G';
     const auto types=Piece::types_for_rotation_system(Runtime::RotationSystem::SrsPlus);
@@ -91,20 +96,45 @@ int main(int argc,char** argv) {
             c->network.localRoomConfig=UserConfig::encode_multiplayer_config(c->user,c->context.config);
         }
     };
-    for (const RoomPolicy policy: {RoomPolicy{true,false},RoomPolicy{true,true},RoomPolicy{false,true},RoomPolicy{false,false}}) {
+    prepare();
+    const auto preview=[&] {return UserConfig::encode_multiplayer_config(b.user,b.context.config,true);};
+    set_room_config_preview(b.network,preview());
+    wait([&] {return a.network.roomPreview.incoming.payload.has_value();});
+    const auto snapshot=UserConfig::decode_multiplayer_config(*a.network.roomPreview.incoming.payload);
+    assert(snapshot && snapshot->map && *snapshot->map==map && snapshot->settings.forceDas);
+    assert(!a.network.roomConfig.epoch && !contains(a,"start3")); // Browsing cannot start or apply match rules.
+    const auto previousPreview=a.network.roomPreview.incoming.digest;
+    b.user.forcedDas=.031;
+    set_room_config_preview(b.network,preview());
+    wait([&] {return a.network.roomPreview.incoming.payload && a.network.roomPreview.incoming.digest!=previousPreview;});
+    assert(UserConfig::decode_multiplayer_config(*a.network.roomPreview.incoming.payload)->settings.forcedDas==.031);
+    assert(a.user.das==.42);
+    const auto firstHostEpoch=a.network.roomPreview.epoch;
+    transfer_room_host(b.network,0);wait([&]{return !b.network.pendingRoomRequest && is_room_host(a.network);});
+    assert(!b.network.roomPreview.incoming.payload);
+    set_room_config_preview(a.network,UserConfig::encode_multiplayer_config(a.user,a.context.config,true));
+    wait([&]{return b.network.roomPreview.incoming.payload.has_value();});
+    assert(b.network.roomPreview.epoch>firstHostEpoch);
+    const auto secondHostEpoch=b.network.roomPreview.epoch;
+    transfer_room_host(a.network,1);wait([&]{return !a.network.pendingRoomRequest && is_room_host(b.network);});
+    assert(!a.network.roomPreview.incoming.payload);
+    set_room_config_preview(b.network,preview());
+    wait([&]{return a.network.roomPreview.incoming.payload.has_value();});
+    assert(a.network.roomPreview.epoch>secondHostEpoch);
+    for (const RoomPolicy policy: {RoomPolicy{true},RoomPolicy{false}}) {
         set_room_policy(b.network,policy);
         wait([&] {return !b.network.pendingRoomRequest && a.network.roomPolicy==policy && b.network.roomPolicy==policy;});
-        prepare(); deferGuest=policy.forceRules && !policy.forceHandling;
+        prepare(); deferGuest=policy.forceRules;
         for (auto* c:{&a,&b}) send(c->network,"start2");
         if (deferGuest) {
             wait([&] {return a.network.roomConfig.incoming.payload.has_value();});
             assert(!contains(a,"start3") && !contains(b,"start3")); // No start before all clients APPLY the full configuration.
-            set_room_policy(b.network,{false,false}); wait([&] {return !b.network.pendingRoomRequest;});
+            set_room_policy(b.network,{false}); wait([&] {return !b.network.pendingRoomRequest;});
             assert(b.network.roomMessage==room_result_message(RoomResult::RoundBusy));
             deferGuest=false;
         }
         wait([&] {return contains(a,"start3") && contains(b,"start3");});
-        assert(a.context.config.handling.das.seconds()==(policy.forceHandling?b.user.das:a.user.das));
+        assert(a.context.config.handling.das.seconds()==(policy.forceRules?b.user.forcedDas:a.user.das));
         assert(a.context.config.field.nextCount==(policy.forceRules?b.user.nextCount:a.user.nextCount));
         assert(a.context.config.garbage.hitMultiplier==(policy.forceRules?b.user.hitMultiplier:a.user.hitMultiplier));
         assert(a.context.config.display.squareStyle==a.user.squareStyle && b.context.config.display.squareStyle==b.user.squareStyle);
@@ -116,13 +146,13 @@ int main(int argc,char** argv) {
     }
     // Exercise the actual application pre-start path, including replay prefix
     // replacement, before either client can initialize its board or countdown.
-    set_room_policy(b.network,{true,true}); wait([&] {return !b.network.pendingRoomRequest && a.network.roomPolicy==RoomPolicy{true,true};});
+    set_room_policy(b.network,{true}); wait([&] {return !b.network.pendingRoomRequest && a.network.roomPolicy==RoomPolicy{true};});
     // A legacy peer cannot silently bypass either enforcement switch.
     send_online(a.network,"!join;"+a.network.connectionToken);
     for (auto* c:{&a,&b}) send(c->network,"start2");
     wait([&] {return a.network.roomMessage.find("Update all players")!=std::string::npos && b.network.roomMessage.find("Update all players")!=std::string::npos;});
-    send_online(a.network,"!join-v2;"+a.network.connectionToken);
-    wait([&] {return a.network.roomPolicyAvailable && a.network.roomPolicy==RoomPolicy{true,true};});
+    send_online(a.network,"!join-v3;"+a.network.connectionToken);
+    wait([&] {return a.network.roomPolicyAvailable && a.network.roomPolicy==RoomPolicy{true};});
     prepare();
     a.user.mapId=2147483646; // Unavailable local selection is superseded by the incoming host map.
     auto mode=Runtime::GameMode::Multiplayer;
@@ -143,6 +173,6 @@ int main(int argc,char** argv) {
     send(a.network,"end_"); wait([&] {return contains(b,"end2");});
     disconnect_online(b.network);
     wait([&] {return a.network.roomMembers.size()==1 && is_room_host(a.network);});
-    assert(a.network.roomPolicy==RoomPolicy({true,true}));
+    assert(a.network.roomPolicy==RoomPolicy({true}));
     std::cerr<<"room_host_config_test: OK ("<<(publicTest?"public WSS":"UDP")<<")\n";
 }

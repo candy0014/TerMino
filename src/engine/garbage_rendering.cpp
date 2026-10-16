@@ -40,7 +40,7 @@ FieldImage capture_field(const Runtime::GameContext& context,
     for (int row=-Runtime::kDisplayHiddenRows;row<image.bottom;++row)
         for (int column=0;column<image.width;++column) {
             const auto value=field.cell(row,column);
-            const auto appearance=Render::board_cell_appearance(context,player,row,value);
+            const auto appearance=Render::board_cell_appearance(context,player,row,column,value);
             image.cells.push_back({color_id(context,value),value.timed_countdown(),
                 appearance!=Render::BoardCellAppearance::Empty,appearance==Render::BoardCellAppearance::Dimmed});
         }

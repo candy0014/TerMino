@@ -82,7 +82,8 @@ PlayerInputResult process_player_input_frame(
             (Input::is_rotation(action) && !restricted.allows_rotation(Input::rotation_delta(action))) ||
             (action == Input::Action::SoftDrop && restricted.disableSoftDrop) ||
             (action == Input::Action::HardDrop && restricted.disableHardDrop) ||
-            (action == Input::Action::Undo && config.disableUndo)) {
+            (action == Input::Action::Undo && config.disableUndo) ||
+            (action == Input::Action::Retry && config.disableRetry)) {
             input.setPhase(key, KeyPhase::Released);
             continue;
         }
@@ -94,6 +95,7 @@ PlayerInputResult process_player_input_frame(
         if (input.phase(key) == KeyPhase::Released && !down) continue;
 
         if (down && action == Input::Action::HardDrop) {
+            movement.recordInput();
             finishHorizontalMoves();
             const auto effect = movement.dropToFloor(2, false, now());
             input.cancelHorizontalRepeats(moveKeys,now(),config.das,config.arr,config.dcd);
@@ -115,6 +117,7 @@ PlayerInputResult process_player_input_frame(
 
         const Runtime::TimePoint inputNow = now();
         if (input.beginPress(key, down, inputNow)) {
+            if(Input::is_horizontal(action) || Input::is_rotation(action) || action==Input::Action::SoftDrop)movement.recordInput();
             if (action == Input::Action::Undo) {
                 finishHorizontalMoves();
                 result.command = PlayerInputCommand::Undo;

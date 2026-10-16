@@ -6,6 +6,8 @@
 #include "tetr/render/piece_renderer.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/runtime/piece.h"
+#include "tetr/config/user_config.h"
+#include "tetr/runtime/construction.h"
 #include <algorithm>
 
 namespace App::InitDetail {
@@ -18,16 +20,14 @@ void reset_player_board(Runtime::PlayerSessionState& player, const Runtime::Runt
     gameplay.playfield.holdEnabled = config.field.holdEnabled;
     gameplay.hold = {};
     gameplay.playfield.field.clear();
-    const auto score = gameplay.scoring.score;
     const auto wins = gameplay.scoring.wins;
     gameplay.scoring = {};
     gameplay.scoring.wins = wins;
-    if (config.mode.mode == Runtime::GameMode::Zen) gameplay.scoring.score = score;
     player.clutch = {};
     player.presentation.spike = {};
     player.pieces.allowedPieces = Piece::types_for_rotation_system(config.rotationSystem,config.legacyRotationRules,
         config.legacyFoolPieceSet ? 10 : config.quickPlay.defaultFloor);
-    if(config.initialMap && config.initialMap->generator==Runtime::MapGenerator::CustomSequence && !config.initialMap->sequence.empty()) {
+    if(config.challengeRules!=Runtime::ChallengeRules::ConstructMap && config.initialMap && config.initialMap->generator==Runtime::MapGenerator::CustomSequence && !config.initialMap->sequence.empty()) {
         player.pieces.allowedPieces=config.initialMap->sequence;
         std::sort(player.pieces.allowedPieces.begin(),player.pieces.allowedPieces.end());
         player.pieces.allowedPieces.erase(std::unique(player.pieces.allowedPieces.begin(),player.pieces.allowedPieces.end()),player.pieces.allowedPieces.end());
@@ -36,11 +36,11 @@ void reset_player_board(Runtime::PlayerSessionState& player, const Runtime::Runt
 
 void draw_initial_board(Runtime::GameContext& context, Runtime::PlayerSessionState& player) {
     Render::print_border(context, player);
-    if(context.config.initialMap)
+    if(context.config.initialMap || Runtime::construction_rules(context.config.challengeRules))
         for(int row=0;row<player.gameplay.playfield.visibleHeight;++row)
             for(int col=0;col<player.gameplay.playfield.width;++col) {
                 const auto cell=player.gameplay.playfield.field.cell(row,col);
-                if(cell.occupied()) Render::draw_board_cell(context,player,row,col,cell);
+                if(cell.occupied() || Runtime::construction_cell(context.config,player.gameplay.playfield.field,row,col)) Render::draw_board_cell(context,player,row,col,cell);
             }
     for (int index = 0; index < player.gameplay.playfield.nextCount; ++index) {
         Render::draw_board_next(context, player, index);
@@ -49,6 +49,8 @@ void draw_initial_board(Runtime::GameContext& context, Runtime::PlayerSessionSta
 }
 
 void initialize_player_field(Runtime::GameContext& context, Runtime::PlayerSessionState& player) {
+    if(context.user_settings_component()) player.presentation.username=context.user_settings().username;
+    player.presentation.remotePlacementRevision=0;
     Engine::initialize_board(context, player);
     Engine::GarbageService::initialize(player, context.config.garbage.holePattern);
 }

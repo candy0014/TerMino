@@ -43,6 +43,9 @@ int main() {
 
 
     UserConfig::Settings parsed;
+    assert(UserConfig::assign_setting_text(parsed,UserConfig::SettingId::AttackMultiplier,"1.123456789"));
+    assert(parsed.attackMultiplier==1.123456789);
+    assert(!UserConfig::assign_setting_text(parsed,UserConfig::SettingId::AttackMultiplier,"nan"));
     assert(UserConfig::assign_setting_text(parsed,UserConfig::SettingId::HitMultiplier,"0.123456789"));
     assert(UserConfig::assign_setting_text(parsed,UserConfig::SettingId::CancellationMultiplier,"1.75"));
     assert(parsed.hitMultiplier==.123456789 && parsed.cancelMultiplier==1.75);
@@ -68,7 +71,7 @@ int main() {
     assert(autoplay.values == std::vector<int>({0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}));
 
     const auto gameModes = UserConfig::choice_options(UserConfig::ChoiceKind::GameMode);
-    assert(gameModes.labels.size() == 7);
+    assert(gameModes.labels.size() == 5);
     assert(gameModes.labels[gameModes.labels.size() - 2] == "Local Versus");
     assert(gameModes.values[gameModes.values.size() - 2] == 6);
     assert(gameModes.labels.back() == "Replay");

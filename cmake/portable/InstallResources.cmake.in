@@ -1,29 +1,40 @@
 set(source [==[@CMAKE_CURRENT_SOURCE_DIR@]==])
 set(data [==[@TETR_PORTABLE_DATA_DIR@]==])
 set(destination "${CMAKE_INSTALL_PREFIX}")
-file(MAKE_DIRECTORY "${destination}/.tetr" "${destination}/replay")
+file(MAKE_DIRECTORY "${destination}/.tetr/replay")
 
-# Copy complete libraries together: map IDs and preset references must agree.
-# Restrict this to runtime files; do not package caches, .tmp files or logs.
-foreach(name active_player maps.txt presets.txt
-        player1.ini player2.ini player1_windows.ini player2_windows.ini
-        player1_linux.ini player2_linux.ini)
-    if(EXISTS "${data}/.tetr/${name}")
-        configure_file("${data}/.tetr/${name}" "${destination}/.tetr/${name}" COPYONLY)
-    endif()
-endforeach()
-foreach(name keybinding.txt keybinding_windows.txt keybinding_player2_windows.txt
-        keybinding_linux.txt keybinding_player2_linux.txt)
-    if(EXISTS "${data}/${name}")
-        configure_file("${data}/${name}" "${destination}/${name}" COPYONLY)
-    endif()
-endforeach()
+# A fresh package must not import legacy profiles, active preset recovery,
+# personal handling, appearance, network identity or custom key bindings.
+# Omitting these files makes startup use the game's complete native defaults.
+if(NOT "@TETR_PORTABLE_RESET_SETTINGS@")
+    # Personal maps and presets travel together only in an explicit data export.
+    foreach(name maps.txt presets.txt)
+        if(EXISTS "${data}/.tetr/${name}")
+            configure_file("${data}/.tetr/${name}" "${destination}/.tetr/${name}" COPYONLY)
+        endif()
+    endforeach()
+    foreach(name active_player player1.ini player2.ini
+            player1_windows.ini player2_windows.ini player1_linux.ini player2_linux.ini)
+        if(EXISTS "${data}/.tetr/${name}")
+            configure_file("${data}/.tetr/${name}" "${destination}/.tetr/${name}" COPYONLY)
+        endif()
+    endforeach()
+    foreach(name keybinding.txt keybinding_windows.txt keybinding_player2_windows.txt
+            keybinding_linux.txt keybinding_player2_linux.txt)
+        if(EXISTS "${data}/${name}")
+            configure_file("${data}/${name}" "${destination}/${name}" COPYONLY)
+        endif()
+    endforeach()
+endif()
 foreach(name zzztoj_standalone/upstream/LICENSE.md third_party/cold-clear/LICENSE)
     get_filename_component(parent "${name}" DIRECTORY)
     file(MAKE_DIRECTORY "${destination}/licenses/${parent}")
     configure_file("${source}/${name}" "${destination}/licenses/${name}" COPYONLY)
 endforeach()
 configure_file("${source}/cmake/portable/README.txt" "${destination}/README.txt" COPYONLY)
+foreach(name LICENSE THIRD_PARTY_NOTICES.md)
+    configure_file("${source}/${name}" "${destination}/${name}" COPYONLY)
+endforeach()
 if(EXISTS "@CMAKE_CURRENT_BINARY_DIR@/websocket-licenses")
     file(INSTALL "@CMAKE_CURRENT_BINARY_DIR@/websocket-licenses/"
         DESTINATION "${destination}/licenses/websocket" TYPE DIRECTORY)
@@ -37,4 +48,4 @@ else()
         DESTINATION "${destination}" TYPE PROGRAM)
 endif()
 file(WRITE "${destination}/BUILD.txt"
-    "Platform: @TETR_PORTABLE_PLATFORM@-@TETR_PORTABLE_ARCH@\nCompiler: @CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@\nLinux full static runtime: @TETR_PORTABLE_FULL_STATIC@\n")
+    "Platform: @TETR_PORTABLE_PLATFORM@-@TETR_PORTABLE_ARCH@\nCompiler: @CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@\nLinux full static runtime: @TETR_PORTABLE_FULL_STATIC@\nReset player settings: @TETR_PORTABLE_RESET_SETTINGS@\n")

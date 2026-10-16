@@ -8,18 +8,18 @@
 
 namespace Replay {
 
-// User-facing replay names are rooted at this directory.  Both loading and
-// saving reject absolute paths and parent traversal; "demo.txt" and
-// "replay/demo.txt" are equivalent.
+// Bare replay names use this directory; "demo.txt", ".tetr/replay/demo.txt"
+// and the legacy "replay/demo.txt" are equivalent. Absolute paths retain
+// their location; ./ and ../ references are relative to the project folder.
 std::filesystem::path replay_directory();
 std::optional<std::filesystem::path> replay_path_for_loading(std::string_view text);
 
-// Interactive and environment-driven saves are deliberately confined to the
-// replay directory.  Absolute paths and parent traversal are rejected.
+// Interactive and environment-driven saves use the same path rules as loading.
 std::optional<std::filesystem::path> replay_path_for_saving(std::string_view text);
 
-// Value stored by the Settings UI.  Empty input remains empty; relative names
-// are made explicit so the menu shows where Replay mode will read from.
+// Stored references are project-relative, using ./ when needed to distinguish
+// them from bare names. Absolute paths remain only when no relative path exists
+// (e.g. a different Windows drive). Empty input remains empty.
 std::string replay_setting_path(std::string_view text);
 
 } // namespace Replay

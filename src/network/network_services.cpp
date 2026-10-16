@@ -37,10 +37,13 @@ void disconnect_online(NetworkServices& services) {
     services.connection = ConnectionState::Disconnected;
     services.connectionMessage = "Disconnected";
     services.onlineInbox.clear();
+    reset_multiplayer_state(services);services.multiplayerRoom=false;services.startMatchQueued=services.startFromMenu=false;
+    services.queuedMatchControl.reset();
     services.pieceTurns = {}; services.boardSync = {};
-    services.roomPolicy={}; services.roomPolicyAvailable=false; services.roomInstance=0; services.roomConfig={}; services.localRoomConfig.clear(); services.lastAppliedConfigEpoch=0;
+    services.roomPolicy={}; services.roomPolicyAvailable=false; services.roomInstance=0; services.roomConfig={}; services.localRoomConfig.clear(); services.roomPreview={}; services.localRoomPreview.clear(); ++services.previewRevision; services.lastAppliedConfigEpoch=0;
     services.room = {}; services.roomPlayerIndex = -1; services.roomMembers.clear(); services.confirmedUsername.clear(); services.confirmedUsernameRevision = 0;
     services.publicRooms.clear(); services.pendingRoomRequest.reset();
+    services.suggestedRoomName.clear();
     services.nextRoomRequest = 0; services.lastRoomStateRevision = 0;
     services.roomMessage = "Create or join a room before starting a game.";
     ++services.roomRevision;
@@ -52,7 +55,7 @@ void send_online(NetworkServices& services, const std::string& message) {
     else throw UdpException("Online transport is not initialized.");
 }
 
-void initialize_network_services(Runtime::GameContext& context, const std::string& serverIp) {
+void initialize_network_services(Runtime::GameContext& context, const std::string& serverIp, int protocolVersion) {
     auto& network = network_services(context);
     try {
         const bool useWebSocket = WebSocketSocket::recognizes(serverIp);
@@ -66,11 +69,14 @@ void initialize_network_services(Runtime::GameContext& context, const std::strin
             disconnect_online(network);
         network.room = {}; network.roomPlayerIndex = -1; network.roomMembers.clear(); network.confirmedUsername.clear(); network.confirmedUsernameRevision = 0; network.lastUsernameSend = {}; network.usernameRevision = 1;
         network.publicRooms.clear(); network.pendingRoomRequest.reset(); network.nextRoomRequest = 0; network.lastRoomStateRevision = 0;
+        network.suggestedRoomName.clear();
         network.roomMessage = "Create or join a room before starting a game.";
         ++network.roomRevision;
         network.onlineInbox.clear();
+        reset_multiplayer_state(network);network.multiplayerRoom=false;network.protocolVersion=protocolVersion;network.startMatchQueued=network.startFromMenu=false;
+        network.queuedMatchControl.reset();
         network.pieceTurns = {}; network.boardSync = {};
-        network.roomPolicy={}; network.roomPolicyAvailable=false; network.roomInstance=0; network.roomConfig={}; network.localRoomConfig.clear(); network.lastAppliedConfigEpoch=0;
+        network.roomPolicy={}; network.roomPolicyAvailable=false; network.roomInstance=0; network.roomConfig={}; network.localRoomConfig.clear(); network.roomPreview={}; network.localRoomPreview.clear(); ++network.previewRevision; network.lastAppliedConfigEpoch=0;
         network.serverIp = serverIp;
         if (context.user_settings_component()) network.username = context.user_settings().username;
         if (!valid_room_name(network.username)) {
@@ -120,14 +126,20 @@ void transfer_room_host(NetworkServices& services,int slot) {
 void set_room_policy(NetworkServices& services,RoomPolicy policy) {
     request_room(services,RoomOperation::SetPolicy,{},true,false,-1,policy);
 }
-void request_room(NetworkServices& services, RoomOperation operation, const std::string& name, bool isPublic, bool quiet,int targetSlot,RoomPolicy policy) {
+void request_room(NetworkServices& services, RoomOperation operation, const std::string& name, bool isPublic, bool quiet,int targetSlot,RoomPolicy policy,int battleLimit,PlayerRole memberRole) {
     if (services.connection != ConnectionState::Connected) {
         services.roomMessage = "Connect to the server before choosing a room."; ++services.roomRevision; return;
     }
     if (services.pendingRoomRequest) {
         if (services.pendingRoomRequest->operation == RoomOperation::List && operation != RoomOperation::List)
             services.pendingRoomRequest.reset(); // A click takes priority over passive lobby refresh.
-        else return;
+        else {
+            if(operation==RoomOperation::StartMatch && services.pendingRoomRequest->operation!=RoomOperation::StartMatch) {services.startMatchQueued=true;services.queuedMatchControl.reset();}
+            if(operation==RoomOperation::ForceStart || operation==RoomOperation::CancelMatch || operation==RoomOperation::Prepare || operation==RoomOperation::EndMatch) {
+                services.queuedMatchControl=operation;services.startMatchQueued=false;
+            }
+            return;
+        }
     }
     const auto normalized = normalize_room_name(name);
     if ((operation == RoomOperation::Create || operation == RoomOperation::Join) &&
@@ -135,6 +147,8 @@ void request_room(NetworkServices& services, RoomOperation operation, const std:
         services.roomMessage = std::string(room_result_message(RoomResult::InvalidName)); ++services.roomRevision; return;
     }
     services.pendingRoomRequest = RoomRequest{services.connectionToken, ++services.nextRoomRequest, operation, normalized, isPublic,targetSlot,policy};
+    services.pendingRoomRequest->matchEpoch=services.matchEpoch;services.pendingRoomRequest->battleLimit=battleLimit;
+    services.pendingRoomRequest->memberRole=memberRole;
     services.quietRoomRequest = quiet;
     if (!quiet) services.roomMessage = "Waiting for the server...";
     services.roomRequestStarted = std::chrono::steady_clock::now(); services.lastRoomSend = {};
@@ -142,17 +156,11 @@ void request_room(NetworkServices& services, RoomOperation operation, const std:
     poll_connection(services);
 }
 
-void poll_connection(NetworkServices& services, std::chrono::milliseconds wait) {
+void poll_connection(NetworkServices& services, std::chrono::milliseconds wait,std::chrono::microseconds processingBudget) {
     if ((!services.socket && !services.webSocket) || (services.connection != ConnectionState::Connecting &&
         services.connection != ConnectionState::Connected)) return;
     using Clock = std::chrono::steady_clock;
     const auto now = Clock::now();
-    if (now - services.lastConnectionReply > std::chrono::seconds(5)) {
-        services.connection = ConnectionState::Failed;
-        services.connectionMessage = "Server unavailable. Reconnect or edit Server IP.";
-        services.roomMessage = services.connectionMessage; services.pendingRoomRequest.reset(); ++services.roomRevision;
-        return;
-    }
     try {
         if (services.connection == ConnectionState::Connected && services.usernameRevision != services.confirmedUsernameRevision &&
             now - services.lastUsernameSend >= std::chrono::milliseconds(250)) {
@@ -167,7 +175,7 @@ void poll_connection(NetworkServices& services, std::chrono::milliseconds wait) 
             }
         }
         if (now - services.lastConnectionSend >= std::chrono::milliseconds(250)) {
-            send_online(services, (services.connection == ConnectionState::Connecting ? "!join-v2;" : "!ping;") + services.connectionToken);
+            send_online(services, (services.connection == ConnectionState::Connecting ? (services.protocolVersion>=4?"!join-v4;":"!join-v3;") : "!ping;") + services.connectionToken);
             services.lastConnectionSend = now;
         }
         const auto receiveOnline = [&](std::chrono::milliseconds timeout) -> std::optional<std::string> {
@@ -181,18 +189,23 @@ void poll_connection(NetworkServices& services, std::chrono::milliseconds wait) 
             return std::nullopt;
         };
         auto message = receiveOnline(wait);
+        const auto receiveDeadline=Clock::now()+processingBudget;
+        int received=0;
         while (message) {
             const auto& wire = *message;
             services.lastConnectionReply = Clock::now();
             if (wire == "!joined;" + services.connectionToken || wire == "!pong;" + services.connectionToken) {
+                if(services.connection!=ConnectionState::Connected) ++services.roomRevision;
                 services.connection = ConnectionState::Connected;
                 services.connectionMessage = "Connected to " + services.serverIp;
             } else if (wire == "!full;" + services.connectionToken) {
                 services.connection = ConnectionState::Full;
                 services.connectionMessage = "Server connection limit reached.";
+                ++services.roomRevision;
             } else if (wire == "!expired;" + services.connectionToken) {
                 services.connection = ConnectionState::Failed;
                 services.connectionMessage = "Connection expired. Reconnect to the server.";
+                ++services.roomRevision;
             } else if (const auto username = decode_username_update(wire,true)) {
                 if (username->token == services.connectionToken && username->revision == services.usernameRevision && username->username == services.username) {
                     services.confirmedUsername = username->username; services.confirmedUsernameRevision = username->revision;
@@ -204,26 +217,46 @@ void poll_connection(NetworkServices& services, std::chrono::milliseconds wait) 
                         services.pendingRoomRequest.reset();
                         if (!services.quietRoomRequest) services.roomMessage = std::string(room_result_message(reply->result));
                         if (reply->result == RoomResult::Listed) services.publicRooms = reply->rooms;
+                        if (reply->result == RoomResult::NameSuggested) services.suggestedRoomName=reply->room.name;
                         ++services.roomRevision;
                     }
                     if (reply->stateRevision >= services.lastRoomStateRevision &&
-                        (reply->result == RoomResult::Created || reply->result == RoomResult::Joined || reply->result == RoomResult::Left ||
-                         reply->result==RoomResult::HostTransferred || reply->result==RoomResult::PolicyChanged)) {
+                        (room_result_has_state(reply->result) || reply->result == RoomResult::Left)) {
+                        const bool kicked=reply->id==0 && reply->result==RoomResult::Left &&
+                            reply->stateRevision>services.lastRoomStateRevision;
                         services.lastRoomStateRevision = reply->stateRevision;
+                        const auto hostSlot=[](const auto& members) {
+                            for(const auto& member:members) if(member.host) return member.slot;
+                            return -1;
+                        };
+                        if(services.roomInstance!=reply->roomInstance || services.roomPolicy!=reply->policy ||
+                           hostSlot(services.roomMembers)!=hostSlot(reply->members)) {
+                            services.roomPreview={};services.localRoomPreview.clear();++services.previewRevision;
+                        }
                         if (services.room.name != reply->room.name || services.roomInstance!=reply->roomInstance) {
                             services.onlineInbox.clear(); services.pieceTurns = {}; services.boardSync = {};
                             services.roomConfig={}; services.lastAppliedConfigEpoch=0;
                         }
                         const bool sameMembers = services.roomMembers.size() == reply->members.size() &&
                             std::equal(services.roomMembers.begin(),services.roomMembers.end(),reply->members.begin(),[](const auto& a,const auto& b) {
-                                return a.slot == b.slot && a.username == b.username && a.host == b.host;
+                                return a.slot == b.slot && a.username == b.username && a.host == b.host && a.role==b.role &&
+                                    a.ready==b.ready && a.participating==b.participating && a.alive==b.alive && a.killer==b.killer;
                             });
                         if (!sameMembers || services.room.name != reply->room.name || services.room.players != reply->room.players ||
+                            services.room.capacity!=reply->room.capacity || services.battleLimit!=reply->battleLimit ||
                             services.roomPlayerIndex != reply->playerIndex || services.roomPolicy!=reply->policy ||
                             services.roomPolicyAvailable!=reply->hasPolicy || services.roomInstance!=reply->roomInstance) ++services.roomRevision;
                         services.room = reply->room; services.roomPlayerIndex = reply->playerIndex; services.roomMembers = reply->members;
                         services.roomPolicy=reply->policy; services.roomPolicyAvailable=reply->hasPolicy;
                         services.roomInstance=reply->roomInstance;
+                        apply_multiplayer_state(services,*reply);
+                        if(kicked) {
+                            services.roomMessage="You were kicked from the room.";++services.roomRevision;
+                            services.pendingRoomRequest.reset();services.startMatchQueued=false;services.queuedMatchControl.reset();
+                            services.startFromMenu=false;services.roomOnlineMode.reset();services.roomGameMode.reset();services.roleRoomInstance=0;
+                            services.matchCanceled=true;
+                            services.onlineInbox.clear();services.onlineInbox.push_back("end2");
+                        }
                     }
                 }
             } else if (wire == "!round-reset") {
@@ -234,7 +267,8 @@ void poll_connection(NetworkServices& services, std::chrono::milliseconds wait) 
                 services.roomMessage=wire.substr(14); ++services.roomRevision;
                 services.roomConfig={}; services.onlineInbox.clear(); services.onlineInbox.push_back("end2");
             } else if (handle_room_config_message(services,wire)) {
-            } else if (services.connection == ConnectionState::Connected && !services.room.name.empty() &&
+            } else if (handle_multiplayer_message(services,wire)) {
+            } else if (!services.multiplayerRoom && services.connection == ConnectionState::Connected && !services.room.name.empty() &&
                        (wire.rfind("!", 0) != 0 || is_gameplay_extension(wire))) {
                 if (wire==encode_server_lobby_signal(ServerLobbySignal::ConfigExchangeReady) && services.roomConfig.applied)
                     services.roomConfig.finished=true;
@@ -242,9 +276,31 @@ void poll_connection(NetworkServices& services, std::chrono::milliseconds wait) 
                     std::find(services.onlineInbox.begin(), services.onlineInbox.end(), wire) == services.onlineInbox.end())
                     services.onlineInbox.push_back(wire);
             }
+            // Do not remove a packet unless this call will process it. A hot
+            // opponent stream must yield to the local input loop.
+            if(++received>=64 || Clock::now()>=receiveDeadline) break;
             message = receiveOnline(std::chrono::milliseconds(0));
         }
+        if(services.connection==ConnectionState::Failed || services.connection==ConnectionState::Full) {
+            services.roomMessage=services.connectionMessage;services.pendingRoomRequest.reset();return;
+        }
+        // Read queued replies before deciding the connection timed out. A
+        // slow terminal repaint or map initialization must not hide a pong
+        // already received by the socket worker.
+        const auto timeout=services.connection==ConnectionState::Connecting?std::chrono::seconds(5):kConnectedTimeout;
+        if(Clock::now()-services.lastConnectionReply>timeout) {
+            services.connection=ConnectionState::Failed;
+            services.connectionMessage="Server unavailable. Reconnect or edit Server IP.";
+            services.roomMessage=services.connectionMessage;services.pendingRoomRequest.reset();++services.roomRevision;
+            return;
+        }
         poll_room_config_transfer(services);
+        poll_multiplayer_transfer(services);
+        if((services.startMatchQueued || services.queuedMatchControl) && !services.pendingRoomRequest) {
+            const auto operation=services.queuedMatchControl.value_or(RoomOperation::StartMatch);
+            services.startMatchQueued=false;services.queuedMatchControl.reset();
+            if(!services.room.name.empty() && (operation==RoomOperation::Prepare || is_room_host(services)))request_room(services,operation);
+        }
     } catch (const UdpException& error) {
         services.connection = ConnectionState::Failed;
         services.connectionMessage = error.what();

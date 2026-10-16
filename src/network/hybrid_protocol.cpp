@@ -5,6 +5,8 @@
 #include "tetr/util/text_codec.h"
 #include <array>
 #include <limits>
+#include <cstring>
+#include <cmath>
 
 namespace Network {
 namespace {
@@ -75,6 +77,12 @@ std::string encode_piece_motion(const PieceMotionFrame& m) {
     append_signed(wire,m.rows); append_signed(wire,m.columns); append_signed(wire,m.rotations);
     append_signed(wire,m.result.position.row); append_signed(wire,m.result.position.col);
     append_unsigned(wire,m.result.rotation.index());
+    if(m.clock) {
+        wire+='\1';
+        std::uint64_t elapsed=0,rate=0;
+        std::memcpy(&elapsed,&m.clock->elapsedSeconds,8);std::memcpy(&rate,&m.clock->rate,8);
+        append_fixed(wire,elapsed,8);append_fixed(wire,rate,8);
+    }
     return wire;
 }
 std::optional<PieceMotionFrame> decode_piece_motion(std::string_view wire) {
@@ -85,14 +93,24 @@ std::optional<PieceMotionFrame> decode_piece_motion(std::string_view wire) {
     const auto piece=take_unsigned(wire),kind=take_unsigned(wire);
     const auto rows=take_signed(wire),cols=take_signed(wire),turns=take_signed(wire),row=take_signed(wire),col=take_signed(wire);
     const auto rotation=take_unsigned(wire);
-    if (!wire.empty() || !epoch || !seq || !*seq || !frame || *frame>std::numeric_limits<std::uint32_t>::max() ||
+    std::optional<RemoteClockSample> clock;
+    if(!wire.empty()) {
+        if(wire.size()!=17 || wire.front()!='\1') return std::nullopt;
+        wire.remove_prefix(1);const auto elapsed=take_fixed(wire,8),rate=take_fixed(wire,8);
+        RemoteClockSample value;
+        std::memcpy(&value.elapsedSeconds,&*elapsed,8);std::memcpy(&value.rate,&*rate,8);
+        if(!std::isfinite(value.elapsedSeconds) || value.elapsedSeconds<0 || value.elapsedSeconds>1e18 ||
+           !std::isfinite(value.rate) || value.rate<0 || value.rate>1e18) return std::nullopt;
+        clock=value;
+    }
+    if (!epoch || !seq || !*seq || !frame || *frame>std::numeric_limits<std::uint32_t>::max() ||
         !revision || !*revision || !hash || !piece || *piece>=Piece::catalog().size() || !kind || *kind>1 ||
         !rows || *rows < -400 || *rows>400 || !cols || *cols < -210 || *cols>210 ||
         !turns || *turns < -3 || *turns>3 || !row || *row < -210 || *row>210 || !col || *col < -105 || *col>210 ||
         !rotation || *rotation>3 || (*kind==0 && *turns!=0) || (*kind==1 && *turns==0)) return std::nullopt;
     return PieceMotionFrame{{static_cast<std::uint32_t>(*epoch),*seq,*frame,*revision,*hash},
         Compat::piece_type_from_legacy(static_cast<int>(*piece)),static_cast<PieceMotionKind>(*kind),
-        *rows,*cols,*turns,{{*row,*col},Runtime::Rotation::from_index(static_cast<int>(*rotation))}};
+        *rows,*cols,*turns,{{*row,*col},Runtime::Rotation::from_index(static_cast<int>(*rotation))},clock};
 }
 std::string encode_board_checkpoint(const BoardFrameStamp& stamp,std::string_view state) {
     std::string packed="~";

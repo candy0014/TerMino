@@ -99,7 +99,10 @@ int main(){
             : std::nullopt;
         const std::string actual=Network::encode_board_state(
             b,y,Network::ActivePieceState::active({{row,col},Runtime::Rotation{rotation}}),placement);
-        assert(actual==expected);
+        const auto clock=actual.rfind(";clock-v1;");assert(clock!=std::string::npos);
+        assert(actual.substr(0,clock)==expected);
+        const auto withClock=Network::decode_board_state(actual,y.gameplay.playfield.width,y.gameplay.playfield.visibleHeight);
+        assert(withClock && withClock->clock);
         // The Stage 24 encoder is pure: the historical oracle still mutates x,
         // while the real codec must leave y presentation state untouched.
         assert(!y.presentation.activePose);

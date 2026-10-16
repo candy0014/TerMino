@@ -15,6 +15,7 @@
 #include "tetr/runtime/game_context.h"
 #include "tetr/runtime/constants.h"
 #include "tetr/runtime/player_session_state.h"
+#include "tetr/runtime/construction.h"
 #include "../src/app/settings_model.h"
 #include "../src/app/ui_text.h"
 #include "../src/engine/garbage_rendering.h"
@@ -261,7 +262,7 @@ void settings_persistence() {
     App::ApplicationState app;
     app.primaryContext=&a.context; app.localPlayerTwoContext=&b.context;
     a.context.attach_app(app); b.context.attach_app(app);
-    assert(!a.user.showSpawnPosition);
+    assert(a.user.showSpawnPosition);
     a.user.showSpawnPosition=1;
     const auto tree=App::Settings::Model::make_tree(a.user,true,0);
     bool inAppearance=false;
@@ -281,7 +282,7 @@ void settings_persistence() {
     UserConfig::reset_settings(restored,false);
     assert(restored.showSpawnPosition==1);
     UserConfig::reset_section(restored,UserConfig::Section::Others,false);
-    assert(restored.showSpawnPosition==0);
+    assert(restored.showSpawnPosition==1);
     std::filesystem::remove(path);
 }
 
@@ -315,10 +316,44 @@ void restored_state() {
     assert(f.player.presentation.spawnMarkerCells==original);
     for (const auto& cell:original) assert(f.dot_at(cell.row,cell.col).glyph==".");
 }
+void construction_targets() {
+    for(int style:{0,1})for(bool obscured:{false,true}) {
+        Fixture f;f.context.config.display.showSpawnPosition=false;
+        f.context.config.display.squareStyle=style;f.context.config.display.obscuredColors=obscured;
+        f.context.config.challengeRules=Runtime::ChallengeRules::ConstructCheckerboard;f.redraw();
+        for(int row=0;row<20;++row)for(int col=0;col<10;++col) {
+            assert(!f.player.gameplay.playfield.field.cell(row,col).occupied());
+            assert((f.dot_at(row,col).glyph==".")==((col+19-row)%2==0));
+        }
+        auto piece=Piece::get_definition(Piece::Type::from_index(0));auto pose=Piece::spawn_pose(10,piece.type());
+        f.player.presentation.activePieceType=piece.type();f.player.presentation.activePose=pose;
+        f.paint([&]{Render::draw_piece(f.context,piece,f.player,pose,f.player.gameplay.playfield.field);});
+        const auto next=pose.translated(7,1);
+        f.paint([&]{Render::draw_piece_transition(f.context,piece,f.player,pose,next,f.player.gameplay.playfield.field);});
+        f.matches_redraw("construction moving piece");
+        f.paint([&]{Render::draw_piece(f.context,piece,f.player,next,f.player.gameplay.playfield.field,Render::PieceDrawMode::Erase);});
+        f.player.presentation.activePose.reset();f.player.presentation.activePieceType.reset();
+        f.matches_redraw("construction erased piece");
+        f.context.config.challengeRules=Runtime::ChallengeRules::ConstructSecret;f.redraw();
+        assert(f.dot_at(19,0).glyph!="." && f.dot_at(19,1).glyph=="." && f.dot_at(0,0).glyph==".");
+        f.context.config.challengeRules=Runtime::ChallengeRules::ConstructSymmetry;
+        f.player.gameplay.playfield.field.set_cell(19,1,Runtime::BoardCell::piece(1));f.redraw();
+        assert(f.dot_at(19,8).glyph=="." && !f.player.gameplay.playfield.field.cell(19,8).occupied());
+        auto target=std::make_shared<Runtime::MapDefinition>();target->rows[19][0]='G';target->rows[18][0]='G';
+        f.context.config.initialMap=target;f.context.config.challengeRules=Runtime::ChallengeRules::ConstructMap;
+        f.player.gameplay.playfield.field.clear();f.redraw();
+        assert(f.dot_at(19,0).glyph=="." && f.dot_at(18,0).glyph=="." && f.dot_at(19,1).glyph!=".");
+        f.matches_redraw("construction map");
+        Engine::begin_undo_history(f.context);Engine::capture_undo_snapshot(f.context);
+        f.player.gameplay.playfield.field.set_cell(19,0,Runtime::BoardCell::piece(0));f.redraw();
+        assert(Engine::restore_previous_undo_snapshot(f.context));f.redraw();
+        assert(f.dot_at(19,0).glyph=="." && !f.player.gameplay.playfield.field.cell(19,0).occupied());
+    }
+}
 }
 
 int main() {
     App::UiText::set_language(App::UiText::Language::Chinese);
     covered_cells_and_toggle(); movement_and_next_change(); ghost_and_garbage();
-    clear_animation(); actual_event_shape_and_remote(); settings_persistence(); restored_state();
+    clear_animation(); actual_event_shape_and_remote(); settings_persistence(); restored_state();construction_targets();
 }

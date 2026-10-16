@@ -2,6 +2,7 @@
 
 #include "tetr/config/settings_schema.h"
 #include "tetr/config/presets.h"
+#include "tetr/challenges/challenges.h"
 #include "tetr/util/text_codec.h"
 
 #include <filesystem>
@@ -38,7 +39,7 @@ std::string trim(std::string_view input) {
 } // namespace
 
 void copy_settings_except_bindings(Settings& target,const Settings& source) {
-    auto copied=source;
+    auto copied=Challenges::persistent_settings(source);
     copied.keyCodes=target.keyCodes;
     copied.additionalKeyCodes=target.additionalKeyCodes;
     copied.keybindingPath=target.keybindingPath;
@@ -61,6 +62,8 @@ void copy_settings_except_bindings(Settings& target,const Settings& source) {
 }
 
 static void load_settings(Settings& settings, const std::string& path, bool loadKeybindings) {
+    Challenges::restore_replay(settings);
+    Challenges::restore_adjustment(settings);
     const int previousReplayKey=settings.keyCodes[10];
     bool undoBindingPresent=false,replayBindingPresent=false;
     bool pauseBindingPresent=false;
@@ -163,6 +166,7 @@ static void load_settings(Settings& settings, const std::string& path, bool load
         set_control_keys(settings, 11, {default_key_codes()[11]});
     }
     settings.presets=std::move(presetState);
+    migrate_legacy_modes(settings);
     if (settings.gameMode==3 || settings.gameMode==-3) {
         // Old profiles cannot recover an unknown earlier configuration;
         // preserve their loaded modifiers as the baseline for this visit.
@@ -209,7 +213,20 @@ bool save(const Settings& settings) {
     if (!output) return false;
     output.imbue(std::locale::classic());
     output << std::setprecision(17);
-    auto copy = settings;
+    auto copy = Challenges::persistent_settings(settings);
+    const auto replayPath = std::filesystem::u8path(copy.replayPath);
+    if (replayPath.is_absolute()) {
+        const auto root = std::filesystem::current_path(error);
+        if (!error) {
+            const auto relative = replayPath.lexically_normal().lexically_relative(root);
+            if (!relative.empty()) {
+                copy.replayPath = relative.generic_u8string();
+                if (*relative.begin() != ".." && copy.replayPath.rfind(".tetr/replay/",0) != 0)
+                    copy.replayPath = "./" + copy.replayPath;
+            }
+        }
+        error.clear();
+    }
     Presets::record_edits(copy);
     Section previous = Section::Global;
     for (const auto& descriptor : setting_schema()) {
@@ -218,10 +235,10 @@ bool save(const Settings& settings) {
             previous = descriptor.section;
         }
         output << (descriptor.keyBinding ? descriptor.label : descriptor.diskName) << " = ";
-        if (descriptor.keyBinding) output << control_keys_text(settings, descriptor.controlIndex);
+        if (descriptor.keyBinding) output << control_keys_text(copy, descriptor.controlIndex);
         else {
             std::visit([&](auto value) { output << value.get(); }, bind_setting(copy, descriptor));
-            if (descriptor.id == SettingId::SoftDropFactor && settings.softDropFixed) output << 's';
+            if (descriptor.id == SettingId::SoftDropFactor && copy.softDropFixed) output << 's';
         }
         output << '\n';
     }

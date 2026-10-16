@@ -1,3 +1,4 @@
+#include "single_player_challenges.h"
 #include "tetr/app/start_screen_navigation.h"
 #include "tetr/input/services.h"
 #include "tetr/app/post_game_interaction.h"
@@ -14,6 +15,10 @@
 #include "tetr/replay/replay_hash.h"
 #include "tetr/replay/local_versus_codec.h"
 #include "tetr/replay/file_path.h"
+#include "tetr/replay/recent.h"
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 #include "tetr/replay/recorder.h"
 #include "tetr/render/board_renderer.h"
 #include "tetr/render/terminal_renderer.h"
@@ -122,7 +127,7 @@ static void print_replay_prompt(Runtime::GameContext& context,
     Runtime::PlayerSessionState& player, int replayPos, const std::string& message) {
     const auto layout=Render::board_text_layout(context,player);
     auto rows=Util::TerminalText::wrap_words(UiText::tr(message),layout.columns);
-    const auto hint=Util::TerminalText::wrap_words(UiText::tr("[Tab] Results / Clear statistics / Board"),layout.columns);
+    const auto hint=Util::TerminalText::wrap_words(UiText::tr("[Tab] Results / Clear statistics"),layout.columns);
     rows.insert(rows.end(),hint.begin(),hint.end());
     draw_replay_prompt_rows(context,player,replayPos,rows);
 }
@@ -134,6 +139,12 @@ static Render::TerminalSize results_terminal_size(const Runtime::GameContext& co
 }
 
 static void restore_finished_boards(Runtime::GameContext& context,Runtime::GameContext* second=nullptr) {
+    for(auto* owner:{&context,second}) if(owner) {
+        using N=Settings::NavigationInput;using K=Settings::NavigationKey;
+        owner->input_services().discard_control_events();
+        for(const auto key:{K::Back,K::Backspace})
+            owner->input_services().suppress_control_key_until_release(N::key_code(key));
+    }
     Render::OutputGuard output(context);
     if (const auto size=Render::terminal_size()) Engine::center_game_boards(context,*size,second);
     Render::clear_screen();
@@ -157,6 +168,20 @@ static void restore_finished_boards(Runtime::GameContext& context,Runtime::GameC
     if (context.config.mode.replayMode) Engine::render_replay_playback_progress(context,context.session.player);
     Render::flush();
 }
+
+// Statistics own Escape while open, just like the online result viewer.
+// The finished board keeps its normal application navigation afterwards.
+struct StatisticsControlScope {
+    Input::Services& input;
+    std::function<void()> saved;
+    StatisticsControlScope(Runtime::GameContext& context,PostGameStatisticsView& statistics)
+        :input(context.input_services()),saved(std::move(input.controlInterrupt)) {
+        input.controlInterrupt=[this,&statistics] {
+            if(statistics.page()==PostGamePage::Board && saved) saved();
+        };
+    }
+    ~StatisticsControlScope() {input.controlInterrupt=std::move(saved);}
+};
 
 static std::vector<int> replay_save_keys(Runtime::GameContext& context) {
     std::vector<int> keys;
@@ -207,6 +232,12 @@ static ReplaySaveResult save_replay_interactively(
     int replayPos,
     const std::string& replay,
     const std::vector<int>& saveKeys,Runtime::GameContext* second=nullptr,PostGameStatisticsView* statistics=nullptr) {
+    struct RestoreCapture {
+        Input::Services& input;bool active;
+        explicit RestoreCapture(Input::Services& source):input(source),active(source.gameplay_input_active()) {if(active)input.end_gameplay_input();}
+        ~RestoreCapture(){if(active)input.begin_gameplay_input();}
+    } firstCapture(context.input_services());
+    std::optional<RestoreCapture> secondCapture;if(second)secondCapture.emplace(second->input_services());
     Input::ControlInputScope inputScope(context.input_component(),second ? second->input_component() : nullptr);
     Render::OutputGuard output(context);
     Render::set_ui_color(
@@ -223,7 +254,7 @@ static ReplaySaveResult save_replay_interactively(
             return;
         }
         const auto layout=Render::board_text_layout(context,player);
-        auto rows=Util::TerminalText::wrap_words(UiText::tr("Replay file [replay/")+defaultName+"]",layout.columns);
+        auto rows=Util::TerminalText::wrap_words(UiText::tr("Replay file [.tetr/replay/")+defaultName+"]",layout.columns);
         const auto instructions=Util::TerminalText::wrap_words(
             UiText::tr("Enter: default name   Esc / /cancel: cancel"),layout.columns);
         rows.insert(rows.end(),instructions.begin(),instructions.end());
@@ -279,79 +310,126 @@ static ReplaySaveResult save_replay_interactively(
     if (enteredName.empty()) enteredName=defaultName;
     const auto path=Replay::replay_path_for_saving(enteredName);
     if (!path) {
-        feedback(UiText::tr("Invalid file name. Replays must stay inside replay/."));
+        feedback(UiText::tr("Invalid file name or path."));
         return ReplaySaveResult::Failed;
     }
 
     std::error_code error;
-    std::filesystem::create_directories(path->parent_path(),error);
+    if(!path->parent_path().empty())std::filesystem::create_directories(path->parent_path(),error);
     if (error || !write_replay_file(replay,*path)) {
         feedback(UiText::tr("Could not save the replay."));
         return ReplaySaveResult::Failed;
     }
+    Replay::mark_explicitly_saved(Replay::session(context).recentPath.empty()?Replay::session(context).sourcePath:Replay::session(context).recentPath,*path);
+    attach_challenge_replay(context,*path);
+    if(second)attach_challenge_replay(*second,*path);
     const std::string message=UiText::tr("Replay saved: ")+path->string();
     feedback(message);
     return ReplaySaveResult::Saved;
 }
 
+void remember_finished_replay(Runtime::GameContext& context,const std::string& recording) {
+    auto& state=Replay::session(context);
+    if(context.config.mode.replayMode || !state.recentPath.empty() || state.tetrioRecorder ||
+       !context.session.player.timing.completedGameTime)return;
+    const auto data=recording.empty()?Replay::recording_for_save(context):recording;
+    if(data.empty() || data.size()>20000000 || data.find("{end_all,")==std::string::npos)return;
+    const auto now=std::time(nullptr);std::tm local{};
+#ifdef _WIN32
+    localtime_s(&local,&now);
+#else
+    localtime_r(&now,&local);
+#endif
+    const auto mode=context.config.mode.mode;
+    const auto& score=context.session.player.gameplay.scoring;
+    std::ostringstream label;label<<std::put_time(&local,"%Y-%m-%d %H:%M:%S")<<"  "
+        <<(mode==Runtime::GameMode::LocalVersus?"VS":mode==Runtime::GameMode::Multiplayer?"ONLINE":mode==Runtime::GameMode::QuickPlay?"QP":"SOLO")
+        <<"  "<<score.placedBlocks<<"P / "<<score.totalLines<<"L";
+    if(const auto path=Replay::save_recent(data,label.str())) {
+        state.recentPath=path->generic_u8string();
+        attach_challenge_replay(context,*path);
+        if(mode==Runtime::GameMode::LocalVersus) {
+            if(const auto* app=context.app_component();app && app->primaryContext && app->localPlayerTwoContext) {
+                auto* partner=&context==app->primaryContext?app->localPlayerTwoContext:app->primaryContext;
+                attach_challenge_replay(*partner,*path);
+            }
+        }
+    }
+}
+
+bool save_finished_online_replay(Runtime::GameContext& context) {
+    auto& player=context.session.player;
+    if(!player.timing.completedGameTime || context.config.mode.replayMode || Replay::session(context).data.size()>10000000) return false;
+    return save_replay_interactively(context,player,replay_prompt_position(context,player),
+        Replay::recording_for_save(context),replay_save_keys(context))==ReplaySaveResult::Saved;
+}
+
 void run_post_game_interaction(Runtime::GameContext& context, Runtime::PlayerSessionState& player) {
     freeze_post_game_times(context,player);
+    finish_single_player_challenges(context,player);
     if (!context.config.mode.replayMode) context.undoHistory.reset();
     if(!context.config.mode.replayMode) Replay::add_replay(context,Replay::OperationKind::EndAll);
+    remember_finished_replay(context);
     if (std::getenv("TETR_TEST_BATCH")) {
         if (const char* path = std::getenv("TETR_TEST_REPLAY"); path && *path) {
             const auto replayPath = Replay::replay_path_for_saving(path);
             std::error_code error;
-            if (replayPath) std::filesystem::create_directories(replayPath->parent_path(), error);
-            if (replayPath && !error && write_replay_file(Replay::recording_for_save(context), *replayPath))
+            if (replayPath && !replayPath->parent_path().empty()) std::filesystem::create_directories(replayPath->parent_path(), error);
+            if (replayPath && !error && write_replay_file(Replay::recording_for_save(context), *replayPath)) {
+                Replay::mark_explicitly_saved(Replay::session(context).recentPath.empty()?Replay::session(context).sourcePath:Replay::session(context).recentPath,*replayPath);
+                attach_challenge_replay(context,*replayPath);
                 std::cerr << "TETR_TEST_REPLAY path=" << replayPath->string() << '\n';
+            }
         }
         return;
     }
-    int replaySavedOrDisabled=0;
+    bool replayDisabled=Replay::recording_for_save(context).size()>10000000;
     const auto completedElapsed=*player.timing.completedGameTime;
     int replayPos=replay_prompt_position(context,player);
     if(Replay::session(context).data.length()>10000000){
-        replaySavedOrDisabled=1;
+        replayDisabled=1;
         print_replay_prompt(context,player,replayPos,"The replay was too long to save.");
     }
-    if(!context.config.mode.replayMode&&!replaySavedOrDisabled){
+    if(!replayDisabled){
         print_replay_prompt(context,player,replayPos,replay_save_prompt(context));
     }
     const std::vector<int> saveKeys=replay_save_keys(context);
     Settings::NavigationInput navigation(context);
     PostGameStatisticsView statistics(make_post_game_statistics(context,player));
+    if(auto* app=context.app_component();app && app->challengeRound)
+        statistics.set_challenges(app->challengeRound->outcomes,app->challengeRound->notice);
+    StatisticsControlScope statisticsInput(context,statistics);
 
     while(1){
         poll_server(context);
         const auto previousPage=statistics.page();statistics.poll(navigation);
         if (previousPage!=PostGamePage::Board && statistics.page()==PostGamePage::Board) {
             restore_finished_boards(context);replayPos=replay_prompt_position(context,player);
-            if (!context.config.mode.replayMode) print_replay_prompt(context,player,replayPos,
-                replaySavedOrDisabled ? "Replay saved or disabled." : replay_save_prompt(context));
+            print_replay_prompt(context,player,replayPos,
+                replayDisabled ? "The replay was too long to save." : replay_save_prompt(context));
         }
-        if (statistics.page()==PostGamePage::Board && !context.config.mode.replayMode && Engine::refresh_game_terminal_layout(context)) {
+        if (statistics.page()==PostGamePage::Board && Engine::refresh_game_terminal_layout(context)) {
             replayPos=replay_prompt_position(context,player);
             Engine::render_final_mode_result(context,player,completedElapsed);
-            print_replay_prompt(context,player,replayPos,replaySavedOrDisabled ? "Replay saved or disabled."
+            print_replay_prompt(context,player,replayPos,replayDisabled ? "The replay was too long to save."
                 : replay_save_prompt(context));
         }
         if(context.config.mode.replayMode && statistics.page()==PostGamePage::Board){
             Engine::update_replay_playback_controls(context,player);
         }
-        statistics.render(context,context.config.mode.replayMode ? std::string{} :
-            (replaySavedOrDisabled ? UiText::tr("Replay saved or disabled.") : replay_save_prompt(context)),
+        statistics.render(context,
+            (replayDisabled ? UiText::tr("The replay was too long to save.") : replay_save_prompt(context)),
             results_terminal_size(context));
         int retry=0;
         for(const auto& [key, action]:context.input_services().bindings.entries()){
             if (statistics.reserves(key)) continue;
             if(action==Input::Action::Retry&&context.input_services().key_down(key)){retry=1;break;}
             if(action==Input::Action::OpenSettings&&context.input_services().key_down(key)){Settings::run_menu(context);return;}
-            if(!context.config.mode.replayMode&&!replaySavedOrDisabled&&action==Input::Action::SaveReplay&&context.input_services().key_down(key)){
+            if(!replayDisabled&&action==Input::Action::SaveReplay&&context.input_services().key_down(key)){
                 const bool inStatistics=statistics.page()!=PostGamePage::Board;
                 const ReplaySaveResult result=save_replay_interactively(
                     context,player,replayPos,Replay::recording_for_save(context),saveKeys,nullptr,inStatistics ? &statistics : nullptr);
-                replaySavedOrDisabled=result==ReplaySaveResult::Saved;
+
                 if(result==ReplaySaveResult::Cancelled && !inStatistics){
                     print_replay_prompt(
                         context,player,replayPos,
@@ -381,31 +459,33 @@ void run_local_versus_post_game_interaction(
     int replayPos = std::max(
         replay_prompt_position(first,firstPlayer),
         replay_prompt_position(second,second.session.player));
-    const std::string replay = replayMode ? std::string{} :
+    const std::string replay = replayMode ? Replay::recording_for_save(first) :
         Replay::encode_local_versus_replay(
             Replay::recording_for_save(first),
             Replay::recording_for_save(second));
-    bool replaySavedOrDisabled = replay.size() > 20000000;
-    if (!replayMode && !replaySavedOrDisabled) {
+    remember_finished_replay(first,replay);
+    bool replayDisabled = replay.size() > 20000000;
+    if (!replayMode && !replayDisabled) {
         if (const char* path = std::getenv("TETR_LOCAL_VERSUS_REPLAY");
             path && *path != '\0') {
             const auto replayPath=Replay::replay_path_for_saving(path);
             std::error_code error;
-            if (replayPath) {
+            if (replayPath && !replayPath->parent_path().empty()) {
                 std::filesystem::create_directories(replayPath->parent_path(),error);
             }
             if (replayPath && !error && write_replay_file(replay,*replayPath)) {
-                replaySavedOrDisabled = true;
+                Replay::mark_explicitly_saved(Replay::session(first).recentPath,*replayPath);
+                attach_challenge_replay(first,*replayPath);attach_challenge_replay(second,*replayPath);
                 std::cerr << "TETR_LOCAL_VERSUS_REPLAY path="
                           << replayPath->string() << '\n';
             }
         }
     }
     if (std::getenv("TETR_LOCAL_VERSUS_BATCH")) return;
-    if (!replayMode) {
+    {
         print_replay_prompt(
             first, firstPlayer, replayPos,
-            replaySavedOrDisabled
+            replayDisabled
                 ? "The replay was too long to save."
                 : replay_save_prompt(first,&second));
     }
@@ -416,6 +496,15 @@ void run_local_versus_post_game_interaction(
     Settings::NavigationInput firstNavigation(first),secondNavigation(second);
     PostGameStatisticsView statistics(make_post_game_statistics(first,firstPlayer),
         make_post_game_statistics(second,second.session.player));
+    if(auto* app=first.app_component()) {
+        std::vector<Challenges::Outcome> outcomes;std::string notice;
+        for(auto* context:{&first,&second})if(const auto& round=app->challenge_round(context);round) {
+            for(auto outcome:round->outcomes){outcome.player=context==&first?0:1;outcomes.push_back(std::move(outcome));}
+            if(!round->notice.empty()){if(!notice.empty())notice+='\n';notice+=round->notice;}
+        }
+        statistics.set_challenges(std::move(outcomes),notice);
+    }
+    StatisticsControlScope firstStatisticsInput(first,statistics),secondStatisticsInput(second,statistics);
     const auto available_action=[&](Runtime::GameContext& owner,Input::Action requested) {
         for (const auto& [key,action]:owner.input_services().bindings.entries())
             if (action==requested && !statistics.reserves(key) && owner.input_services().key_down(key)) return true;
@@ -427,14 +516,14 @@ void run_local_versus_post_game_interaction(
         if (previousPage!=PostGamePage::Board && statistics.page()==PostGamePage::Board) {
             restore_finished_boards(first,&second);
             replayPos=std::max(replay_prompt_position(first,firstPlayer),replay_prompt_position(second,second.session.player));
-            if (!replayMode) print_replay_prompt(first,firstPlayer,replayPos,
-                replaySavedOrDisabled ? "Replay saved or disabled." : replay_save_prompt(first,&second));
+            print_replay_prompt(first,firstPlayer,replayPos,
+                replayDisabled ? "The replay was too long to save." : replay_save_prompt(first,&second));
         }
         const bool firstResized=statistics.page()==PostGamePage::Board && Engine::refresh_game_terminal_layout(first);
         const bool secondResized=statistics.page()==PostGamePage::Board && Engine::refresh_game_terminal_layout(second);
-        if (!replayMode && (firstResized || secondResized)) {
+        if (firstResized || secondResized) {
             replayPos=std::max(replay_prompt_position(first,firstPlayer),replay_prompt_position(second,second.session.player));
-            print_replay_prompt(first,firstPlayer,replayPos,replaySavedOrDisabled ? "Replay saved or disabled."
+            print_replay_prompt(first,firstPlayer,replayPos,replayDisabled ? "The replay was too long to save."
                 : replay_save_prompt(first,&second));
         }
         if(replayMode && statistics.page()==PostGamePage::Board){
@@ -442,8 +531,8 @@ void run_local_versus_post_game_interaction(
             // Left can seek back into a completed Local Versus replay.
             Engine::update_replay_playback_controls(first,firstPlayer);
         }
-        statistics.render(first,replayMode ? std::string{} : (replaySavedOrDisabled ?
-            UiText::tr("Replay saved or disabled.") : replay_save_prompt(first,&second)),results_terminal_size(first));
+        statistics.render(first,(replayDisabled ?
+            UiText::tr("The replay was too long to save.") : replay_save_prompt(first,&second)),results_terminal_size(first));
         if (available_action(first,Input::Action::OpenSettings) ||
             available_action(second,Input::Action::OpenSettings)) {
             Settings::run_menu(first);
@@ -453,13 +542,13 @@ void run_local_versus_post_game_interaction(
             available_action(second,Input::Action::Retry)) {
             return;
         }
-        if (!replayMode && !replaySavedOrDisabled &&
+        if (!replayDisabled &&
             (available_action(first,Input::Action::SaveReplay) ||
              available_action(second,Input::Action::SaveReplay))) {
             const bool inStatistics=statistics.page()!=PostGamePage::Board;
             const ReplaySaveResult result=save_replay_interactively(
                 first,firstPlayer,replayPos,replay,saveKeys,&second,inStatistics ? &statistics : nullptr);
-            replaySavedOrDisabled=result==ReplaySaveResult::Saved;
+
             if(result==ReplaySaveResult::Cancelled && !inStatistics){
                 print_replay_prompt(
                     first,firstPlayer,replayPos,

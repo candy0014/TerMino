@@ -84,6 +84,10 @@ AutoplayStepResult run_handling_autoplay_step(Runtime::GameContext& context,Runt
             else Render::draw_piece(context,piece,player,movement.pose,field);
         }
         player.presentation.activePose=movement.pose;
+        // Local presentation commits first. Reuse the non-waiting gameplay
+        // send path, including full-view subscriptions and stale-pose merging.
+        if(previous!=movement.pose && context.config.garbage.mode==Runtime::GarbageMode::Multiplayer)
+            Network::send_piece_motion_frame(context,player,movement.pose,true);
     };
     const bool continuation=carry && heldPieceContinuation && carry->selectedPieceType==piece.type();
     // Ordinary gravity is suspended while deciding and planning. 20G settles
@@ -101,11 +105,12 @@ AutoplayStepResult run_handling_autoplay_step(Runtime::GameContext& context,Runt
         poll_undo_key(context);
         if(context.input_component()) for(const auto& [key,action]:context.input_services().bindings.entries()) {
             if((action!=Input::Action::Retry && action!=Input::Action::OpenSettings) || !context.input_services().key_down(key)) continue;
-            if(context.config.garbage.mode==Runtime::GarbageMode::Multiplayer)
+            if(!Network::handle_room_game_control(context,action==Input::Action::Retry)) continue;
+            if(context.config.garbage.mode==Runtime::GarbageMode::Multiplayer && !context.session.roomScene.enabled)
                 Network::send_round_signal(context,Network::OutgoingRoundSignal::LeaveRound);
             result.signal=action==Input::Action::Retry ? Rules::PlayResult::Retry : Rules::PlayResult::OpenSettings;return false;
         }
-        if(periodic_event_due(context.real_now(),player.timing.framePoll,Runtime::Duration::from_seconds(.05))) {
+        if(periodic_event_due(context.real_now(),player.timing.framePoll,Network::multiplayer_frame_poll_interval(context))) {
             result.signal=pumpFrame();if(result.signal!=Rules::PlayResult::ContinueFrame) return false;
         }
         bool changed=false;

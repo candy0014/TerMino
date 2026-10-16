@@ -1,5 +1,6 @@
 #ifndef TETR_APP_POST_GAME_INTERACTION_H
 #define TETR_APP_POST_GAME_INTERACTION_H
+#include <string>
 
 namespace Runtime { class GameContext; struct PlayerSessionState; }
 
@@ -7,6 +8,8 @@ namespace App {
 
 // Capture at the round's exit, before post-game interaction or a partner wait.
 void freeze_post_game_times(Runtime::GameContext& context, Runtime::PlayerSessionState& player);
+bool save_finished_online_replay(Runtime::GameContext& context);
+void remember_finished_replay(Runtime::GameContext& context,const std::string& recording={});
 
 void run_post_game_interaction(
     Runtime::GameContext& context,

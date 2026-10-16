@@ -14,7 +14,8 @@ Rules::PlacementResult resolve_locked_piece(
     Piece::Definition& piece,
     Runtime::PlayerSessionState& player,
     Piece::Pose pose,
-    Runtime::RotationRecord lastRotation) {
+    Runtime::RotationRecord lastRotation,
+    Runtime::Duration lockedAt) {
     auto& playfield = player.gameplay.playfield;
     auto& scoring = player.gameplay.scoring;
 
@@ -27,15 +28,20 @@ Rules::PlacementResult resolve_locked_piece(
             break;
         }
     }
+    const bool trackLockTime=context.config.field.invisible && !context.config.field.periodicInvisible &&
+        context.config.field.invisibilityDelay>Runtime::Duration{};
     for (const auto& cell : piece.cells(pose.rotation)) {
         field.set_cell(
             pose.position.row + cell[0],
             pose.position.col + cell[1],
             Runtime::BoardCell::piece(piece.color_id()));
+        if(trackLockTime) field.mark_cell_lock_time(pose.position.row+cell[0],pose.position.col+cell[1],lockedAt);
     }
 
     const Piece::Metadata pieceMetadata = Piece::metadata(piece.type());
     Rules::PlacementInput input;
+    input.clearBatch=context.config.challengeRules==Runtime::ChallengeRules::Stack?4:0;
+    input.retainFullRows=context.config.challengeRules==Runtime::ChallengeRules::ConstructMap;
     input.attackRules = context.config.attackRules;
     input.mapWidth = context.config.field.width;
     input.mapHeight = playfield.activeHeight;

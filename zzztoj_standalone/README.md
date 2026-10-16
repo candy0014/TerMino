@@ -11,7 +11,7 @@ include or link gameplay code from the parent `tetr` project.
 - Branch: `botris`
 - Tag: `pre0.8.3-botris`
 - Commit: `ce12b474af8438abec77ae8ec69c8f24a918c7b3`
-- Checkout: `upstream/` (the vendored source snapshot)
+- Checkout: `upstream/` (a clean nested Git checkout)
 
 The build compiles the upstream evaluators and search implementations without
 modifying them, plus upstream `rule_srs.cpp` as the shape base for a local
@@ -22,7 +22,8 @@ or dependency on the parent program at runtime.
 Only the pointer graph used by search/path reachability is changed from
 `rule_botris` to `rule_tetr_srs_plus`. It uses the parent tetr project's exact
 standard-piece geometry, spawn pose, ordered 90-degree kicks, ordered
-180-degree kicks, and four invariant O rotation states. The snapshot includes the existing bounds-only fixes documented in the parent project.
+180-degree kicks, and four invariant O rotation states. The upstream checkout
+remains clean.
 
 QQ keeps its native target search mode. Its selected target is executed using
 the upstream graph path builder, which handles the wall kicks in tetr SRS+;

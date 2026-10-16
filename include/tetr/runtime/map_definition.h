@@ -38,5 +38,8 @@ bool decode_map(std::string_view text,MapDefinition& map);
 std::string encode_map_hex(const MapDefinition& map);
 bool decode_map_hex(std::string_view text,MapDefinition& map);
 void apply_map_config(RuntimeConfig& config,const MapDefinition& map);
+// A construction target owns only size and occupancy, independent of colors,
+// generation, rotation, sequence and the map's original completion goal.
+MapDefinition construction_map_target(const MapDefinition& map);
 } // namespace Runtime
 #endif

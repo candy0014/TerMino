@@ -350,7 +350,7 @@ void full_redraw_followed_by_input_clears_old_piece() {
             session.gameStartTime=tp(0);
             session.simulationTime=tp(repaint==0 ? 5.1 : 6.1);
             player.timing.frameUpdate=context.now();
-            player.presentation.qpInvisibleFlash=repaint==1;
+            player.presentation.invisibleFlash=repaint==1;
         }
         auto piece=Piece::get_definition(type);
         f.state.pose={{0,3},Runtime::Rotation{}};

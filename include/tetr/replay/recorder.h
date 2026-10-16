@@ -29,7 +29,7 @@ void record_end_move_data(
     Runtime::GameContext& context,
     Runtime::RotationRecord lastRotation,
     long long score,
-    Piece::Pose pose);
+    Piece::Pose pose,int inputActions=-1);
 void record_quick_play_state(Runtime::GameContext& context, const Runtime::PlayerSessionState& player);
 
 template<typename... T>

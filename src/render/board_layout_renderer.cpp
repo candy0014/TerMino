@@ -10,6 +10,7 @@
 
 #include <iostream>
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace Render {
@@ -73,16 +74,23 @@ void print_racing_goal_marker(const Runtime::GameContext& context, Runtime::Play
     OutputGuard output(context);
     const auto& playfield=player.gameplay.playfield;
     const auto& scoring=player.gameplay.scoring;
-    const int completed=Runtime::is_cheese_mode(context.config.garbage.mode)
-        ? scoring.totalGarbageLines : scoring.totalLines;
-    const long long remaining=static_cast<long long>(context.config.mode.racingDistance)-completed;
-    const int rows=context.config.mode.mode==Runtime::GameMode::Racing &&
-        (!context.config.initialMap || context.config.mode.mapGoal==Runtime::MapGoal::Disabled) &&
-        remaining>0 && remaining<playfield.activeHeight ? static_cast<int>(remaining) : 0;
+    const auto goal=Runtime::active_goal(context.config);
+    double remaining=0;std::string unit;
+    switch(goal) {
+        case Runtime::GameGoal::Time:
+            remaining=std::ceil(context.config.mode.blitzTime.seconds()-board_elapsed_seconds(context,player));unit="s";break;
+        case Runtime::GameGoal::Lines: remaining=double(context.config.mode.racingDistance)-scoring.totalLines;unit="L";break;
+        case Runtime::GameGoal::Garbage: remaining=double(context.config.mode.garbageTarget)-scoring.totalGarbageLines;unit="L";break;
+        case Runtime::GameGoal::Pieces: remaining=double(context.config.mode.pieceTarget)-scoring.placedBlocks;unit="P";break;
+        case Runtime::GameGoal::Attack: remaining=double(context.config.mode.attackTarget)-scoring.totalAttack;unit="A";break;
+        default: break;
+    }
+    const int rows=remaining>0 && remaining<=playfield.activeHeight ? static_cast<int>(remaining) : 0;
+    std::string label=rows ? " "+std::to_string(rows)+unit+" " : "";
     auto& previous=player.presentation.racingGoalRows;
-    if (previous==rows) return;
+    if (previous==rows && player.presentation.racingGoalLabel==label) return;
     const int oldRows=previous;
-    previous=rows;
+    previous=rows;player.presentation.racingGoalLabel=label;
     if (!rows && oldRows<=0) return;
 
     // Use a bright double border and a count in the existing floor, keeping
@@ -111,7 +119,6 @@ void print_racing_goal_marker(const Runtime::GameContext& context, Runtime::Play
         context.config.display.obscuredColors);
     move_cursor(playfield.activeHeight+player.presentation.topMargin,player.presentation.margin);
     const int floorWidth=playfield.width*2;
-    std::string label=rows ? " "+std::to_string(rows)+"L " : "";
     if (static_cast<int>(label.size())>floorWidth) label.clear();
     const int labelStart=(floorWidth-static_cast<int>(label.size()))/2;
     for (int column=0;column<floorWidth;++column) {
@@ -204,6 +211,12 @@ void print_border(const Runtime::GameContext& context, Runtime::PlayerSessionSta
     flush();
 }
 
+int board_info_top_row(const Runtime::PlayerSessionState& player) {
+    const int hold=player.presentation.hold_panel_height();
+    const int available=player.gameplay.playfield.visibleHeight-hold;
+    return hold+1+std::max(0,(available-kBoardInfoRows)/2);
+}
+
 int board_footer_base_row(const Runtime::PlayerSessionState& player) {
     return std::max({player.gameplay.playfield.visibleHeight,
         player.presentation.hold_panel_height()+15,
@@ -255,11 +268,14 @@ HorizontalExtent board_core_horizontal_extent(const Runtime::GameContext& contex
     int leftSpace=22+shift; // Spin erasure, Clutch, combo and statistics.
     if (player.gameplay.playfield.holdEnabled)
         leftSpace=std::max(leftSpace,(player.presentation.blockMaxWidth+1)*2+2+shift);
-    if (context.config.mode.mode==Runtime::GameMode::Racing) {
-        const auto goal=static_cast<long long>(context.config.mode.racingDistance);
-        const int progressWidth=static_cast<int>(std::to_string(std::max(0LL,goal)+6).size()+1+
-            std::to_string(goal).size());
-        leftSpace=std::max(leftSpace,7+progressWidth+shift);
+    const auto goal=Runtime::active_goal(context.config);
+    if(goal!=Runtime::GameGoal::None && goal!=Runtime::GameGoal::Time) {
+        const auto& mode=context.config.mode;
+        const int target=goal==Runtime::GameGoal::Garbage ? mode.garbageTarget : goal==Runtime::GameGoal::Pieces ? mode.pieceTarget :
+            goal==Runtime::GameGoal::Attack ? mode.attackTarget : goal==Runtime::GameGoal::AllClear ? mode.allClearTarget : mode.racingDistance;
+        const int progressWidth=static_cast<int>(std::to_string(std::max(0LL,static_cast<long long>(target))+6).size()+1+
+            std::to_string(target).size());
+        leftSpace=std::max(leftSpace,11+progressWidth+shift);
     }
     return {player.presentation.margin-leftSpace,board_terminal_size(context,player,maximum).columns};
 }
@@ -324,7 +340,12 @@ void redraw_player_board(
     Runtime::GameContext& context,
     Runtime::PlayerSessionState& player) {
     OutputGuard output(context);
+    // A complete redraw starts from a cleared/erased layout. The former
+    // statistics coordinates may now belong to HOLD, so do not erase them
+    // after painting the new frame. Keep widths to clear shortened values.
+    player.presentation.messageTopMargin=-1;
     print_border(context,player);
+    player.presentation.messageText={};
 
     const auto& playfield=player.gameplay.playfield;
     for(int row=-Runtime::kDisplayHiddenRows;row<playfield.visibleHeight;++row){

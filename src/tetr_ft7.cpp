@@ -10,6 +10,7 @@
 #include "tetr/input/services.h"
 #include "tetr/render/terminal_renderer.h"
 #include "tetr/replay/session_state.h"
+#include "tetr/replay/file_path.h"
 #include "tetr/replay/tetrio_recorder.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/config/user_config.h"
@@ -145,7 +146,7 @@ int main(int argc, char** argv) {
             if (std::string(scale) != "1") throw std::runtime_error(
                 "Unset TETR_TEST_CLOCK_SCALE before running the 4 PPS match");
         }
-        if (output.empty()) output = std::filesystem::path("replay") /
+        if (output.empty()) output = Replay::replay_directory() /
             ("ft7_" + std::to_string(std::time(nullptr)) + "_" + std::to_string(seed));
         if (!std::filesystem::create_directories(output)) throw std::runtime_error("Output directory must be new: " + output.string());
         const std::string ts = timestamp();

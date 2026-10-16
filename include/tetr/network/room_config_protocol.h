@@ -19,6 +19,7 @@ struct ConfigMessage {
     int hostSlot=-1;
     RoomPolicy policy;
     std::string data;
+    bool preview=false;
 };
 std::string encode_config_message(const ConfigMessage& message);
 std::optional<ConfigMessage> decode_config_message(std::string_view wire);

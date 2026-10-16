@@ -5,7 +5,9 @@
 #include "tetr/app/start_menu.h"
 #include "tetr/app/start_screen_navigation.h"
 #include "app/ui_text.h"
+#include "app/multiplayer_battle.h"
 #include "tetr/network/network_services.h"
+#include "tetr/network/lobby_channel.h"
 #include "tetr/legacy/bot_strategy.h"
 #include "tetr/input/services.h"
 #include "tetr/render/terminal_renderer.h"
@@ -131,22 +133,43 @@ int main(int argc, char* argv[]) {
         Network::disconnect_online(networkServices);
         return 0;
     }
+    bool watchInterruptedRoom=false;
     for (;;) {
         if (applicationState.startScreenRequested) {
+            watchInterruptedRoom=false;
             applicationState.startScreenRequested = false;
             applicationState.replayResume = {};
-            Network::disconnect_online(networkServices);
+            if(networkServices.connection==Network::ConnectionState::Connected && networkServices.multiplayerRoom && !networkServices.room.name.empty())
+                Network::send_lobby_signal(context,Network::ClientLobbySignal::Cancel);
+            else Network::disconnect_online(networkServices);
             if (!App::run_start_menu(context)) {
                 Network::disconnect_online(networkServices);
                 return 0;
             }
         }
         try {
+            if(watchInterruptedRoom) {
+                watchInterruptedRoom=false;
+                App::watch_room_match(context);
+                if(applicationState.startScreenRequested) continue;
+            }
             App::initialize_game(context);
             App::run(context);
         } catch (const App::StartScreenRequested&) {
             continue;
+        } catch (const App::RoomSettingsRequested&) {
+            networkServices.matchCanceled=false;
+            App::Settings::run_menu(context);
+            continue;
         } catch (const Network::LobbyInterrupted&) {
+            if(networkServices.multiplayerRoom && networkServices.matchCanceled) {
+                networkServices.matchCanceled=false;
+                App::Settings::run_menu(context);
+                continue;
+            }
+            if(networkServices.multiplayerRoom && context.session.roomScene.enabled && !networkServices.startFromMenu &&
+                context.session.roomScene.finished && networkServices.matchEpoch!=context.session.roomScene.epoch)
+                watchInterruptedRoom=true;
             continue;
         } catch (const Network::ConnectionError&) {
             applicationState.settingsCategoryIndex = 6; // NETWORK, after Player

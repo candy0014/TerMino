@@ -1,5 +1,6 @@
 #include "tetr/engine/locked_line_clear_phase.h"
 #include "tetr/engine/input_precharge.h"
+#include "garbage_rendering.h"
 #include "tetr/engine/garbage_service.h"
 #include "tetr/replay/session_state.h"
 
@@ -157,6 +158,10 @@ Rules::PlayResult run_locked_line_clear_phase(
             Render::draw_empty_board_cell(context,player,change.row,change.col);
         }
     } else {
+        std::optional<GarbageRendering::FieldImage> before;
+        if(context.config.field.invisible && !context.config.field.periodicInvisible &&
+            context.config.field.invisibilityDelay>Runtime::Duration{})
+            before=GarbageRendering::capture_field(context,player,field);
         const auto collapsePlan = Rules::build_gravity_collapse_plan(
             -Runtime::kHiddenRowCapacity,
             playfield.activeHeight,
@@ -167,12 +172,13 @@ Rules::PlayResult run_locked_line_clear_phase(
             [&field](int row, int col) { return field.cell(row, col); },
             [&field](int destination, int source) { field.copy_row(destination, source); });
         Render::OutputGuard output(context);
-        for (const auto& change : changes) {
+        if(before) GarbageRendering::render_field_changes(context,player,field,*before);
+        else for (const auto& change : changes) {
             if (change.row < -Runtime::kDisplayHiddenRows) continue;
             Render::draw_board_cell(context,player,change.row,change.col,change.value);
         }
     }
-    if(context.config.mode.mode==Runtime::GameMode::Racing && context.config.initialMap && context.config.mode.mapGoal!=Runtime::MapGoal::Disabled) {
+    if(Runtime::active_goal(context.config)==Runtime::GameGoal::InitialCells) {
         Render::print_message(context,player);
         Render::flush();
     }

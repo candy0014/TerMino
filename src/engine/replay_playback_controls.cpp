@@ -12,9 +12,9 @@
 #include "tetr/replay/movement_event.h"
 #include "tetr/replay/session_state.h"
 #include "tetr/runtime/constants.h"
+#include "tetr/util/numeric.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/runtime/player_session_state.h"
-#include "tetr/util/numeric.h"
 #include "tetr/util/terminal_text.h"
 
 #include <algorithm>
@@ -130,7 +130,7 @@ bool rebuild_has_due_operation(Runtime::GameContext& context) {
 
 void redraw_rebuilt_player(Runtime::GameContext& context) {
     auto& player=context.session.player;
-    synchronize_qp_invisible_flash(context,player);
+    synchronize_field_visibility(context,player);
     Render::redraw_player_board(context,player);
     GarbageService::redraw_buffer(context,player);
 }
@@ -183,15 +183,7 @@ bool complete_rebuild_if_ready(Runtime::GameContext& context) {
 }
 
 std::string format_replay_time(Runtime::Duration value) {
-    const double seconds=std::max(0.0,value.seconds());
-    const long long hundredths=static_cast<long long>(seconds*100.0);
-    const long long minutes=hundredths/6000;
-    const long long remainingSeconds=(hundredths/100)%60;
-    const long long fraction=hundredths%100;
-    std::ostringstream text;
-    text<<std::setfill('0')<<std::setw(2)<<minutes<<':'
-        <<std::setw(2)<<remainingSeconds<<'.'<<std::setw(2)<<fraction;
-    return text.str();
+    return Util::format_time(std::max(0.0,value.seconds()));
 }
 
 std::string progress_bar(

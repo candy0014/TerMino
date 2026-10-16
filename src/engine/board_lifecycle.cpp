@@ -17,10 +17,14 @@ namespace Engine {
 void initialize_board(Runtime::GameContext& context, Runtime::PlayerSessionState& player, bool initializeQueue){
     context.undoHistory.reset();
     auto& gameplay=player.gameplay;
+    gameplay.challenge={};
     auto& field=gameplay.playfield;
     auto& quick=gameplay.quickPlay;
     auto& pieces=player.pieces;
     auto& presentation=player.presentation;
+    player.timing.completedGameTime.reset();
+    player.timing.completedRealTime.reset();
+    player.timing.realGameStart.reset();
     presentation.topMargin=Runtime::kDisplayHiddenRows;
     presentation.dynamicLayout=false;
     presentation.terminalColumns=presentation.terminalRows=0;
@@ -30,11 +34,18 @@ void initialize_board(Runtime::GameContext& context, Runtime::PlayerSessionState
         context.config.field.width=4;
         context.config.field.height=4;
     }
-    presentation.qpInvisibleFlash=false;
+    presentation.invisibleFlash=false;
+    presentation.visibilityTime={};
     presentation.altitudeDisplay={};
     presentation.replayPromptDisplay.clear();
     presentation.roundEndHeadline.clear();
     presentation.racingGoalRows=-1;
+    // A new round clears the terminal, so unchanged HUD values must be drawn
+    // again instead of reusing the previous round's display cache.
+    presentation.messageText={};
+    presentation.messageWidths={};
+    presentation.messageMargin=presentation.messageTopMargin=-1;
+    presentation.lastMessagePaint={};
     context.session.quickPlay.progress={};
     context.session.quickPlay.speed=1;
     context.session.quickPlay.altitude=0;
@@ -42,10 +53,25 @@ void initialize_board(Runtime::GameContext& context, Runtime::PlayerSessionState
     pieces.randomizerState={};
     pieces.qpBagBreather=1;
     pieces.foolLastTypes.clear();
+    // Board-dependent randomizers must see this round's empty initial field,
+    // never the terrain left by the preceding game.
+    field.activeHeight=field.visibleHeight;
+    field.field.initialize(field.width,field.activeHeight);
+    field.garbageHeight=0;
 
     context.session.quickPlay.floor=std::clamp(context.config.quickPlay.defaultFloor,1,10);
     if(context.config.garbage.mode == Runtime::GarbageMode::QuickPlay)
         context.session.quickPlay.altitude=Rules::qp_floor_altitude(context.session.quickPlay.floor);
+
+    if(context.config.initialMap && initializeQueue && context.config.challengeRules!=Runtime::ChallengeRules::ConstructMap) {
+        const auto& map=*context.config.initialMap;
+        for(int row=0;row<map.height;++row) for(int col=0;col<map.width;++col) {
+            const auto cell=Runtime::map_cell(map.rows[row][col]);
+            field.field.set_cell(row,col,cell);
+            field.field.mark_initial_cell(row,col);
+            if(cell.is_normal_garbage()) field.garbageHeight=std::max(field.garbageHeight,map.height-row);
+        }
+    }
 
     if(initializeQueue){
         if (pieces.allowedPieces.empty()) {
@@ -66,18 +92,6 @@ void initialize_board(Runtime::GameContext& context, Runtime::PlayerSessionState
         throw std::logic_error("cannot initialize board without enough queued NEXT pieces");
     }
 
-    field.activeHeight=field.visibleHeight;
-    field.field.initialize(field.width,field.activeHeight);
-    field.garbageHeight=0;
-    if(context.config.initialMap && initializeQueue) {
-        const auto& map=*context.config.initialMap;
-        for(int row=0;row<map.height;++row) for(int col=0;col<map.width;++col) {
-            const auto cell=Runtime::map_cell(map.rows[row][col]);
-            field.field.set_cell(row,col,cell);
-            field.field.mark_initial_cell(row,col);
-            if(cell.is_normal_garbage()) field.garbageHeight=std::max(field.garbageHeight,map.height-row);
-        }
-    }
     presentation.activePose.reset();
     presentation.activePieceType.reset();
     presentation.paintedActivePose.reset();
@@ -108,9 +122,7 @@ void initialize_board(Runtime::GameContext& context, Runtime::PlayerSessionState
             presentation.blockMaxWidth=std::max(presentation.blockMaxWidth,pieceMetadata.displayWidth);
         }
     }
-    auto& multiplayer=player.multiplayer;
-    multiplayer.pendingSends.clear();
-    multiplayer.sendId={}; multiplayer.receiveId={};
+    player.multiplayer={};
 }
 
 

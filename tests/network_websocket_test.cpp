@@ -1,6 +1,7 @@
 #include "tetr/network/network_services.h"
 #include "tetr/network/lobby_protocol.h"
 #include "tetr/network/transport.h"
+#include "tetr/network/multiplayer_channel.h"
 #include "tetr/runtime/game_context.h"
 #include "support/network_gameplay_frames.h"
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <chrono>
 #include <iostream>
 #include <thread>
+#include <vector>
 
 struct Client {
     Runtime::SessionState session;
@@ -15,7 +17,7 @@ struct Client {
     Runtime::GameContext context{session, services};
     Network::NetworkServices network;
     Client() { context.attach_network(network); }
-    void join(const std::string& address) { Network::initialize_network_services(context, address); }
+    void join(const std::string& address) { Network::initialize_network_services(context, address,3); }
     ~Client() { Network::disconnect_online(network); }
 };
 
@@ -24,6 +26,126 @@ int main(int argc, char** argv) {
     const std::string url = argv[1];
     using namespace std::chrono_literals;
     using Network::ConnectionState;
+    if (argc == 3 && std::string(argv[2]) == "--latency-samples") {
+        Network::WebSocketSocket socket(url);
+        socket.send("ready");assert(socket.receive_for(5s)=="ready");
+        std::vector<double> samples;
+        for(std::uint64_t seq=1;seq<=120;++seq) {
+            const Network::PieceMotionFrame motion{{77,seq,seq,1,123},Piece::Type::from_index(0),
+                Network::PieceMotionKind::Translate,0,1,0,{{2,int(seq%10)},Runtime::Rotation{}}};
+            const auto wire=Network::encode_match_packet(77,Network::encode_piece_motion(motion));
+            const auto started=std::chrono::steady_clock::now();
+            socket.send(wire);assert(socket.receive_for(2s)==wire);
+            samples.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());
+            std::this_thread::sleep_for(std::chrono::milliseconds(1+seq%5));
+        }
+        std::sort(samples.begin(),samples.end());
+        std::cout<<"{\"samples\":120,\"event_stream\":"<<(socket.uses_event_stream()?"true":"false")
+            <<",\"p50_ms\":"<<samples[60]<<",\"p95_ms\":"<<samples[114]
+            <<",\"p99_ms\":"<<samples[118]<<",\"max_ms\":"<<samples.back()<<"}\n";
+        return 0;
+    }
+    if (argc == 3 && std::string(argv[2]) == "--event-stream") {
+        Network::WebSocketSocket socket(url);
+        socket.send("ready");assert(socket.receive_for(5s)=="ready");
+        assert(socket.uses_event_stream());
+        for(std::uint64_t seq=1;seq<=100;++seq) {
+            const Network::PieceMotionFrame motion{{77,seq,seq,1,123},Piece::Type::from_index(0),
+                Network::PieceMotionKind::Translate,0,1,0,{{2,int(seq%10)},Runtime::Rotation{}}};
+            socket.send(Network::encode_match_packet(77,Network::encode_piece_motion(motion)));
+        }
+        const auto attack=Network::encode_match_packet(77,Network::encode_attack_frame({Runtime::MultiplayerSequenceId::from_wire(1),{},7}));
+        socket.send(attack);
+        std::uint64_t lastSequence=0;int receivedMotions=0;bool gotAttack=false;
+        const auto deadline=std::chrono::steady_clock::now()+2s;
+        while(!gotAttack && std::chrono::steady_clock::now()<deadline) {
+            const auto wire=socket.receive_for(100ms);if(!wire)continue;
+            if(*wire==attack) {gotAttack=true;continue;}
+            const auto packet=Network::decode_match_packet(*wire);assert(packet && packet->first==77);
+            const auto motion=Network::decode_piece_motion(packet->second);assert(motion);
+            assert(motion->stamp.sequence>lastSequence);lastSequence=motion->stamp.sequence;++receivedMotions;
+        }
+        assert(gotAttack && lastSequence==100 && receivedMotions<=100);
+        std::cerr<<"Event stream: 100 visual updates -> "<<receivedMotions<<" delivered, final pose before reliable attack: OK\n";
+        return 0;
+    }
+    if (argc == 3 && (std::string(argv[2]) == "--paced-visuals" || std::string(argv[2]) == "--stream-visuals")) {
+        const bool stream=std::string(argv[2])=="--stream-visuals";
+        Client actor;
+        auto& n=actor.network;auto& c=actor.context;auto& p=actor.session.player;
+        n.webSocket=std::make_unique<Network::WebSocketSocket>(url);
+        n.initialized=true;n.connection=ConnectionState::Connected;n.multiplayerRoom=true;n.matchEpoch=77;
+        n.countdownBestRtt=1s;
+        Test::prepare_online_board(c,0);
+        Network::configure_board_sync(c,true,77);
+        Network::send_board_state_frame(c,p,Network::ActivePieceState::active({{2,3},Runtime::Rotation{}}));
+        assert(n.webSocket->receive_for(1s));
+        assert(n.webSocket->uses_event_stream()==stream);
+        Piece::Pose latest;
+        for(int i=0;i<40;++i) {
+            latest={{2,3+i%4},Runtime::Rotation{}};
+            Network::send_piece_motion_frame(c,p,latest);
+        }
+        assert(bool(n.boardSync.pendingMotion)==!stream);
+        // Combat bypasses paced movement, and the final position still reaches
+        // the receiver after input stops. No keystroke is needed to flush it.
+        const Network::OutgoingAttackFrame attack{Runtime::MultiplayerSequenceId::from_wire(1),{},7};
+        Network::send_attack_frame(c,attack);
+        bool receivedAttack=false;std::optional<Piece::Pose> receivedPose;
+        const auto deadline=std::chrono::steady_clock::now()+1s;
+        while(!receivedAttack && std::chrono::steady_clock::now()<deadline) {
+            const auto wire=n.webSocket->receive_for(100ms);if(!wire)continue;
+            const auto packet=Network::decode_match_packet(*wire);
+            assert(packet && packet->first==77);
+            if(auto move=Network::decode_piece_motion(packet->second))receivedPose=move->result;
+            receivedAttack=packet->second==Network::encode_attack_frame(attack);
+        }
+        assert(receivedAttack);
+        if(stream) {
+            assert(receivedPose==latest && n.boardSync.motionsSent>1);
+            Network::send_piece_motion_frame(c,p,{{2,4},Runtime::Rotation{}});
+            Network::send_board_state_frame(c,p,Network::ActivePieceState::locked(),{},true);
+            bool locked=false;
+            while(!locked) {
+                const auto wire=n.webSocket->receive_for(1s);assert(wire);
+                const auto packet=Network::decode_match_packet(*wire);assert(packet);
+                locked=packet->second.rfind("!board-v1;",0)==0;
+                assert(locked || Network::decode_piece_motion(packet->second));
+            }
+            assert(!n.webSocket->receive_for(30ms));
+            std::cerr<<"Stream visuals: 1s RTT estimate does not throttle updates; latest pose, attack and lock order: OK\n";
+            return 0;
+        }
+        std::this_thread::sleep_for(60ms);
+        Network::flush_piece_motion_frame(c);
+        const auto wire=n.webSocket->receive_for(1s);assert(wire);
+        const auto packet=Network::decode_match_packet(*wire);assert(packet && packet->first==77);
+        const auto motion=Network::decode_piece_motion(packet->second);
+        assert(motion && motion->result==latest && !n.boardSync.pendingMotion);
+        Network::send_piece_motion_frame(c,p,{{2,4},Runtime::Rotation{}});
+        assert(n.boardSync.pendingMotion);
+        Network::send_board_state_frame(c,p,Network::ActivePieceState::locked(),{},true);
+        assert(n.webSocket->receive_for(1s) && !n.boardSync.pendingMotion);
+        std::this_thread::sleep_for(60ms);Network::flush_piece_motion_frame(c);
+        assert(!n.webSocket->receive_for(30ms));
+        std::cerr<<"Paced movement: latest position delivered, combat immediate, lock cancels stale movement: OK\n";
+        return 0;
+    }
+    if (argc == 3 && std::string(argv[2]) == "--poll-timing") {
+        Network::WebSocketSocket socket(url);
+        socket.send("!probe");
+        assert(socket.receive_for(5s) == "!probe-ok");
+        std::vector<double> times;
+        for (int i=0;i<2000;++i) {
+            const auto started=std::chrono::steady_clock::now();
+            assert(!socket.receive_for(0ms));
+            times.push_back(std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-started).count());
+        }
+        std::sort(times.begin(),times.end());
+        std::cout << "{\"empty_poll_samples\":2000,\"p50_us\":" << times[1000]
+                  << ",\"p95_us\":" << times[1900] << ",\"max_us\":" << times.back() << "}\n";
+        return 0;
+    }
     if (argc == 3 && std::string(argv[2]) == "--probe") {
         Network::WebSocketSocket probe(url);
         probe.send("!probe");
@@ -40,6 +162,23 @@ int main(int argc, char** argv) {
         assert(socket.receive_for(5s) == payload);
         socket.send("after-ping");
         assert(socket.receive_for(5s) == "after-ping");
+        // More than the worker's per-pass receive budget may already be in
+        // curl/TLS, with no readable bytes left in the OS socket. Do not sleep
+        // for the idle poll timeout between these ordered reliable messages.
+        const auto burstStarted=std::chrono::steady_clock::now();
+        socket.send("burst-160");
+        for(int index=0;index<160;++index)
+            assert(socket.receive_for(1s)=="checkpoint-"+std::to_string(index));
+        assert(std::chrono::steady_clock::now()-burstStarted<750ms);
+        // An empty gameplay poll must not enter a timed wait. The generous
+        // aggregate budget distinguishes queue checks from the millisecond
+        // waits previously incurred by MinGW/Wine on every empty poll.
+        const auto pollStarted=std::chrono::steady_clock::now();
+        for (int i=0;i<256;++i) assert(!socket.receive_for(0ms));
+        assert(std::chrono::steady_clock::now()-pollStarted < 250ms);
+        assert(!socket.receive_for(-1ms));
+        socket.send("after-empty-polls");
+        assert(socket.receive_for(5s) == "after-empty-polls");
         socket.send("close-now");
         bool closed = false;
         try { socket.receive_for(5s); }
@@ -54,6 +193,7 @@ int main(int argc, char** argv) {
         bool rejected = false;
         try { socket.receive_for(5s); }
         catch (const Network::UdpException& e) {
+            std::cerr << "Untrusted TLS response: " << e.what() << '\n';
             rejected = std::string(e.what()) == "WebSocket TLS verification failed.";
         }
         assert(rejected);
@@ -102,7 +242,7 @@ int main(int argc, char** argv) {
     wait([&] { return b.network.room.name == roomName &&
                     a.network.roomMembers.size()==2 && b.network.roomMembers.size()==2; });
     assert(a.network.roomMembers.size()==2 && a.network.roomMembers[0].host);
-    Network::set_room_policy(a.network,{false,false});
+    Network::set_room_policy(a.network,{false});
     wait([&] {return !a.network.pendingRoomRequest && !a.network.roomPolicy.forceRules && !b.network.roomPolicy.forceRules;});
     Network::set_online_username(a.network,"公网房主");
     wait([&] { return a.network.confirmedUsername == "公网房主" && b.network.roomMembers[0].username == "公网房主"; });

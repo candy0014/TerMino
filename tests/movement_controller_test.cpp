@@ -214,6 +214,8 @@ void inputStateRegression() {
     keyCodes[3]=13; // hard drop
     keyCodes[4]=14; // clockwise
     keyCodes[7]=15; // hold
+    keyCodes[8]=16; // retry
+    keyCodes[9]=17; // settings
     std::array<bool,256> down{};
 
     // Establish a carried left DAS state before spawning the next piece.
@@ -229,6 +231,17 @@ void inputStateRegression() {
     assert(input.phase(12)==Engine::KeyPhase::Released);
     assert(input.phase(13)==Engine::KeyPhase::AwaitRelease);
     assert(input.phase(14)==Engine::KeyPhase::AwaitRelease);
+
+    // Fresh game controls during a piece transition must survive its spawn.
+    down[16]=down[17]=true;
+    input.preparePiece(typedBindings,[&](int k){return down[k];},Runtime::TimePoint::from_seconds(5.01));
+    assert(!input.consumeReleaseDebounce(16,true));
+    assert(!input.consumeReleaseDebounce(17,true));
+    // A control held before the first piece still requires release.
+    Engine::MovementInputState heldControl;
+    heldControl.preparePiece(typedBindings,[&](int k){return down[k];},Runtime::TimePoint::from_seconds(5.01));
+    assert(heldControl.consumeReleaseDebounce(16,true));
+    assert(heldControl.consumeReleaseDebounce(17,true));
 
     assert(input.horizontalRepeatDue(10,Runtime::TimePoint::from_seconds(5.02),Runtime::Duration::from_seconds(0.1),Runtime::Duration::from_seconds(0.01)));
     assert(input.phase(10)==Engine::KeyPhase::Repeating);

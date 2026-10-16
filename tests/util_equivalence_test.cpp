@@ -60,6 +60,13 @@ void shuffle_vector(std::vector<int>& values,std::mt19937& random){
 }
 
 int main(){
+    assert(Util::format_time(0)=="00:00.000");
+    assert(Util::format_time(61.123)=="01:01.123");
+    assert(Util::format_time(59.9996)=="01:00.000");
+    assert(Util::parse_time("1:75.5")==135.5);
+    assert(Util::parse_time("135.5")==135.5);
+    assert(Util::parse_time("0:120")==120.0);
+    for(const auto text:{"1:",":3","1:2:3","1:-2","1:nan","inf"}) assert(!Util::parse_time(text));
     std::mt19937 rng(0x18A11u);
 
     assert(Util::digit_count(0)==1);

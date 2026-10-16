@@ -1,5 +1,6 @@
 option(TETR_PORTABLE_BUILD "Build a relocatable game/server distribution" OFF)
 option(TETR_PORTABLE_FULL_STATIC "Link all Linux runtime libraries statically" ON)
+option(TETR_PORTABLE_RESET_SETTINGS "Use built-in defaults instead of copying player settings and bindings" OFF)
 set(TETR_PORTABLE_DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH
     "Runtime directory containing .tetr and keybinding files to package")
 

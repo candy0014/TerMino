@@ -43,6 +43,7 @@ try {
     # when copied sources have timestamps ahead of the build machine's clock.
     $configureArguments = @('-S', $PSScriptRoot, '-B', $BuildDirectory,
         '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=OFF', '-DTETR_PORTABLE_BUILD=ON',
+        '-DTETR_PORTABLE_RESET_SETTINGS=ON',
         '-DCMAKE_SUPPRESS_REGENERATION=ON',
         "-DTETR_PORTABLE_DATA_DIR=$DataDirectory")
     if ($Generator) { $configureArguments += @('-G', $Generator) }

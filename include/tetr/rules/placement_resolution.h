@@ -10,6 +10,7 @@
 namespace Rules {
 
 struct PlacementInput {
+    int clearBatch=0;
     int mapWidth = 0;
     int mapHeight = 0;
     int firstRow = 0;
@@ -36,6 +37,7 @@ struct PlacementInput {
     bool canonicalGeometry = false;
     double garbageMultiplier = 1.0;
     Runtime::AttackRules attackRules;
+    bool retainFullRows=false;
 };
 
 struct PlacementResult {

@@ -15,13 +15,19 @@ namespace Network {
 inline constexpr std::size_t kMaxRoomNameBytes = 48;
 std::string normalize_room_name(std::string_view name);
 bool valid_room_name(std::string_view name, bool allowEmpty = false);
-enum class RoomOperation { Create, Join, List, Leave, TransferHost, SetPolicy };
+enum class RoomOperation { Create, Join, List, Leave, TransferHost, SetPolicy,
+    SetRole, StartMatch, SetReady, ForceStart, CancelMatch, SetLimits, Kick, SetMemberRole, SuggestName,
+    Prepare, EndMatch };
 enum class RoomResult { Created, Joined, Listed, Left, NameTaken, NotFound, Full, InvalidName, AlreadyInRoom, Busy,
-    HostTransferred, PolicyChanged, HostOnly, InvalidPlayer, RoundBusy };
+    HostTransferred, PolicyChanged, HostOnly, InvalidPlayer, RoundBusy,
+    RoleChanged, MatchStarted, ReadyChanged, MatchForced, MatchCanceled, NeedReadyPlayers, Incompatible,
+    LimitsChanged, BattleFull, LimitBelowMembers, PlayerKicked, OfflineRestricted, NameSuggested };
+enum class PlayerRole { Battle, Spectator, Offline };
+enum class RoomMatchPhase { Idle, Preparing, Countdown, Playing, Finished };
+inline constexpr int kMultiplayerRoomCapacity = 32;
 struct RoomPolicy {
     bool forceRules = true;
-    bool forceHandling = false;
-    bool operator==(const RoomPolicy& other) const { return forceRules==other.forceRules && forceHandling==other.forceHandling; }
+    bool operator==(const RoomPolicy& other) const { return forceRules==other.forceRules; }
     bool operator!=(const RoomPolicy& other) const { return !(*this==other); }
 };
 struct RoomInfo {
@@ -34,6 +40,11 @@ struct RoomMember {
     int slot = -1;
     std::string username;
     bool host = false;
+    PlayerRole role = PlayerRole::Battle;
+    bool ready = false;
+    bool participating = false;
+    bool alive = false;
+    int killer = -1, target = -1;
 };
 struct UsernameUpdate {
     std::string token, username;
@@ -49,6 +60,9 @@ struct RoomRequest {
     bool isPublic = true;
     int targetSlot = -1;
     RoomPolicy policy;
+    std::uint64_t matchEpoch = 0;
+    int battleLimit = kMultiplayerRoomCapacity;
+    PlayerRole memberRole = PlayerRole::Battle;
 };
 struct RoomResponse {
     std::string token;
@@ -62,7 +76,29 @@ struct RoomResponse {
     RoomPolicy policy;
     bool hasPolicy = false;
     std::uint64_t roomInstance = 0;
+    bool multiplayer = false;
+    RoomMatchPhase matchPhase = RoomMatchPhase::Idle;
+    std::uint64_t matchEpoch = 0;
+    int battleLimit = kMultiplayerRoomCapacity;
 };
+bool room_result_has_state(RoomResult result) noexcept;
+struct PlayerWirePacket {
+    std::uint64_t epoch = 0;
+    int slot = -1;
+    std::string data;
+};
+std::string encode_player_packet(const PlayerWirePacket& packet);
+std::optional<PlayerWirePacket> decode_player_packet(std::string_view wire);
+std::string encode_match_packet(std::uint64_t epoch,std::string_view data);
+std::optional<std::pair<std::uint64_t,std::string>> decode_match_packet(std::string_view wire);
+// Requests have no remainingMicros. Replies use -1 before the server has
+// chosen a start time, or 0..3,000,000 until that monotonic deadline.
+struct CountdownClockPacket {
+    std::uint64_t probe = 0;
+    std::optional<int> remainingMicros;
+};
+std::string encode_countdown_clock(const CountdownClockPacket& packet);
+std::optional<CountdownClockPacket> decode_countdown_clock(std::string_view wire);
 std::string encode_room_request(const RoomRequest& request);
 std::optional<RoomRequest> decode_room_request(std::string_view wire);
 std::string encode_room_response(const RoomResponse& response);

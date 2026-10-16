@@ -6,6 +6,7 @@
 #include "tetr/replay/config_codec.h"
 #include "tetr/replay/replay_hash.h"
 #include "tetr/replay/session_state.h"
+#include "tetr/replay/file_path.h"
 #include "tetr/config/user_config.h"
 #include "tetr/autoplay/strategy.h"
 #include "tetr/config/normalization.h"
@@ -255,7 +256,7 @@ int main(){
     const std::string replayData=Replay::encode_config_prefix(recordedConfig)+
         "{block_seed,123}{garbage_seed,456}}";
     const std::filesystem::path replayPath=
-        std::filesystem::path("replay")/"init_context_display_replay_test.txt";
+        Replay::replay_directory()/"init_context_display_replay_test.txt";
     std::filesystem::create_directories(replayPath.parent_path());
     {
         std::ofstream replayFile(replayPath);

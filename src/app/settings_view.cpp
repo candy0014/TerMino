@@ -1,4 +1,5 @@
 #include "settings_view.h"
+#include "ui_style.h"
 #include "settings_navigation.h"
 #include "tetr/config/presets.h"
 #include "ui_text.h"
@@ -28,9 +29,22 @@ constexpr int columnGap = 2;
 constexpr int previousColumnSlice = 6;
 constexpr int rightMargin = 8;
 constexpr int leftMargin = 2;
-constexpr int hintRows = 4;
 using UiText::tr;
 using UiText::key_label;
+
+std::string shorten_middle(const std::string& text,int columns) {
+    const auto limit=static_cast<std::size_t>(std::max(0,columns));
+    const auto length=Util::TerminalText::width(text);
+    if(length<=limit) return text;
+    if(limit<=3) return std::string(limit,'.');
+    const auto tail=(limit-3)/2,head=limit-3-tail;
+    return Util::TerminalText::clip(text,head,"")+"..."+
+        Util::TerminalText::slice(text,length-tail,tail);
+}
+bool server_address(const Model::SettingItem& item) {
+    return item.id==Model::SettingId::ServerIp &&
+        item.label==UserConfig::setting_descriptor(Model::SettingId::ServerIp).label;
+}
 
 bool english_mod_name(const Model::SettingItem& item) {
     return UserConfig::setting_descriptor(item.id).section == UserConfig::Section::QuickPlay &&
@@ -121,7 +135,7 @@ std::string item_hint(const Model::SettingItem& item) {
     if (item.choice.cycleImmediately) return tr("Right / Enter cycles the value.") +
         (item.hint.empty() ? "" : " " + tr(item.hint));
     if (!item.choice.labels.empty()) return tr("Right / Enter opens the available values.");
-    if (item.id == Model::SettingId::ReplayPath) return tr("Replay filename or path inside replay/.");
+    if (item.id == Model::SettingId::ReplayPath) return tr("Replay filename or path; absolute paths are supported.");
     if (std::holds_alternative<std::reference_wrapper<std::string>>(item.value))
         return tr("Text input supports Chinese; Enter saves.");
     return tr("Right / Enter edits; blank input keeps the value.");
@@ -167,26 +181,25 @@ void TerminalSettingsView::set_menu_path(const Model::SettingNode& root,
     configure_layout(parent_, nullptr, false);
 }
 void TerminalSettingsView::set_text_color() const {
-    background_ = {{12,12,12}};
-    color_ = context_.config.display.obscuredColors ? TerminalSettingsSurface::Color{{0,0,0}} :
-        TerminalSettingsSurface::Color{{255,255,255}};
+    const auto style=ui_style(context_.config.display.obscuredColors);
+    background_=style.background;color_=style.text;
 }
 void TerminalSettingsView::set_selection_color(bool active) const {
-    if (active) {
-        color_ = context_.config.display.obscuredColors ? TerminalSettingsSurface::Color{{54,57,62}} :
-            TerminalSettingsSurface::Color{{255,188,92}};
-        background_ = context_.config.display.obscuredColors ? TerminalSettingsSurface::Color{{0,0,0}} :
-            TerminalSettingsSurface::Color{{56,34,16}};
-    } else {
-        background_ = {{12,12,12}};
-        color_ = context_.config.display.obscuredColors ? TerminalSettingsSurface::Color{{54,57,62}} :
-            TerminalSettingsSurface::Color{{193,168,65}};
-    }
+    const auto style=ui_style(context_.config.display.obscuredColors);
+    color_=active?style.selectedText:style.inactiveSelection;
+    background_=active?style.selectedBackground:style.background;
 }
 void TerminalSettingsView::set_heading_color() const {
-    background_ = {{12,12,12}};
-    color_ = context_.config.display.obscuredColors ? TerminalSettingsSurface::Color{{54,57,62}} :
-        TerminalSettingsSurface::Color{{237,109,0}};
+    const auto style=ui_style(context_.config.display.obscuredColors);
+    background_=style.background;color_=style.heading;
+}
+void TerminalSettingsView::set_submenu_path(const TerminalSettingsView& parent,
+    const Model::SettingNode& root,const std::vector<std::string>& path,std::size_t selected) {
+    auto prefix=parent.ancestors_;
+    if(parent.parent_)prefix.push_back({parent.parent_,parent.parentSelected_});
+    set_menu_path(root,path,selected);
+    ancestors_.insert(ancestors_.begin(),prefix.begin(),prefix.end());
+    configure_layout(parent_,nullptr,false);
 }
 void TerminalSettingsView::set_hint_color(bool highlight) const {
     background_ = {{12,12,12}};
@@ -216,13 +229,21 @@ std::string TerminalSettingsView::value_text(const Model::SettingItem& item) con
     }
     return Model::scalar_value(item);
 }
-std::string TerminalSettingsView::row_text(const Model::SettingNode& node, bool selected) const {
+std::string TerminalSettingsView::row_text(const Model::SettingNode& node, bool selected,int availableWidth,bool showSummary) const {
+    if(node.kind==Model::NodeKind::Separator) return {};
     std::string text = (selected ? "> " : "  ") + node_title(node);
-    if (node.item) text += " = " + value_text(*node.item);
-    else if (!node.summary.empty()) text += " = " + node.summary;
+    if (node.item) {
+        text += " = ";
+        const auto value=value_text(*node.item);
+        text += server_address(*node.item) ? shorten_middle(value,availableWidth>0 ?
+            std::min(19,availableWidth-static_cast<int>(Util::TerminalText::width(text))) : 19) : value;
+    }
+    else if (showSummary && !node.summary.empty()) text += " = " + node.summary;
     else if (node.key == "player") text += " = " + (player_==2 ? tr("Both players") : tr("Player")+" "+std::to_string(player_+1));
     else if (node.kind == Model::NodeKind::Player && node.player == player_) text += tr(" [current]");
-    if (node.kind == Model::NodeKind::Group) text += "  >";
+    const bool roomDialog=node.key=="room-create" || node.key=="room-join" || node.key=="room-list" ||
+        node.key=="room-users" || node.key=="room-view-host" || node.key.rfind("manage-player:",0)==0;
+    if ((node.kind == Model::NodeKind::Group && !node.children.empty()) || roomDialog) text += "  >";
     return text;
 }
 int TerminalSettingsView::menu_width(const Model::SettingNode& menu) const {
@@ -316,12 +337,14 @@ void TerminalSettingsView::print_row(const Model::SettingNode& node, std::size_t
         color_ = context_.config.display.obscuredColors ? TerminalSettingsSurface::Color{{0,0,0}} :
             TerminalSettingsSurface::Color{{128,128,128}};
     else if (selected) set_selection_color(false); else set_text_color();
-    line(firstRow_ + static_cast<int>(index % visibleRows_), row_text(node, selected), entryColumn_, entryWidth_);
+    if(node.challengeQualified)color_=*node.challengeQualified || context_.config.display.obscuredColors
+        ?TerminalSettingsSurface::Color{{255,255,255}}:TerminalSettingsSurface::Color{{128,128,128}};
+    line(firstRow_ + static_cast<int>(index % visibleRows_), row_text(node, selected,entryWidth_,active || node.challengeId.empty()), entryColumn_, entryWidth_);
     set_text_color();
 }
 void TerminalSettingsView::print_hint_text(const std::string& text) const {
     const auto rows = Util::TerminalText::wrap(text,frameWidth_);
-    for (int i = 0; i < hintRows; ++i)
+    for (int i = 0; i < hintLines_; ++i)
         line(hintRow_ + i, i < static_cast<int>(rows.size()) ? rows[i] : "", column, frameWidth_);
 }
 void TerminalSettingsView::print_hint(const Model::SettingNode& node) const {
@@ -340,16 +363,16 @@ void TerminalSettingsView::print_hint(const Model::SettingNode& node) const {
             tr("Fixed rotation system")+" / "+tr(UserConfig::choice_options(UserConfig::ChoiceKind::RotationSystem).labels.at(static_cast<std::size_t>(map.rotationSystem)));
         const auto rows=Util::TerminalText::wrap_words(tr("Field size")+": "+std::to_string(map.width)+" x "+std::to_string(map.height)+"\n"+
             tr("Generator")+": "+generator+"\n"+tr("Final goal")+": "+goal,frameWidth_);
-        for(int i=0;i<hintRows;++i) line(hintRow_+i,i<static_cast<int>(rows.size()) ? rows[i] : "",column,frameWidth_);
-    } else print_hint_text(node.item ? preset_hint(*node.item,item_hint(*node.item)) : tr(node.description)+
+        for(int i=0;i<hintLines_;++i) line(hintRow_+i,i<static_cast<int>(rows.size()) ? rows[i] : "",column,frameWidth_);
+    } else print_hint_text(node.item ? preset_hint(*node.item,item_hint(*node.item)) : (node.literalDescription?node.description:tr(node.description))+
         (node.descriptionSuffix.empty() ? "" : " "+tr(node.descriptionSuffix)));
 }
 void TerminalSettingsView::prepare_layout(std::size_t entries, const std::string& breadcrumb) const {
     (void)entries;
     const auto rows = UiText::breadcrumb_rows(breadcrumb, frameWidth_);
     firstRow_ = std::max(5, 4 + static_cast<int>(rows.size()));
-    visibleRows_=mapEditor_ && terminalSize_ ? static_cast<std::size_t>(std::clamp(terminalSize_->rows-firstRow_-11,1,static_cast<int>(kVisibleSettingsRows))) : kVisibleSettingsRows;
-    // Reserve all fifteen rows on every page, then one blank row.
+    hintLines_=terminalSize_ && terminalSize_->rows<22?2:4;
+    visibleRows_=terminalSize_ ? static_cast<std::size_t>(std::clamp(terminalSize_->rows-firstRow_-(mapEditor_?hintLines_+7:hintLines_+8)-(localVersus_?1:0),1,static_cast<int>(kVisibleSettingsRows))) : kVisibleSettingsRows;
     hintRow_ = firstRow_ + static_cast<int>(visibleRows_) + 2;
 }
 void TerminalSettingsView::print_column(const Model::SettingNode& menu, std::size_t selected,
@@ -365,7 +388,7 @@ void TerminalSettingsView::print_column(const Model::SettingNode& menu, std::siz
     const auto end = std::min(menu.children.size(), first + visibleRows_);
     for (auto i = first; i < end; ++i)
         print_row(menu.children[i], i, i == selected, active);
-    if (menu.children.size() > visibleRows_) {
+    if (menu.children.size() > visibleRows_ && !active) {
         set_hint_color();
         line(firstRow_ + static_cast<int>(visibleRows_) + 1,
             std::to_string(first + 1) + "-" + std::to_string(end) + " / " + std::to_string(menu.children.size()),
@@ -377,14 +400,16 @@ void TerminalSettingsView::print_frame(const std::string& title, const std::stri
     surface_->leftLimit=terminalSize_ ? std::min(leftMargin,terminalSize_->columns-1) : 0;
     surface_->columnsLimit=terminalSize_ ?
         std::optional<int>{std::max(surface_->leftLimit+1,terminalSize_->columns-rightMargin)} : std::nullopt;
-    surface_->rowsLimit=mapEditor_ && terminalSize_ ? std::optional<int>{terminalSize_->rows} : std::nullopt;
+    surface_->rowsLimit=terminalSize_ ? std::optional<int>{terminalSize_->rows} : std::nullopt;
     prepare_layout(kVisibleSettingsRows, breadcrumb);
     surface_->hintRow=hintRow_;
     surface_->begin_frame();
     set_heading_color();
     const auto target=player_==2 ? tr("Both players")+" ("+tr("Player 1")+" | "+tr("Player 2")+")" :
         tr("Player")+" "+std::to_string(player_+1);
-    line(1, (mapEditor_ ? tr("MAP EDITOR") : context_.user_settings().presetDefined ? tr("PRESET SETTINGS")+(localVersus_ ? " / "+tr("Edit target: ")+target : "") : (localVersus_ ? tr("Edit target: ") : "")+target)+" / "+title, column, frameWidth_);
+    const auto hostTitle=tr("Host configuration (read-only)");
+    line(1,readOnly_ ? hostTitle+(title==hostTitle ? "" : " / "+title) :
+        (mapEditor_ ? tr("MAP EDITOR") : context_.user_settings().presetDefined ? tr("PRESET SETTINGS")+(localVersus_ ? " / "+tr("Edit target: ")+target : "") : (localVersus_ ? tr("Edit target: ") : "")+target)+" / "+title, column, frameWidth_);
     set_text_color();
     const auto rows = UiText::breadcrumb_rows(breadcrumb, frameWidth_);
     for (std::size_t i = 0; i < rows.size(); ++i) line(3 + static_cast<int>(i), rows[i], column, frameWidth_);
@@ -405,7 +430,7 @@ void TerminalSettingsView::print_frame(const std::string& title, const std::stri
 }
 void TerminalSettingsView::print_shortcuts(bool editing) const {
     set_hint_color();
-    int row = hintRow_ + hintRows + 2;
+    int row = hintRow_ + hintLines_ + 1;
     // Wrap long multi-key captions so every configured key remains visible.
     const auto write = [&](const std::string& text) {
         std::string part;
@@ -422,8 +447,10 @@ void TerminalSettingsView::print_shortcuts(bool editing) const {
         }
         line(row++, part, column, frameWidth_);
     };
-    write(tr(editing ? "Up/Down Select   Right/Enter Apply" : "Up/Down Select   Right/Enter Open"));
-    write(tr(mapEditor_ ? "Left/Backspace/Esc Back" : context_.user_settings().presetDefined ? "Left/Backspace Back   Esc Exit" : "Left/Backspace Back   Esc Start screen"));
+    const bool compact=frameWidth_<60;
+    write(tr(compact?(editing?"Up/Down Select  Enter Apply":"Up/Down Select  Enter Open"):(editing ? "Up/Down Select   Right/Enter Apply" : "Up/Down Select   Right/Enter Open")));
+    if(readOnly_) {write(tr(compact?"Left/Esc Back":"Left/Backspace/Esc Back"));return;}
+    write(tr(compact?(mapEditor_ || context_.user_settings().presetDefined?"Left Back  Esc Exit":"Left Back  Esc Start"):(mapEditor_ ? "Left/Backspace/Esc Back" : context_.user_settings().presetDefined ? "Left/Backspace Back   Esc Exit" : "Left/Backspace Back   Esc Start screen")));
     if(mapEditor_) {write(tr(editing ? "S Save map" : "S Save map   Space Back   Tab Field / Sequence"));return;}
     const auto binding=[&](std::size_t control) {
         if (!localVersus_) return UiText::binding_label(context_.user_settings(),control);
@@ -462,14 +489,22 @@ void TerminalSettingsView::print_menu(const Model::SettingNode& menu, std::size_
     const auto first = selected/visibleRows_*visibleRows_;
     const auto end = std::min(menu.children.size(), first + visibleRows_);
     set_hint_color();
+    std::string footer;
     if (menu.children.size() > visibleRows_)
-        line(hintRow_ + hintRows, std::to_string(first + 1) + "-" + std::to_string(end) + " / " +
-            std::to_string(menu.children.size()) + tr("   PgUp/PgDn Page"), column, frameWidth_);
+        footer=std::to_string(first + 1) + "-" + std::to_string(end) + " / " +
+            std::to_string(menu.children.size()) + tr("   PgUp/PgDn Page");
     if (menu.section == UserConfig::Section::Network) {
         const auto* app = context_.app_component();
         const auto& primary = app && app->primaryContext ? *app->primaryContext : context_;
-        line(hintRow_ + hintRows, UiText::connection_status(primary.network_component() ? primary.network_component()->connectionMessage : "Disconnected"), column, frameWidth_);
+        const auto message=primary.network_component() ? primary.network_component()->connectionMessage : "Disconnected";
+        const auto status=message.rfind("Connected to ",0)==0 ? tr("Connected") :
+            message.rfind("Connecting to ",0)==0 ? tr("Connecting") : UiText::connection_status(message);
+        if(!footer.empty()) {
+            const auto pager=std::to_string(first+1)+"-"+std::to_string(end)+"/"+std::to_string(menu.children.size())+" PgUp/PgDn";
+            footer=Util::TerminalText::clip(status,std::max(0,frameWidth_-static_cast<int>(Util::TerminalText::width(pager))-2))+"  "+pager;
+        } else footer=Util::TerminalText::clip(status,frameWidth_);
     }
+    if(!footer.empty()) line(hintRow_+hintLines_,footer,column,frameWidth_);
     if (!menu.children.empty()) print_hint(menu.children[selected]);
     print_shortcuts();
     if(render) present();
@@ -478,29 +513,6 @@ void TerminalSettingsView::print_selection(const Model::SettingNode& menu, std::
     std::size_t selected, const std::string& breadcrumb) const {
     (void)previous;
     print_menu(menu,selected,breadcrumb);
-}
-void TerminalSettingsView::print_connection(std::size_t selected,const std::string& breadcrumb) const {
-    configure_layout(parent_,nullptr,true);
-    print_frame(tr("Connection status"),breadcrumb+" > Connection status",true);
-    print_box(boxes_.size()-1,tr("Connection status"));
-    const auto* app=context_.app_component();
-    const auto& primary=app && app->primaryContext ? *app->primaryContext : context_;
-    const auto* network=primary.network_component();
-    const auto status=UiText::connection_status(network ? network->connectionMessage : "Disconnected");
-    set_text_color();
-    const auto lines=Util::TerminalText::wrap(status,entryWidth_);
-    for (std::size_t i=0;i<std::min(lines.size(),std::size_t{5});++i)
-        line(firstRow_+static_cast<int>(i),lines[i],entryColumn_,entryWidth_);
-    const std::array<std::string,4> actions{{"Rooms","CONNECT / RECONNECT","DISCONNECT","Back to settings"}};
-    for (std::size_t i=0;i<actions.size();++i) {
-        set_text_color();
-        if (selected==i) set_selection_color();
-        line(firstRow_+6+static_cast<int>(i),(selected==i ? "> " : "  ")+tr(actions[i]),entryColumn_,entryWidth_);
-    }
-    set_hint_color();
-    print_hint_text(tr("Connection status updates here. Choose Rooms to create or join a room."));
-    print_shortcuts(true);
-    present();
 }
 void TerminalSettingsView::print_edit(const Model::SettingItem& item, const std::string& breadcrumb,
     const std::string& value, std::size_t caret) const {
@@ -517,11 +529,11 @@ void TerminalSettingsView::print_edit(const Model::SettingItem& item, const std:
     print_hint_text(preset_hint(item,item_hint(item)));
     if (item.keyBinding) {
         const bool menuShortcut=item.id==Model::SettingId::ControlRetry || item.id==Model::SettingId::ControlOpenSettings;
-        line(hintRow_ + hintRows, tr("Press and release a key; existing bindings toggle."), column, frameWidth_);
-        if (menuShortcut) line(hintRow_ + hintRows + 1, tr(context_.user_settings().presetDefined ? "Esc Cancel" : "Esc Start screen"), column, frameWidth_);
+        line(hintRow_ + hintLines_, tr("Press and release a key; existing bindings toggle."), column, frameWidth_);
+        if (menuShortcut) line(hintRow_ + hintLines_ + 1, tr(context_.user_settings().presetDefined ? "Esc Cancel" : "Esc Start screen"), column, frameWidth_);
     } else {
-        line(hintRow_ + hintRows, tr(context_.user_settings().presetDefined ? "Enter Confirm   Esc Cancel   Blank Keep value" : "Enter Save   Esc Save and start screen   Blank Keep value"), column, frameWidth_);
-        line(hintRow_ + hintRows + 1, tr("Left/Right Cursor   Backspace/Delete Edit"), column, frameWidth_);
+        line(hintRow_ + hintLines_, tr(context_.user_settings().presetDefined ? "Enter Confirm   Esc Cancel   Blank Keep value" : "Enter Save   Esc Save and start screen   Blank Keep value"), column, frameWidth_);
+        line(hintRow_ + hintLines_ + 1, tr("Left/Right Cursor   Backspace/Delete Edit"), column, frameWidth_);
     }
     const auto prompt = tr(item.keyBinding ? "Key: " : "New value: ");
     print_input(firstRow_ + 4,prompt,value,caret);
@@ -556,9 +568,9 @@ void TerminalSettingsView::print_scalar_input(const Model::SettingItem& item, co
     entryWidth_ = box.width;
     const int row = firstRow_ + static_cast<int>(parentSelected_ % visibleRows_);
     set_hint_color();
-    print_hint_text(preset_hint(item,item_hint(item)));
-    line(hintRow_ + hintRows, tr(item.allowEmptyText ? "Enter Confirm   Blank Auto name" : mapEditor_ || context_.user_settings().presetDefined ? "Enter Confirm   Esc Cancel   Blank Keep value" : "Enter Save   Esc Save and start screen   Blank Keep value"), column, frameWidth_);
-    line(hintRow_ + hintRows + 1, tr("Left/Right Cursor   Backspace/Delete Edit"), column, frameWidth_);
+    print_hint_text(server_address(item) ? tr("Type to replace; arrows edit the full address.") : preset_hint(item,item_hint(item)));
+    line(hintRow_ + hintLines_, tr(item.allowEmptyText ? "Enter Confirm   Blank Auto name" : mapEditor_ || context_.user_settings().presetDefined ? "Enter Confirm   Esc Cancel   Blank Keep value" : "Enter Save   Esc Save and start screen   Blank Keep value"), column, frameWidth_);
+    line(hintRow_ + hintLines_ + 1, tr("Left/Right Cursor   Backspace/Delete Edit"), column, frameWidth_);
     print_input(row,prompt,value,caret);
 }
 void TerminalSettingsView::print_choices(const Model::SettingItem& item, std::size_t selected,
@@ -579,7 +591,7 @@ void TerminalSettingsView::print_choices(const Model::SettingItem& item, std::si
     }
     set_hint_color();
     if (item.choice.labels.size() > visibleRows_)
-        line(hintRow_ + hintRows, std::to_string(first + 1) + "-" + std::to_string(end) + " / " +
+        line(hintRow_ + hintLines_, std::to_string(first + 1) + "-" + std::to_string(end) + " / " +
             std::to_string(item.choice.labels.size()) + tr("   PgUp/PgDn Page"), column, frameWidth_);
     const auto available = bot_availability(item, item.choice.values[selected]);
     const auto* rotationInfo = item.id == Model::SettingId::RotationSystem && item.choice.values[selected]>=0

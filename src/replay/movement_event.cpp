@@ -37,6 +37,7 @@ MovementEvent parse_movement_event(const Operation& operation) {
             result.lastRotation = payload->lastRotation;
             result.score = payload->score;
             result.pose = payload->pose;
+            result.inputActions=payload->inputActions;
         }
     }
     return result;

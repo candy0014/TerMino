@@ -16,7 +16,10 @@
 #include "tetr/replay/playback_clock.h"
 #include "tetr/replay/config_codec.h"
 #include "tetr/replay/recorder.h"
+#include "tetr/replay/local_versus_codec.h"
+#include "tetr/replay/replay_hash.h"
 #include "tetr/replay/session_state.h"
+#include "tetr/replay/file_path.h"
 #include "tetr/render/board_renderer.h"
 #include "tetr/runtime/game_context.h"
 #include "../src/app/post_game_statistics.h"
@@ -25,11 +28,13 @@
 #include "../src/app/ui_text.h"
 #include "support/terminal_screen.h"
 #include <cassert>
+#include <cmath>
 #include <iostream>
 #include <set>
 #include <sstream>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #ifdef __linux__
 #include <unistd.h>
 #endif
@@ -70,10 +75,10 @@ void metrics_and_frozen_times() {
     r.p.timing.realGameStart=r.context.real_now()-D::from_seconds(3);
     r.context.config.garbage.mode=Runtime::GarbageMode::QuickPlay;
     r.session.quickPlay.floor=5;r.session.quickPlay.altitude=600;
-    s.totalHolds=10;s.totalAttack=240;s.placedBlocks=300;s.totalLines=100;s.maxCombo=6;s.maxB2B=4;
+    s.score=9876543210123LL;s.totalHolds=10;s.totalAttack=240;s.placedBlocks=300;s.totalLines=100;s.maxCombo=6;s.maxB2B=4;
     App::freeze_post_game_times(r.context,r.p);
     const auto summary=App::make_post_game_statistics(r.context,r.p);
-    assert(summary.metrics.size()==19);
+    assert(summary.metrics.size()==22 && metric(summary,"SCORE")=="9876543210123");
     assert(metric(summary,"TIME")=="02:00.000" && metric(summary,"REAL TIME")=="00:03.000");
     assert(metric(summary,"FLOOR")=="5" && metric(summary,"ALTITUDE")=="600.00");
     assert(metric(summary,"ALTITUDE PER SECOND")=="5.000" && metric(summary,"HOLDS")=="10");
@@ -88,9 +93,10 @@ void metrics_and_frozen_times() {
     assert(App::make_post_game_statistics(r.context,r.p).metrics==summary.metrics);
     r.context.config.garbage.mode=Runtime::GarbageMode::None;r.context.config.simulationPps=0;
     const auto ordinary=App::make_post_game_statistics(r.context,r.p);
-    assert(ordinary.metrics.size()==15 && metric(ordinary,"REAL TIME").empty() && metric(ordinary,"FLOOR").empty());
+    assert(ordinary.metrics.size()==18 && metric(ordinary,"REAL TIME").empty() && metric(ordinary,"FLOOR").empty());
     r.p.gameplay.scoring={};r.p.timing.completedGameTime=D{};
     const auto empty=App::make_post_game_statistics(r.context,r.p);
+    assert(metric(empty,"SCORE")=="0");
     assert(metric(empty,"TIME")=="00:00.000" && metric(empty,"ATTACK PER PIECE")=="0.000");
     assert(metric(empty,"ATTACK PER MINUTE")=="0.000" && metric(empty,"PIECES PER SECOND")=="0.000");
     r.p.timing.completedGameTime=D::from_seconds(59.9996);
@@ -129,6 +135,20 @@ void saved_times_survive_replay_speed_and_end_screen_waits() {
     Runtime::RuntimeConfig bad;Replay::ConfigPrefixResult invalid;
     assert(!Replay::decode_config_prefix("{{result_real_time,-1}}",bad,invalid));
     assert(!Replay::decode_config_prefix("{{result_game_time,nan}}",bad,invalid));
+}
+void control_counts_outside_battles() {
+    Rig r;r.replay.undoCount=7;r.replay.pauseCount=3;
+    r.p.timing.completedGameTime=D::from_seconds(5);r.p.timing.completedRealTime=D::from_seconds(5);
+    auto data=App::make_post_game_statistics(r.context,r.p);
+    assert(metric(data,"UNDO COUNT")=="7" && metric(data,"PAUSE COUNT")=="3");
+    r.context.config.mode.replayMode=true;data=App::make_post_game_statistics(r.context,r.p);
+    assert(metric(data,"UNDO COUNT")=="7" && metric(data,"PAUSE COUNT")=="3");
+    for(const auto mode:{Runtime::GameMode::Multiplayer,Runtime::GameMode::LocalVersus}) {
+        r.context.config.mode.mode=mode;data=App::make_post_game_statistics(r.context,r.p);
+        assert(metric(data,"UNDO COUNT").empty() && metric(data,"PAUSE COUNT").empty());
+    }
+    r.context.config.mode.mode=Runtime::GameMode::Zen;r.context.config.garbage.mode=Runtime::GarbageMode::Multiplayer;
+    data=App::make_post_game_statistics(r.context,r.p);assert(metric(data,"UNDO COUNT").empty() && metric(data,"PAUSE COUNT").empty());
 }
 App::PostGameStatistics table_data(Rig& r) {
     const auto types=Piece::types_for_rotation_system(Runtime::RotationSystem::SrsPlus);
@@ -316,7 +336,7 @@ void rendering_navigation_scrolling_and_resize() {
     Capture output;Test::TerminalScreen screen;
     view.next_page();view.render(r.context,"footer",{80,24});screen.feed(output.take());
     assert(screen.text().find("RESULTS")==std::string::npos && screen.text().find("TIME")!=std::string::npos);
-    assert(screen.text().find("footer")==std::string::npos && screen.text().find("Tab:")==std::string::npos);
+    assert(screen.text().find("footer")==std::string::npos && screen.text().find("Tab Page")!=std::string::npos);
     view.next_page();assert(view.page()==App::PostGamePage::Clears);
     for (const auto size:{Render::TerminalSize{80,24},{32,12},{28,10},{120,40},{4,3},{80,24}}) {
         for (const auto delta:{std::pair<int,int>{0,0},{75,4},{200,200},{-180,-3},{-200,-200}}) {
@@ -329,15 +349,21 @@ void rendering_navigation_scrolling_and_resize() {
                 assert(screen.text().find("Selected:")==std::string::npos);
                 assert(screen.text().find("CLEAR STATISTICS")==std::string::npos);
                 assert(screen.text().find("SUM")!=std::string::npos);
+                for(int y=1;y<=size.rows;++y) for(int x=1;x<=size.columns;++x) {
+                    const auto cell=screen.at(y,x);
+                    if(cell.glyph=="│" || cell.glyph=="┌" || cell.glyph=="┼" || cell.glyph=="─")
+                        assert((cell.foreground==Test::TerminalScreen::Color{174,130,91}));
+                }
                 bool highlighted=false;
-                const auto accent=Render::ui_colors(Render::ColorRole::Accent,false).foreground;
+                const Test::TerminalScreen::Color accent{241,188,133};
                 for (int y=1;y<=size.rows;++y) for (int x=1;x<=size.columns;++x)
                     highlighted=highlighted || screen.at(y,x).background==accent;
                 assert(highlighted); // Includes the pinned total cell in a ten-row window.
             }
         }
     }
-    view.next_page();assert(view.page()==App::PostGamePage::Board);
+    view.next_page();assert(view.page()==App::PostGamePage::Summary);
+    view.close();assert(view.page()==App::PostGamePage::Board);
     view.render(r.context,"footer",{80,24});assert(output.take().empty());
     view.next_page();view.render(r.context,"footer",{80,24});screen.feed(output.take());
     assert(screen.text().find("TIME")!=std::string::npos && screen.text().find("CLEAR STATISTICS")==std::string::npos);
@@ -353,13 +379,43 @@ void rendering_navigation_scrolling_and_resize() {
     assert(keys.reserves(N::key_code(K::Left)));
     down.clear();keys.poll(navigation);down.insert(N::key_code(K::PageDown));keys.poll(navigation);
     assert(keys.player_index()==1);
+    down.clear();keys.poll(navigation);down.insert(N::key_code(K::Back));keys.poll(navigation);
+    assert(keys.page()==App::PostGamePage::Board && !keys.reserves(N::key_code(K::Back)));
+}
+void clear_table_text_stays_readable() {
+    const auto luminance=[](const Test::TerminalScreen::Color& color) {
+        const auto channel=[](int value) {
+            const double c=value/255.;return c<=.04045 ? c/12.92 : std::pow((c+.055)/1.055,2.4);
+        };
+        return .2126*channel(color[0])+.7152*channel(color[1])+.0722*channel(color[2]);
+    };
+    for(bool obscured:{false,true}) for(const auto size:{Render::TerminalSize{120,40},{80,24},{28,10}}) {
+        Rig r;r.context.config.display.obscuredColors=obscured;
+        auto data=table_data(r);
+        std::fill(data.pieceColors.begin(),data.pieceColors.end(),8); // Dark gameplay colors must not dim the labels.
+        App::PostGameStatisticsView view(data);view.next_page();view.next_page();
+        for(const auto delta:{std::pair{0,0},std::pair{1,1},std::pair{100,100}}) {
+            view.move(delta.first,delta.second);view.invalidate();Capture output;view.render(r.context,"",size);
+            Test::TerminalScreen screen;screen.feed(output.take());
+            bool selected=false;
+            const Test::TerminalScreen::Color selection{241,188,133};
+            for(int y=1;y<=size.rows;++y) for(int x=1;x<=size.columns;++x) {
+                const auto cell=screen.at(y,x);
+                selected=selected || cell.background==selection;
+                if(cell.glyph.empty() || cell.glyph==" ") continue;
+                const auto a=luminance(cell.foreground),b=luminance(cell.background);
+                assert((std::max(a,b)+.05)/(std::min(a,b)+.05)>=4.5);
+            }
+            assert(selected);
+        }
+    }
 }
 void summary_single_column_order_and_save_overlay() {
     Rig r;r.context.config.garbage.mode=Runtime::GarbageMode::QuickPlay;r.context.config.simulationPps=1;
     const auto data=App::make_post_game_statistics(r.context,r.p);
-    const std::vector<std::string> expected{"TIME","REAL TIME","FLOOR","ALTITUDE","ALTITUDE PER SECOND",
+    const std::vector<std::string> expected{"SCORE","TIME","REAL TIME","FLOOR","ALTITUDE","ALTITUDE PER SECOND",
         "ATTACK","ATTACK PER MINUTE","ATTACK PER PIECE","TOTAL ATTACK","TOTAL RECEIVED","MAXIMUM SPIKE",
-        "PIECES","PIECES PER SECOND","LINES","LINES PER MINUTE","ALLCLEAR","HOLDS","MAXIMUM COMBO","MAXIMUM BACK-TO-BACK CHAIN"};
+        "PIECES","PIECES PER SECOND","LINES","LINES PER MINUTE","ALLCLEAR","HOLDS","MAXIMUM COMBO","MAXIMUM BACK-TO-BACK CHAIN","UNDO COUNT","PAUSE COUNT"};
     assert(data.metrics.size()==expected.size());
     for (std::size_t i=0;i<expected.size();++i) assert(data.metrics[i].first==expected[i]);
     for (const auto size:{Render::TerminalSize{120,40},{80,24},{48,16},{28,10}}) {
@@ -367,9 +423,10 @@ void summary_single_column_order_and_save_overlay() {
         int boxColumn=-1;
         for (int index=0;index<int(expected.size());++index) {
             assert(view.selected_metric()==index);view.render(r.context,"footer",size);screen.feed(output.take());
-            assert(screen.text().find(index==18 ? "MAXIMUM B2B" : expected[index])!=std::string::npos);
+            assert(screen.text().find(expected[index]=="MAXIMUM BACK-TO-BACK CHAIN" ? "MAXIMUM B2B" : expected[index])!=std::string::npos);
             for (int y=1;y<=size.rows;++y) for (int x=1;x<=size.columns;++x) if (screen.at(y,x).glyph=="┌") {
                 if (boxColumn<0) boxColumn=x;
+                assert(x==3);
                 assert(x==boxColumn && (screen.at(y,x).foreground==Test::TerminalScreen::Color{237,109,0}));
             }
             view.move(1,0);
@@ -377,20 +434,57 @@ void summary_single_column_order_and_save_overlay() {
         view.show_replay_save_prompt("default.txt","中文很长的回放名字abcdef.txt",30);
         view.render(r.context,"footer",size);screen.feed(output.take());
         assert(screen.text().find("Save Replay")!=std::string::npos);
-        view.finish_replay_save_prompt("Replay saved: replay/test.txt");view.render(r.context,"footer",size);screen.feed(output.take());
+        view.finish_replay_save_prompt("Replay saved: .tetr/replay/test.txt");view.render(r.context,"footer",size);screen.feed(output.take());
         assert(screen.text().find("Save Replay")==std::string::npos);
         view.invalidate();view.render(r.context,"footer",size);Test::TerminalScreen fresh;fresh.feed(output.take());equal_screens(screen,fresh,size);
     }
 }
 #ifdef __linux__
+void actual_save_twice(bool playback,bool local) {
+    Rig first,second;Capture output;
+    first.context.config.mode.replayMode=second.context.config.mode.replayMode=playback;
+    first.replay.data=second.replay.data="{{Model,0}}";
+    const std::string original=local?Replay::encode_local_versus_replay("{{Model,0}}{end_all,1}","{{Model,6}}{end_all,1}")
+        :"{{Model,0}}{end_all,1}";
+    if(playback) {
+        first.replay.loadedRecording=original;
+        Replay::configure_playback(first.context,1,D::from_seconds(1));Replay::finish_playback(first.context,first.context.now());
+    }
+    const auto codes=UserConfig::default_key_codes();Input::refresh_bindings(first.input,codes);Input::refresh_bindings(second.input,codes);
+    const auto base="save_as_"+std::to_string(getpid())+"_"+std::to_string(playback)+"_"+std::to_string(local);
+    const std::filesystem::path a=local?std::filesystem::path(base+"_one.txt"):Replay::replay_directory()/(base+"_one.txt");
+    const auto b=std::filesystem::temp_directory_path()/base/std::filesystem::u8path("中文 two.txt");
+    const auto typed=(local?"./"+a.generic_u8string():a.filename().string())+"\n\""+b.u8string()+"\"\n";
+    int descriptors[2];assert(pipe(descriptors)==0);const int saved=dup(STDIN_FILENO);assert(saved>=0);
+    assert(dup2(descriptors[0],STDIN_FILENO)>=0);assert(write(descriptors[1],typed.data(),typed.size())==ssize_t(typed.size()));
+    int attempts=0;bool held=false;
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    first.input.keyStateProvider=[&](int key) {
+        assert(std::chrono::steady_clock::now()<deadline);
+        if(key==codes[8])return std::filesystem::exists(a) && std::filesystem::exists(b);
+        if(key!=codes[10])return false;
+        if(held){held=false;return false;}
+        if(attempts==1 && !std::filesystem::exists(a))return false;
+        if(attempts<2){++attempts;held=true;return true;}return false;
+    };
+    if(local)App::run_local_versus_post_game_interaction(first.context,second.context);
+    else App::run_post_game_interaction(first.context,first.p);
+    assert(attempts==2);
+    assert(dup2(saved,STDIN_FILENO)>=0);close(saved);close(descriptors[0]);close(descriptors[1]);std::cin.clear();
+    const auto read=[](const auto& path){std::ifstream file(path);return std::string(std::istreambuf_iterator<char>(file),{});};
+    const auto data=read(a);assert(data==read(b));
+    assert(data.size()>17 && Replay::replay_hash_suffix(data.substr(0,data.size()-17))==data.substr(data.size()-17));
+    if(playback)assert(data==original+Replay::replay_hash_suffix(original));
+    std::filesystem::remove(a);std::filesystem::remove_all(b.parent_path());
+}
 void actual_save_stays_on_statistics_page(int page,bool local,int action) {
     Rig first,second;Capture output;Test::TerminalScreen screen;
     first.replay.data="{{Model,0}}";second.replay.data="{{Model,0}}";
     auto codes=UserConfig::default_key_codes();Input::refresh_bindings(first.input,codes);Input::refresh_bindings(second.input,codes);
     const int retry=codes[8],save=codes[10],tab=App::Settings::NavigationInput::key_code(App::Settings::NavigationKey::Tab);
     const std::string name="statistics_中文_"+std::to_string(getpid())+"_"+std::to_string(page)+"_"+std::to_string(local)+".txt";
-    const auto path=std::filesystem::path("replay")/name;assert(!std::filesystem::exists(path));
-    const std::string typed=action==0 ? name+"\n" : action==1 ? "\x1b" : "../outside.txt\n";
+    const auto path=Replay::replay_directory()/name;assert(!std::filesystem::exists(path));
+    const std::string typed=action==0 ? name+"\n" : action==1 ? "\x1b" : ".tetr/replay/\n";
     int descriptors[2];assert(pipe(descriptors)==0);const int saved=dup(STDIN_FILENO);assert(saved>=0);
     assert(dup2(descriptors[0],STDIN_FILENO)>=0);assert(write(descriptors[1],typed.data(),typed.size())==ssize_t(typed.size()));
     int step=0;bool fired=false,sawDialog=false;
@@ -411,7 +505,7 @@ void actual_save_stays_on_statistics_page(int page,bool local,int action) {
             screen.feed(output.take());
             if (fired) {
                 assert(sawDialog && screen.text().find(title)!=std::string::npos);
-                assert(screen.text().find(action==0 ? "Replay saved:" : action==1 ? "Replay save cancelled." : "Invalid file name.")!=std::string::npos);
+                assert(screen.text().find(action==0 ? "Replay saved:" : action==1 ? "Replay save cancelled." : "Invalid file name or path.")!=std::string::npos);
                 return true;
             }
             ++step;
@@ -435,6 +529,7 @@ void actual_end_screen_cycle(bool replay,bool network,bool local) {
     if (replay) {Replay::configure_playback(first.context,1024,D::from_seconds(10));Replay::finish_playback(first.context,first.context.now());}
     first.p.gameplay.scoring.totalAttack=12;second.p.gameplay.scoring.totalAttack=99;
     auto codes=UserConfig::default_key_codes();const int retry=codes[8],tab=App::Settings::NavigationInput::key_code(App::Settings::NavigationKey::Tab);
+    const int escape=App::Settings::NavigationInput::key_code(App::Settings::NavigationKey::Back);
     Input::refresh_bindings(first.input,codes);
     Capture output;Test::TerminalScreen screen;int step=0;
     first.input.keyStateProvider=[&](int key) {
@@ -442,22 +537,44 @@ void actual_end_screen_cycle(bool replay,bool network,bool local) {
             screen.feed(output.take());
             if (step==1 || step==2 || step==3) assert(screen.text().find("TIME & ALTITUDE")!=std::string::npos);
             if (step==4 || step==5 || step==6) assert(screen.text().find("PIECE")!=std::string::npos);
-            if (step==7) {
+            if (step==7 || step==8) assert(screen.text().find("TIME & ALTITUDE")!=std::string::npos);
+            if (step>=9) {
                 assert(screen.text().find("PIECE")==std::string::npos);
                 if (network) assert(screen.text().find("You lost this game!")!=std::string::npos);
             }
-            return step++>=9;
+            return step++>=11;
         }
+        if(key==escape) return step==9 || step==10;
         return key==tab && (step==1 || step==2 || step==4 || step==7);
     };
+    bool escapedApplication=false;
+    first.input.controlInterrupt=[&] {if(first.input.control_key_pressed(escape)) escapedApplication=true;};
     if (local) App::run_local_versus_post_game_interaction(first.context,second.context);
     else App::run_post_game_interaction(first.context,first.p);
-    assert(step==10);
+    assert(step==12 && !escapedApplication);
     assert(first.p.timing.completedGameTime && first.p.timing.completedRealTime);
     if (replay) assert(first.replay.playback.finished && first.replay.playback.speed==1024);
 }
 }
 int main(int argc,char** argv) {
+    if(argc>2 && std::string(argv[1])=="--gallery") {
+        const auto directory=std::filesystem::path(argv[2]);std::filesystem::create_directories(directory);
+        for(bool hidden:{false,true})for(const auto size:{Render::TerminalSize{120,40},Render::TerminalSize{80,24}}) {
+            Rig r;r.context.config.display.obscuredColors=hidden;
+            App::UiText::set_language(App::UiText::Language::English);
+            App::PostGameStatisticsView view(table_data(r));view.next_page();view.next_page();
+            Test::TerminalScreen screen;{Capture output;view.render(r.context,"Save Replay: [S]",size);screen.feed(output.take());}
+            std::ofstream file(directory/(std::to_string(size.columns)+(hidden?"-hidden":"-normal")+".json"));
+            file<<"{\"columns\":"<<size.columns<<",\"rows\":"<<size.rows<<",\"cells\":[";
+            for(int y=1;y<=size.rows;++y)for(int x=1;x<=size.columns;++x) {
+                const auto c=screen.at(y,x);if(y>1 || x>1)file<<',';
+                file<<'['<<x-1<<','<<y-1<<','<<std::quoted(c.glyph)<<",["<<c.foreground[0]<<','<<c.foreground[1]<<','<<c.foreground[2]
+                    <<"],["<<c.background[0]<<','<<c.background[1]<<','<<c.background[2]<<"]]";
+            }
+            file<<"]}\n";
+        }
+        return 0;
+    }
     if (argc>1) {
         Rig r;r.p.gameplay.scoring.totalAttack=240;r.p.gameplay.scoring.placedBlocks=300;
         r.p.gameplay.scoring.totalLines=100;r.p.gameplay.scoring.maxSpike=28;
@@ -476,12 +593,14 @@ int main(int argc,char** argv) {
     round_libraries_and_max_spike();allclear_and_scaled_attack_totals();
     const auto language=App::UiText::language();App::UiText::set_language(App::UiText::Language::English);
     Capture output;
-    metrics_and_frozen_times();saved_times_survive_replay_speed_and_end_screen_waits();catalog_columns_categories_and_totals();
+    metrics_and_frozen_times();control_counts_outside_battles();saved_times_survive_replay_speed_and_end_screen_waits();catalog_columns_categories_and_totals();
     actual_settlement_counts_large_clears_and_spins();holds_reset_and_undo();
     rendering_navigation_scrolling_and_resize();
+    clear_table_text_stays_readable();
     actual_end_screen_cycle(false,false,false);actual_end_screen_cycle(true,false,false);
     summary_single_column_order_and_save_overlay();
 #ifdef __linux__
+    for(bool playback:{false,true})for(bool local:{false,true})actual_save_twice(playback,local);
     for (int page:{1,2}) for (bool local:{false,true}) for (int action:{0,1,2}) actual_save_stays_on_statistics_page(page,local,action);
 #endif
     actual_end_screen_cycle(false,true,false);actual_end_screen_cycle(false,false,true);

@@ -8,7 +8,7 @@ ConditionPathExists=%h/.config/termino-cloudflare/token
 
 [Service]
 Type=exec
-ExecStart=%h/termino-cloudflare/current/cloudflared tunnel --no-autoupdate --protocol http2 --metrics 127.0.0.1:20241 run --token-file %h/.config/termino-cloudflare/token
+ExecStart=/usr/bin/python3 %h/termino-cloudflare/run_cloudflare_direct.py
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=15s

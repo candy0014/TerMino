@@ -8,7 +8,7 @@
 
 namespace Network {
 
-// One game packet per WebSocket message. TLS and framing belong to libcurl;
+// Bounded event batches with one-packet legacy fallback. TLS belongs to libcurl;
 // all I/O runs on one worker, keeping DNS/connect/send away from the game loop.
 class WebSocketSocket {
 public:
@@ -19,6 +19,7 @@ public:
     void send(const std::string& message);
     std::optional<std::string> receive_for(std::chrono::milliseconds timeout);
     void close() noexcept;
+    bool uses_event_stream() const noexcept;
     static bool recognizes(const std::string& address) noexcept;
 private:
     struct Impl;

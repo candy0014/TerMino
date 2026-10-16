@@ -47,6 +47,9 @@ void hidden_row(const Path& path,Id selected,Part selectedPart,Id control,Part c
 
 int main() {
     using namespace Model;
+    for(const auto& entry:UserConfig::forced_handling_settings())
+        hidden_row({"GAME","forced-handling"},entry.value,Part::Raw,entry.enabled,Part::Raw,
+            [&](auto&,auto& two){UserConfig::assign_setting_text(two,entry.enabled,"1");});
     const Path pieces{"GAME","pieces"},timing{"GAME","timing"},gravity{"GAME","gravity"};
     const Path b2b{"GAME","attack-rules","b2b-reward"};
     const Path half{"GAME","attack-rules","half-clear"},perfect{"GAME","attack-rules","perfect-clear"};

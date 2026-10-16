@@ -37,6 +37,7 @@ bool remap_profile(const std::filesystem::path& path,const UserConfig::Settings&
             if(section=="MAPS" && key=="Selected") value=profile.mapId;
             if(!profile.mapId && section=="MAPS" && key=="Rotation System") value=profile.mapRotationSystem;
             if(!profile.mapId && section=="MODEL" && key=="Map Mode") value=profile.mapGoal;
+            if(!profile.mapId && section=="MODEL" && key=="Goal") value=profile.goal;
             if(value) {
                 const auto first=line.find_first_not_of(" \t",equals+1);
                 if(first!=std::string::npos) {

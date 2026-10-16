@@ -2,6 +2,7 @@
 #include "tetr/compat/board_encoding.h"
 #include "tetr/compat/piece_encoding.h"
 #include "tetr/replay/operation_codec.h"
+#include "tetr/replay/challenge_prefix.h"
 #include "tetr/app/application_state.h"
 #include "tetr/util/text_codec.h"
 
@@ -15,6 +16,7 @@ namespace Replay {
 
 std::string recording_for_save(const Runtime::GameContext& context) {
     const auto& state = session(context);
+    if(context.config.mode.replayMode && !state.loadedRecording.empty())return state.loadedRecording;
     std::string recording = state.data;
     const auto headerEnd = Util::Text::matching_brace(recording, 0);
     if (headerEnd != std::string::npos) {
@@ -22,9 +24,24 @@ std::string recording_for_save(const Runtime::GameContext& context) {
         metadata.imbue(std::locale::classic());
         metadata<<"{undo_count,"<<state.undoCount<<"}{pause_count,"<<state.pauseCount<<'}';
         const auto& timing=context.session.player.timing;
+        auto gameTime=timing.completedGameTime,realTime=timing.completedRealTime;
+        const auto* app=context.app_component();
+        const auto* round=app && app->challenge_round(&context)?&*app->challenge_round(&context):nullptr;
+        if(round && round->completedResult) {
+            // Preserve the full source's times when the visible challenge
+            // result has already been replaced with its earlier prefix.
+            gameTime=Runtime::Duration::from_seconds(round->completedResult->gameSeconds);
+            realTime=Runtime::Duration::from_seconds(round->completedResult->realSeconds);
+        }
         metadata<<std::setprecision(std::numeric_limits<double>::max_digits10);
-        if (timing.completedGameTime) metadata<<"{result_game_time,"<<timing.completedGameTime->seconds()<<'}';
-        if (timing.completedRealTime) metadata<<"{result_real_time,"<<timing.completedRealTime->seconds()<<'}';
+        if (gameTime) metadata<<"{result_game_time,"<<gameTime->seconds()<<'}';
+        if (realTime) metadata<<"{result_real_time,"<<realTime->seconds()<<'}';
+        if(round) {
+            // Undo can replace the operation stream. Such attempts are not
+            // eligible, and their old placement ordinals must not be cached.
+            if(!state.undoCount && !state.pauseCount && round->evaluated)
+                metadata<<encode_challenge_prefixes(round->replayPrefixes);
+        }
         recording.insert(headerEnd,metadata.str());
     }
     return recording;
@@ -94,7 +111,9 @@ void record_end_move_data(
     Runtime::GameContext& context,
     Runtime::RotationRecord lastRotation,
     long long score,
-    Piece::Pose pose) {
+    Piece::Pose pose,int inputActions) {
+    if(inputActions>=0){add_replay(context,OperationKind::EndMoveData,Compat::to_legacy(lastRotation),score,
+        pose.position.row,pose.position.col,Compat::to_legacy(pose.rotation),inputActions);return;}
     add_replay(
         context,
         OperationKind::EndMoveData,

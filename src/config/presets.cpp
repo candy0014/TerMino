@@ -1,3 +1,4 @@
+#include "tetr/challenges/challenges.h"
 #include "tetr/config/presets.h"
 #include "tetr/runtime/game_modes.h"
 
@@ -25,6 +26,17 @@ using Id=SettingId;
 constexpr std::size_t maxLayers=256;
 PresetValue read(const Settings& settings,Id id) { return read_value(settings,id); }
 void write(Settings& settings,Id id,const PresetValue& value) { write_value(settings,id,value); }
+void mechanism_handling(PresetFields& values) {
+    for(const auto& entry:forced_handling_settings()) {
+        const auto value=values.find(entry.personal);
+        if(value==values.end() || values.count(entry.enabled) || values.count(entry.value)) continue;
+        values.emplace(entry.enabled,1);values.emplace(entry.value,value->second);values.erase(value);
+        if(entry.personal==Id::SoftDropFactor) {
+            const auto fixed=values.find(Id::SoftDropFixed);
+            if(fixed!=values.end()) {values.emplace(Id::ForcedSdfFixed,fixed->second);values.erase(fixed);}
+        }
+    }
+}
 // Presets own separate concerns: Classic supplies rules, Delayed handling,
 // and Marathon a goal/speed curve. Inactive and personal settings stay intact.
 PresetFields fields(PresetKind kind) {
@@ -37,9 +49,13 @@ PresetFields fields(PresetKind kind) {
     const auto progression=[&](Id id,PresetValue value){if(classic || marathon) result.emplace(id,value);};
     for (const auto& descriptor:setting_schema()) {
         const auto id=descriptor.id;
+        if(id>=Id::ForceSdf && id<=Id::ForcedDasPrecharge) continue;
         if (descriptor.keyBinding || descriptor.section==Section::Network || descriptor.section==Section::Others) continue;
         switch (id) {
-            case Id::GameMode: progression(id,marathon ? 1 : 0);break;
+            case Id::ChallengeRules: rule(id,0);break;
+            case Id::GameMode: progression(id,0);break;
+            case Id::Goal: if(marathon) result.emplace(id,2);break;
+            case Id::GarbageTarget: case Id::PieceTarget: case Id::AttackTarget: case Id::AllClearTarget: break;
             case Id::RacingDistance: if(marathon) result.emplace(id,150);break;
             case Id::FieldWidth: rule(id,10);break;
             case Id::FieldHeight: rule(id,20);break;
@@ -78,7 +94,7 @@ PresetFields fields(PresetKind kind) {
             // dormant modifiers, reward amounts and unrelated mode parameters.
             case Id::DisableUndo: case Id::DisablePause: case Id::AutoplayMode:
             case Id::SimulationPps: case Id::TurnPieces:
-            case Id::B2BRewardAmount: case Id::B2BChargeThreshold: case Id::B2BChargeReduction:
+            case Id::B2BRewardAmount: case Id::B2BChargeThreshold: case Id::B2BChargeReduction: case Id::AttackMultiplier:
             case Id::PerfectClearAttack: case Id::HalfClearAttack: case Id::HalfClearCharge:
             case Id::QpExpert: case Id::QpNoHold: case Id::QpMessy: case Id::QpGravity: case Id::QpVolatile:
             case Id::QpDoubleHole: case Id::QpInvisible: case Id::QpAllSpin: case Id::QpBackfire:
@@ -91,13 +107,16 @@ PresetFields fields(PresetKind kind) {
             case Id::MessinessWithinAttack: case Id::AvoidSameColumn: case Id::GarbageCap: case Id::OpenerPhase:
             case Id::QpDefaultFloor: case Id::AutoplayPps: case Id::AutoplayWidth: case Id::AutoplayHandlingSimulation:
             case Id::MapId: case Id::MapRotationSystem: case Id::MapGoal: break;
+            case Id::InvisibilityDelay: case Id::InvisibilityInterval: case Id::InvisibilityDuration: break;
             default: throw std::logic_error("unreviewed preset setting");
         }
     }
+    // Built-in handling is a game mechanism; it never rewrites personal feel.
+    if(classic || delayed) mechanism_handling(result);
     return result;
 }
 bool marathon_parameter(Id id) {
-    return id==Id::GameMode || id==Id::GravityInterval || id==Id::GravityProgression ||
+    return id==Id::GameMode || id==Id::Goal || id==Id::GravityInterval || id==Id::GravityProgression ||
         id==Id::GravityLevelLines || id==Id::GravityAcceleration || id==Id::InstantGravity;
 }
 void recompose(Settings& settings,bool keepMatchMode) {
@@ -191,7 +210,8 @@ const PresetLayer* source(const Settings& settings,Id id) {
 bool modified(const PresetLayer& layer) { return layer.values!=layer.reference; }
 void record_edits(Settings& settings) {
     for (auto& layer:settings.presets.layers)
-        for (auto& [id,value]:layer.values) if (source(settings,id)==&layer) value=read(settings,id);
+        for (auto& [id,value]:layer.values) if (source(settings,id)==&layer &&
+            (!settings.challengeAdjustment || !settings.challengeAdjustment->before.count(id))) value=read(settings,id);
 }
 bool apply(Settings& settings,PresetKind kind,bool keepMatchMode) {
     Collection collection;if(!load(collection)) return false;
@@ -199,6 +219,7 @@ bool apply(Settings& settings,PresetKind kind,bool keepMatchMode) {
     return found!=collection.presets.end() && apply(settings,*found,keepMatchMode);
 }
 bool remove(Settings& settings,std::uint64_t serial,bool keepMatchMode) {
+    Challenges::restore_adjustment(settings);
     const auto it=std::find_if(settings.presets.layers.begin(),settings.presets.layers.end(),[&](const auto& layer){return layer.serial==serial;});
     if (it==settings.presets.layers.end()) return false;
     record_edits(settings);
@@ -210,11 +231,12 @@ bool undo(Settings& settings,bool keepMatchMode) {
     return !settings.presets.layers.empty() && remove(settings,settings.presets.layers.back().serial,keepMatchMode);
 }
 bool clear(Settings& settings,bool keepMatchMode) {
+    Challenges::restore_adjustment(settings);
     if (settings.presets.layers.empty()) return false;
     record_edits(settings);
     settings.presets.layers.clear();recompose(settings,keepMatchMode);return true;
 }
-void commit(Settings& settings) { settings.presets.base.clear();settings.presets.layers.clear();settings.presets.undefinedBase.clear(); }
+void commit(Settings& settings) { Challenges::restore_adjustment(settings);settings.presets.base.clear();settings.presets.layers.clear();settings.presets.undefinedBase.clear(); }
 std::string encode(const PresetState& state) {
     std::ostringstream out;out.imbue(std::locale::classic());out<<std::setprecision(17);
     out<<2<<' '<<state.nextSerial<<' ';write_fields(out,state.base);out<<' '<<state.layers.size();
@@ -296,12 +318,19 @@ PresetFields draft_fields(const Settings& settings) {
     return fields;
 }
 bool apply(Settings& settings,const SavedPreset& preset,bool keepMatchMode,bool playerTwo) {
+    Challenges::restore_adjustment(settings);
     if(settings.presets.layers.size()>=maxLayers || settings.presets.nextSerial==std::numeric_limits<std::uint64_t>::max()) return false;
     auto values=playerTwo && preset.playerTwoFields ? *preset.playerTwoFields : preset.fields;
-    const auto originalMode=settings.presets.base.find(Id::GameMode);
-    const int mode=originalMode==settings.presets.base.end() ? settings.gameMode : std::get<int>(originalMode->second);
-    const auto assignedMode=values.find(Id::GameMode);
-    if(keepMatchMode || (preset.kind==PresetKind::Classic && mode==1 && assignedMode!=values.end() && std::get<int>(assignedMode->second)==0)) values.erase(Id::GameMode);
+    migrate_legacy_modes(settings);
+    if(const auto assigned=values.find(Id::GameMode);assigned!=values.end()) {
+        const int old=std::get<int>(assigned->second);
+        if(old==1 || old==-1 || old==2 || old==-2) {
+            assigned->second=0;
+            values.try_emplace(Id::Goal,old==1 || old==-1 ? 2 : 1);
+            if(old==2) values[Id::GravityProgression]=3;
+        }
+    }
+    if(keepMatchMode) values.erase(Id::GameMode);
     if(values.empty()) return true;
     record_edits(settings);
     for(const auto& [id,value]:values) {
@@ -341,7 +370,12 @@ bool load(Collection& collection,const std::filesystem::path& path) {
             int second=0;if(!(in>>second) || (second!=0 && second!=1)) return false;
             if(second) {preset.playerTwoFields.emplace();if(!read_fields(in,*preset.playerTwoFields)) return false;}
         }
-        preset.kind=static_cast<PresetKind>(kind);result.presets.push_back(std::move(preset));
+        preset.kind=static_cast<PresetKind>(kind);
+        if(preset.kind==PresetKind::Classic || preset.kind==PresetKind::Delayed) {
+            mechanism_handling(preset.fields);
+            if(preset.playerTwoFields) mechanism_handling(*preset.playerTwoFields);
+        }
+        result.presets.push_back(std::move(preset));
     }
     in>>std::ws;if(!in.eof() || in.bad()) return false;
     collection=std::move(result);return true;
@@ -422,6 +456,7 @@ bool remap_maps(const std::vector<std::pair<int,int>>& changes,const std::filesy
                 found->second=newId;changed=true;
                 if(!newId) {
                     if(fields->count(Id::MapGoal)) (*fields)[Id::MapGoal]=0;
+                    if(fields->count(Id::Goal) && std::get<int>((*fields)[Id::Goal])==7) (*fields)[Id::Goal]=0;
                     if(fields->count(Id::MapRotationSystem)) (*fields)[Id::MapRotationSystem]=-1;
                 }
                 break;

@@ -10,6 +10,7 @@
 namespace Runtime { class GameContext; }
 
 namespace Network {
+void send_player_setup(Runtime::GameContext& context,const LobbyPlayerSetup& setup);
 
 void send_lobby_signal(Runtime::GameContext& context, ClientLobbySignal signal);
 std::optional<ServerLobbySignal> receive_lobby_signal_for(

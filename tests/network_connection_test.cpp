@@ -13,7 +13,7 @@ struct Client {
     Runtime::GameContext context{session,services};
     Network::NetworkServices network;
     Client() { context.attach_network(network); }
-    void join(const std::string& ip="127.0.0.1") { Network::initialize_network_services(context,ip); }
+    void join(const std::string& ip="127.0.0.1") { Network::initialize_network_services(context,ip,3); }
 };
 int main() {
     using Network::ConnectionState;
@@ -29,7 +29,14 @@ int main() {
             for(auto* client:{&a,&b,&c}) Network::poll_connection(client->network);
         }
     };
+    const auto connectingRevision=a.network.roomRevision;
     pump(); assert(a.network.connection==ConnectionState::Connected);
+    assert(a.network.roomRevision>connectingRevision); // Connection completion refreshes settings.
+    a.network.lastConnectionSend={};Network::poll_connection(a.network);
+    for(int i=0;i<10;++i) server.poll(std::chrono::milliseconds(1));
+    a.network.lastConnectionReply=std::chrono::steady_clock::now()-Network::kConnectedTimeout-std::chrono::seconds(1);
+    Network::poll_connection(a.network);
+    assert(a.network.connection==ConnectionState::Connected); // Consume queued pong before timeout.
     b.join("localhost"); pump(); assert(b.network.connection==ConnectionState::Connected);
     assert(b.network.serverIp=="localhost");
     assert(b.network.resolvedServerIp=="127.0.0.1");
@@ -39,7 +46,7 @@ int main() {
     Network::request_room(b.network,Network::RoomOperation::Join,"TEST"); pump();
     Network::request_room(c.network,Network::RoomOperation::Join,"TEST"); pump();
     assert(c.network.room.name.empty() && c.network.roomMessage.find("full")!=std::string::npos);
-    Network::set_room_policy(a.network,{false,false}); pump();
+    Network::set_room_policy(a.network,{false}); pump();
     for(auto* client:{&a,&b})
         Network::send(client->network,std::string(Network::encode_client_lobby_signal(Network::ClientLobbySignal::ReadyForConfig)));
     pump();
@@ -83,7 +90,7 @@ int main() {
     a.join(); pump(); assert(a.network.connection==ConnectionState::Connected);
     Network::request_room(a.network,Network::RoomOperation::Join,"TEST"); pump(); assert(a.network.room.name=="TEST");
     // A crashed client stops heartbeats; the remaining client keeps its slot.
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(5200);
+    const auto deadline=std::chrono::steady_clock::now()+Network::kConnectedTimeout+std::chrono::milliseconds(200);
     while(std::chrono::steady_clock::now()<deadline) {
         server.poll(std::chrono::milliseconds(10));
         Network::poll_connection(b.network);
@@ -108,7 +115,7 @@ int main() {
     a.join("127.0.0.1:3001"); b.join("localhost:3001"); customPump();
     Network::request_room(a.network,Network::RoomOperation::Create,"PORT"); customPump();
     Network::request_room(b.network,Network::RoomOperation::Join,"PORT"); customPump();
-    Network::set_room_policy(a.network,{false,false}); customPump();
+    Network::set_room_policy(a.network,{false}); customPump();
     for(auto* client:{&a,&b}) {
         assert(client->network.connection==ConnectionState::Connected);
         assert(client->network.serverPort==3001);

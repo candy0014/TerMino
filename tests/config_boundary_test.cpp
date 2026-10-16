@@ -188,7 +188,8 @@ void replay_config_round_trips() {
         assert(result.operationOffset == encoded.size());
         assert(result.blockSeed == blockSeed);
         assert(result.garbageSeed == garbageSeed);
-        assert(Compat::to_legacy(output.mode.mode) == Compat::to_legacy(input.mode.mode));
+        Runtime::redirect_legacy_mode(input);
+        assert(output.mode.mode == input.mode.mode && output.mode.goal==input.mode.goal);
         assert(Compat::to_legacy(output.garbage.mode) == Compat::to_legacy(input.garbage.mode));
         assert(output.garbage.holePattern == input.garbage.holePattern);
         assert(Compat::to_legacy(output.rotationSystem) == Compat::to_legacy(input.rotationSystem));

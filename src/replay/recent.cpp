@@ -1,0 +1,123 @@
+#include "tetr/util/file_path.h"
+#include "tetr/replay/recent.h"
+#include "tetr/replay/file_path.h"
+#include "tetr/replay/replay_hash.h"
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <fstream>
+#include <iomanip>
+#include <iterator>
+#include <random>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+#endif
+namespace Replay {
+namespace {
+auto directory(){return replay_directory()/"recent";}
+struct Entry {std::string name,label,digest;bool saved=false;};
+class Lock {
+#ifdef _WIN32
+    HANDLE handle=INVALID_HANDLE_VALUE;OVERLAPPED overlapped{};
+#else
+    int handle=-1;
+#endif
+    bool locked=false;
+public:
+    Lock() {
+        std::error_code error;std::filesystem::create_directories(directory(),error);if(error)return;
+        const auto path=directory()/".lock";
+#ifdef _WIN32
+        handle=CreateFileW(path.c_str(),GENERIC_READ|GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(handle!=INVALID_HANDLE_VALUE)locked=LockFileEx(handle,LOCKFILE_EXCLUSIVE_LOCK,0,MAXDWORD,MAXDWORD,&overlapped)!=0;
+#else
+        handle=open(path.c_str(),O_CREAT|O_RDWR,0600);if(handle>=0)locked=flock(handle,LOCK_EX)==0;
+#endif
+    }
+    explicit operator bool() const{return locked;}
+    ~Lock(){
+#ifdef _WIN32
+        if(locked)UnlockFileEx(handle,0,MAXDWORD,MAXDWORD,&overlapped);if(handle!=INVALID_HANDLE_VALUE)CloseHandle(handle);
+#else
+        if(handle>=0) {if(locked)flock(handle,LOCK_UN);close(handle);}
+#endif
+    }
+};
+std::string unique_id() {
+    static std::atomic<unsigned> sequence{0};std::random_device random;
+    return std::to_string(std::chrono::system_clock::now().time_since_epoch().count())+"-"+std::to_string(random())+"-"+std::to_string(sequence++);
+}
+bool owned(const std::string& name) {
+    return name.size()>9 && name.compare(0,5,"auto-")==0 && name.substr(name.size()-4)==".txt" &&
+        name.find_first_not_of("auto-0123456789.txt")==std::string::npos;
+}
+bool load(std::vector<Entry>& entries) {
+    const auto index=directory()/"index.dat";std::error_code error;
+    if(!std::filesystem::exists(index,error))return !error;
+    std::ifstream file(index);std::string header;if(!std::getline(file,header) || header!="TETR_RECENT_1")return false;
+    while(file>>std::ws && !file.eof()) {
+        Entry e;if(!(file>>std::quoted(e.name)>>std::quoted(e.label)>>e.saved>>std::quoted(e.digest)) || !owned(e.name))return false;
+        if(std::any_of(entries.begin(),entries.end(),[&](const auto& old){return old.name==e.name;}))return false;
+        entries.push_back(std::move(e));if(entries.size()>kRecentReplayLimit)return false;
+    }
+    return !file.bad();
+}
+bool store(const std::vector<Entry>& entries) {
+    const auto temporary=directory()/("index-"+unique_id()+".tmp"),index=directory()/"index.dat";
+    bool written=false;
+    {std::ofstream file(temporary);file<<"TETR_RECENT_1\n";
+     for(const auto& e:entries)file<<std::quoted(e.name)<<' '<<std::quoted(e.label)<<' '<<e.saved<<' '<<std::quoted(e.digest)<<'\n';
+     file.flush();written=static_cast<bool>(file);}
+    std::error_code error;
+    if(written) {
+#ifdef _WIN32
+        written=MoveFileExW(temporary.c_str(),index.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
+#else
+        std::filesystem::rename(temporary,index,error);written=!error;
+#endif
+    }
+    if(!written)std::filesystem::remove(temporary,error);return written;
+}
+bool same(const std::filesystem::path& a,const std::filesystem::path& b) {
+    if(a.empty() || b.empty())return false;
+    std::error_code error;const auto first=Util::FilePath::absolute(a,error);if(error)return false;
+    const auto second=Util::FilePath::absolute(b,error);return !error && first==second;
+}
+void prune(const Entry& entry) {
+    if(entry.saved || !owned(entry.name))return;
+    const auto path=directory()/entry.name;std::error_code error;
+    if(std::filesystem::is_symlink(path,error) || error || std::filesystem::file_size(path,error)>20000017 || error)return;
+    std::ifstream file(path,std::ios::binary);const std::string content((std::istreambuf_iterator<char>(file)),{});
+    // A user may have replaced a cached file outside this program. Preserve it.
+    if(!file.bad() && replay_hash_suffix(content)==entry.digest) {file.close();std::filesystem::remove(path,error);}
+}
+}
+std::optional<std::filesystem::path> save_recent(const std::string& recording,const std::string& label) {
+    Lock lock;if(!lock || recording.empty())return {};
+    std::vector<Entry> entries;if(!load(entries))return {};
+    const auto content=recording+replay_hash_suffix(recording);
+    Entry entry{"auto-"+unique_id()+".txt",label,replay_hash_suffix(content),false};const auto path=directory()/entry.name;
+    bool written=false;{std::ofstream file(path,std::ios::binary);file<<content;file.flush();written=static_cast<bool>(file);}
+    std::optional<Entry> expired;
+    entries.insert(entries.begin(),entry);if(entries.size()>kRecentReplayLimit){expired=entries.back();entries.pop_back();}
+    if(!written || !store(entries)) {std::error_code error;std::filesystem::remove(path,error);return {};}
+    if(expired)prune(*expired);return path;
+}
+std::vector<RecentReplay> recent_replays() {
+    std::error_code error;if(!std::filesystem::exists(directory(),error) || error)return {};
+    Lock lock;if(!lock)return {};std::vector<Entry> entries;if(!load(entries))return {};
+    std::vector<RecentReplay> result;
+    for(const auto& e:entries) {const auto path=directory()/e.name;if(std::filesystem::is_regular_file(path,error) && !error)result.push_back({path,e.label});error.clear();}
+    return result;
+}
+bool mark_explicitly_saved(const std::filesystem::path& source,const std::filesystem::path& destination) {
+    std::error_code error;if(!std::filesystem::exists(directory(),error))return !error;
+    Lock lock;if(!lock)return false;std::vector<Entry> entries;if(!load(entries))return false;
+    bool changed=false;for(auto& e:entries)if(!e.saved && (same(directory()/e.name,source) || same(directory()/e.name,destination))) {e.saved=true;changed=true;}
+    return !changed || store(entries);
+}
+}

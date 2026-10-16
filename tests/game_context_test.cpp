@@ -79,10 +79,17 @@ int main() {
         Piece::Type{0}, Piece::Type{1}, Piece::Type{2}, Piece::Type{3},
         Piece::Type{4}, Piece::Type{5}, Piece::Type{6}};
     localPlayer.pieces.random.seed(123);
+    localPlayer.multiplayer.lastDamageSource=23;
+    localPlayer.multiplayer.sendId=Runtime::MultiplayerSequenceId::from_wire(9);
+    localPlayer.multiplayer.receiveId=Runtime::MultiplayerSequenceId::from_wire(4);
+    localPlayer.multiplayer.pendingSends.push_back({Runtime::MultiplayerSequenceId::from_wire(7),3});
     Engine::initialize_board(custom, localPlayer);
     assert(custom.session.quickPlay.floor == 4);
     assert(baseline.session.quickPlay.floor == baselineFloor);
     assert(localPlayer.pieces.bag.size() >= 2);
+    assert(localPlayer.multiplayer.lastDamageSource==-1);
+    assert(localPlayer.multiplayer.sendId==Runtime::MultiplayerSequenceId{} &&
+        localPlayer.multiplayer.receiveId==Runtime::MultiplayerSequenceId{} && localPlayer.multiplayer.pendingSends.empty());
 
     // Multiplayer setup supplies the remote NEXT queue over the wire and asks
     // board initialization not to generate a local bag.  Such a remote player

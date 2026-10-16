@@ -4,6 +4,7 @@
 #include "settings_input.h"
 #include "settings_view.h"
 #include "ui_text.h"
+#include "ui_style.h"
 #include "tetr/config/map_store.h"
 #include "tetr/config/user_config.h"
 #include "tetr/config/settings_schema.h"
@@ -106,7 +107,7 @@ int letter(char c) {
 #ifdef _WIN32
     return c;
 #else
-    switch(c) {case 'I':return KEY_I;case 'J':return KEY_J;case 'L':return KEY_L;case 'O':return KEY_O;case 'S':return KEY_S;case 'T':return KEY_T;case 'Z':return KEY_Z;case 'Y':return KEY_Y;}
+    switch(c) {case 'I':return KEY_I;case 'J':return KEY_J;case 'L':return KEY_L;case 'O':return KEY_O;case 'P':return KEY_P;case 'S':return KEY_S;case 'T':return KEY_T;case 'Z':return KEY_Z;case 'Y':return KEY_Y;}
     return 0;
 #endif
 }
@@ -157,7 +158,7 @@ struct Edges {
         for(const auto& [key,action]:context.input_services().bindings.entries()) down[key]=context.input_services().key_down(key);
         for(int i=0;i<15;++i) down[special(i)]=context.input_services().key_down(special(i));
         for(int i=0;i<9;++i) down[digit_key(i)]=context.input_services().key_down(digit_key(i));
-        for(const char c:std::string("IJLOSTZY")) down[letter(c)]=context.input_services().key_down(letter(c));
+        for(const char c:std::string("IJLOPSTZY")) down[letter(c)]=context.input_services().key_down(letter(c));
     }
     void update() {for(auto& [key,value]:down) {const bool next=context.input_services().key_down(key);triggered[key]=next && !value;value=next;}}
     bool pressed(int key) {const bool result=triggered[key];triggered[key]=false;return result;}
@@ -169,7 +170,7 @@ struct EditorView {
     int columns=96,rows=30;
     std::optional<Render::TerminalSize> fixedSize;
     Render::TerminalColors plain=Render::ui_colors(Render::ColorRole::Text,false);
-    Render::TerminalColors selected{{{255,188,92}},{{56,34,16}}};
+    Render::TerminalColors selected{ui_style().selectedText,ui_style().selectedBackground};
     explicit EditorView(Runtime::GameContext& c):context(c) {}
     void line(int y,int x,const std::string& value,int width=-1,bool active=false) {
         const auto& color=active ? selected : plain;
@@ -181,7 +182,7 @@ struct EditorView {
         columns=std::max(1,size.columns);rows=std::max(1,size.rows);
         // Keep the last column blank to avoid autowrap at the terminal edge.
         canvas.columnsLimit=std::max(0,columns-1);canvas.rowsLimit=rows;
-        canvas.begin_frame();line(1,2,title);
+        canvas.begin_frame();canvas.write(1,2,title,columns-3,ui_style().heading,plain.background);
     }
     void shape(Piece::Type type,int y,int x,int maxWidth,int maxHeight) {
         if(maxWidth<2 || maxHeight<=0) return;
@@ -281,7 +282,7 @@ struct EditorView {
     void sequence(const MapEditorState& state) {
         const auto& map=state.map;
         line(4,2,(map.generator==Runtime::MapGenerator::CustomSequence ? text("Custom sequence","自定义块序") : text("Fixed rotation system","固定旋转系统"))+"  "+goal_name(map.goal));
-        line(5,2,system_name(map.rotationSystem)+"  "+text("Floor","楼层")+" "+std::to_string(map.foolFloor)+"  "+text("Space: options","空格：设置"));
+        line(5,2,system_name(map.rotationSystem)+"  "+text("Floor","楼层")+" "+std::to_string(map.foolFloor)+"  "+text("P: options","P：设置"));
         if(map.generator==Runtime::MapGenerator::RotationSystem) {
             line(7,2,text("Generate using this rotation system.","按所选旋转系统生成方块。"));
             const auto allowed=Piece::types_for_rotation_system(map.rotationSystem,false,map.foolFloor);
@@ -333,15 +334,16 @@ struct EditorView {
         if(state.exitPrompt) {
             begin(text("MAP EDITOR","地图编辑")+" / "+state.map.name+" *");
             const TerminalCanvas::Color orange{{237,109,0}};
-            const int width=std::max(0,std::min(46,columns-7));
-            const int top=std::min(4,std::max(0,rows-9)),height=std::max(0,std::min(5,rows-top-3));
+            const auto insets=ui_insets({columns,rows});canvas.columnsLimit=columns-insets.right;
+            const int width=std::max(0,std::min(46,columns-insets.left-insets.right-4));
+            const int top=std::min(4,std::max(0,rows-insets.bottom-9)),height=std::max(0,std::min(5,rows-insets.bottom-top-4));
             canvas.box(top,2,width,height,text("Unsaved changes","尚未保存的修改"),orange,plain.foreground,plain.background);
             if(height) canvas.write(top+1,4,text("Save before exiting?","退出前是否保存？"),width,orange,plain.background);
             const std::array<std::string,3> choices={text("Save and exit","保存退出"),text("Discard and exit","不保存退出"),text("Keep editing","不退出")};
             const int slots=std::max(0,height-2),first=std::clamp(state.exitChoice-slots+1,0,std::max(0,3-slots));
             for(int i=first;i<3 && i<first+slots;++i) line(top+3+i-first,4,(i==state.exitChoice ? "> " : "  ")+choices[i],width,i==state.exitChoice);
-            if(!message.empty()) canvas.write(rows-2,2,message,columns-3,orange,plain.background);
-            line(rows-1,2,text("Arrows Select   Enter Apply   Esc Keep editing","方向键选择  Enter 确认  Esc 不退出"));
+            if(!message.empty()) canvas.write(rows-insets.bottom-2,2,message,columns-insets.left-insets.right,orange,plain.background);
+            line(rows-insets.bottom-1,2,text("Arrows Select   Enter Apply   Esc Keep editing","方向键选择  Enter 确认  Esc 不退出"));
             if(present) canvas.present({},false);
             return;
         }
@@ -359,15 +361,15 @@ struct EditorView {
             (map.name.empty() ? text("New map","新建地图") : map.name)+(map.id ? " #"+std::to_string(map.id) : "")+(map!=baseline ? " *" : ""));
         // For very small terminals reserve the footer and clip all content.
         if(rows>=10) {
-            line(2,2,state.sequenceFocus ? text("Tab → FIELD   Space Options","Tab → 版面编辑  空格打开设置") : text("Tab → SEQUENCE   Hold 0–8 + arrows to paint","Tab → 块序编辑  按住 0～8 + 方向键连续涂色"));
+            if(!state.sequenceFocus)line(2,2,text("Hold 0–8 + arrows to paint","按住 0～8 + 方向键连续涂色"));
             line(3,2,std::string(std::max(0,columns-4),'-'));
             if(state.sequenceFocus) sequence(state);else field(state);
         }
         line(rows-4,2,state.sequenceFocus ? text("Insert at","插入位置")+" "+std::to_string(state.caret+1)+" / "+std::to_string(map.sequence.size())+(state.query.empty() ? "" : "  / "+state.query) :
             text("Cell","方格")+" "+std::to_string(state.column+1)+","+std::to_string(map.height-state.row)+"  "+text("Brush","颜色")+": "+(state.brush==' ' ? text("Empty","空") : std::string(1,state.brush)));
         line(rows-3,2,!message.empty() ? message : state.optionsOpen ? text("Up/Down Select   Right/Enter Open   Left/Right Change   Esc Close","上下选择  右/Enter 打开  左右调整  Esc 返回") : state.sequenceFocus ? text("Arrows Select   Shift+Left/Right Position   Enter Insert","方向键选块  Shift+左右定位  Enter 插入") : text("Arrows Move   0–8 Paint   Enter Brush","方向键移动  0～8 涂色  Enter 使用当前颜色"));
-        line(rows-2,2,text("S Save   Space Options   Tab Field / Sequence","S 保存  空格设置  Tab 版面 / 块序"));
-        line(rows-1,2,state.sequenceFocus ? text("Del/Backspace Remove   / Search   Esc Exit","Del/退格删除  / 检索  Esc 退出") : text("Esc Exit   S Save","Esc 退出  S 保存"));
+        line(rows-2,2,text("S Save   P Options   Tab Field / Sequence","S 保存  P 设置  Tab 版面 / 块序"));
+        line(rows-1,2,state.sequenceFocus ? text("Del/Backspace Remove   / Search   Esc Exit","Del/退格删除  / 检索  Esc 退出") : text("Esc Exit","Esc 退出"));
         if(present) canvas.present({},false);
     }
 };
@@ -505,6 +507,7 @@ bool run_map_editor(Runtime::GameContext& context,Runtime::MapDefinition definit
             state.exitPrompt=false;input.suppress_held_keys();edges.suppress();view.draw(state,baseline,message);continue;
         }
         const bool space=edges.pressed(special(0));
+        const bool optionsPressed=edges.pressed(letter('P'));
         if(state.exitPrompt) {
             if(back || tab || space || (enter && state.exitChoice==2)) {
                 state.exitPrompt=false;message=text("Exit cancelled.","已取消退出。");input.suppress_held_keys();edges.suppress();view.draw(state,baseline,message);
@@ -524,7 +527,7 @@ bool run_map_editor(Runtime::GameContext& context,Runtime::MapDefinition definit
         }
         int menuAction=-1;
         if(state.optionsOpen) {
-            if((back && !savePressed) || space) {
+            if((back && !savePressed) || optionsPressed) {
                 state.optionsOpen=false;message.clear();view.draw(state,baseline,message);
                 context.services.clock.sleep_for(Runtime::Duration::from_seconds(.001));continue;
             }
@@ -560,7 +563,7 @@ bool run_map_editor(Runtime::GameContext& context,Runtime::MapDefinition definit
                 state.optionsOpen=false;
                 if(menuAction==0) savePressed=true;
             }
-        } else if(space && !savePressed) {
+        } else if(optionsPressed && !savePressed) {
             state.optionsOpen=true;heldDigit=-1;message.clear();view.draw(state,baseline,message);
             context.services.clock.sleep_for(Runtime::Duration::from_seconds(.001));continue;
         }

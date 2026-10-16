@@ -112,7 +112,8 @@ Rules::PlayResult wait_for_piece_turn(Runtime::GameContext& context,
                 const bool pressed = down && !heldControls[key];
                 heldControls[key] = down;
                 if (!pressed) continue;
-                Network::send_round_signal(context, Network::OutgoingRoundSignal::LeaveRound);
+                if(!Network::handle_room_game_control(context,action==Input::Action::Retry)) continue;
+                if(!context.session.roomScene.enabled) Network::send_round_signal(context, Network::OutgoingRoundSignal::LeaveRound);
                 return action == Input::Action::Retry ? Rules::PlayResult::Retry
                                                      : Rules::PlayResult::OpenSettings;
             }

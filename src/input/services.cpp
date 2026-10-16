@@ -254,7 +254,7 @@ void Services::begin_gameplay_input() {
 #ifdef _WIN32
     if (!source.keyEventSource) {
         for (const auto& [key, action] : bindings.entries())
-            (void)source.raw_key_down(key);
+            (void)source.read_key_state(key);
     }
 #endif
     gameplayDown_ = event_buffer().snapshot(eventCursor_, &gameplayPressedAt_);
@@ -288,7 +288,7 @@ void Services::poll_gameplay_events() {
     auto& source = physical_source();
     if (!source.keyEventSource) {
         for (const auto& [key, action] : bindings.entries())
-            (void)source.raw_key_down(key);
+            (void)source.read_key_state(key);
     }
 #endif
     for (const auto& event : event_buffer().read(eventCursor_)) {
@@ -299,6 +299,25 @@ void Services::poll_gameplay_events() {
 const KeyEvent* Services::next_gameplay_event() const {
     if (focus_state().generation()!=focusGeneration_ || !focus_state().accepting_input()) return nullptr;
     return pendingEvents_.empty() ? nullptr : &pendingEvents_.front();
+}
+
+bool Services::gameplay_input_pending() {
+    if(!gameplayInputActive_)return false;
+    if(next_gameplay_event())return true;
+#ifdef _WIN32
+    auto& source=physical_source();
+    if(!source.keyEventSource && !source.focusSource) {
+        DWORD available=0;
+        {
+            std::lock_guard<std::mutex> lock(source.consoleMutex_);
+            if(!GetNumberOfConsoleInputEvents(GetStdHandle(STD_INPUT_HANDLE),&available) || !available)return false;
+        }
+    }
+#endif
+    poll_platform_events();
+    for(const auto& event:event_buffer().read(eventCursor_))
+        if(bindings.action_for(event.key)!=Action::Unknown)pendingEvents_.push_back(event);
+    return next_gameplay_event()!=nullptr;
 }
 
 void Services::consume_gameplay_event() {
@@ -375,8 +394,14 @@ bool Services::key_down(int keyCode) {
 
 bool Services::raw_key_down(int keyCode) {
     poll_focus(); synchronize_focus();
+    return read_key_state(keyCode);
+}
+
+bool Services::read_key_state(int keyCode) {
+    // The caller has sampled focus for this operation. In particular a bound
+    // key scan must not query the console HWND/foreground window for each key.
     if (keyStateSource && keyStateSource != this) {
-        return keyStateSource->raw_key_down(keyCode);
+        return keyStateSource->read_key_state(keyCode);
     }
     if (focusSource) return focusSource->key_down(keyCode);
     if (keyStateProvider) return focus_state().accepting_input() && keyStateProvider(keyCode);

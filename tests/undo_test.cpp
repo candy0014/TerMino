@@ -12,6 +12,7 @@
 #include "tetr/engine/placement_coordinator.h"
 #include "tetr/engine/undo.h"
 #include "tetr/input/services.h"
+#include "tetr/network/network_services.h"
 #include "tetr/replay/operation_codec.h"
 #include "tetr/replay/config_codec.h"
 #include "tetr/replay/recorder.h"
@@ -44,12 +45,13 @@ struct Fixture {
     Runtime::GameContext context{session,services};
     Replay::ReplaySessionState replay;
     Input::Services input;
+    Network::NetworkServices network;
     Engine::PieceLoopState loop;
     bool undoDown=false;
     explicit Fixture(UserConfig::Settings user={}, GameMode mode=GameMode::Zen) {
         user.fieldWidth=4; user.fieldHeight=6; user.nextCount=0;
         context.config=Runtime::normalize_user_config(user,mode);
-        context.attach_replay(replay); context.attach_input(input);
+        context.attach_replay(replay); context.attach_input(input);context.attach_network(network);
         Input::refresh_bindings(input,UserConfig::default_key_codes());
         input.keyStateProvider=[this](int key) { return key==UserConfig::default_key_codes()[11] && undoDown; };
         auto& player=session.player;
@@ -549,8 +551,8 @@ void app_replay_undo_after_end_all() {
 }
 
 void app_replay_goal_finishes_with_an_unconsumed_end_marker() {
-    UserConfig::Settings user; user.racingDistance=1;
-    Fixture f(user,GameMode::Racing);
+    UserConfig::Settings user; user.racingDistance=1;user.goal=2;
+    Fixture f(user,GameMode::Zen);
     f.context.config.mode.replayMode=true;
     f.session.player.gameplay.scoring.totalLines=1;
     f.replay.operations.push({Replay::OperationKind::EndAll,Duration::from_seconds(20)});

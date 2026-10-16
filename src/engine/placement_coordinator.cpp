@@ -22,7 +22,14 @@
 #include "tetr/runtime/piece.h"
 #include "tetr/app/application_state.h"
 #include "tetr/replay/tetrio_recorder.h"
+#include "tetr/replay/playback_clock.h"
 #include "tetr/rules/quick_play.h"
+#include "tetr/runtime/field_metrics.h"
+#include "tetr/runtime/challenge_puzzles.h"
+#include "tetr/runtime/dynamic_rules.h"
+#include "tetr/engine/finesse.h"
+#include "tetr/render/audio_cues.h"
+#include "tetr/runtime/construction.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -40,7 +47,7 @@ Rules::PlayResult finalize_locked_piece(
     MovementState& movementState,
     int blitzLevel,
     const std::function<Rules::PlayResult()>& pumpFrame, MovementInputState* movementInput) {
-    if (context.config.field.invisible && !player.presentation.qpInvisibleFlash) {
+    if (context.config.field.invisible) {
         Render::draw_piece(
             context,
             piece,
@@ -50,15 +57,18 @@ Rules::PlayResult finalize_locked_piece(
             Render::PieceDrawMode::Erase);
     }
 
+    const int minimumInputs=Runtime::finesse_rules(context.config.challengeRules)?minimal_input_count(field,piece,movementState.pose,context.config.movement):-1;
+    const bool finesseFault=Runtime::finesse_rules(context.config.challengeRules) && (minimumInputs<0 || movementState.inputActions<0 || movementState.inputActions>minimumInputs);
     const Rules::PlacementResult placement = resolve_locked_piece(
         context,
         field,
         piece,
         player,
         movementState.pose,
-        movementState.lastRotation);
+        movementState.lastRotation,
+        Runtime::Duration::from_seconds(Render::board_elapsed_seconds(context,player)));
     record_locked_piece_for_clutch(player, placement.clear.clearedLines);
-    if (context.config.mode.replayMode && context.config.field.invisible) {
+    if (context.config.field.invisible) {
         for (const auto& offset:piece.cells(movementState.pose.rotation)) {
             const int row=movementState.pose.position.row+offset[0];
             const int column=movementState.pose.position.col+offset[1];
@@ -193,6 +203,63 @@ Rules::PlayResult finalize_locked_piece(
     apply_due_cheese_timer_after_autoplay_lock(context, field, player);
     const Rules::PlayResult result = complete_locked_piece_side_effects(
         context, field, piece, player, placement, application.effects);
+    const auto metrics=Runtime::field_metrics(field,context.config.rotationSystem);
+    gameplay.scoring.stackHeight=metrics.height;
+    const auto metricTime=context.config.mode.replayMode?Replay::playback_game_elapsed(context,context.now()):Runtime::elapsed_game_time(context.session,context.now());
+    if(metrics.secretGrade>gameplay.scoring.secretGrade){gameplay.scoring.secretGradePieces=gameplay.scoring.placedBlocks;gameplay.scoring.secretGradeTime=metricTime;}
+    if(metrics.checkerboardRows>gameplay.scoring.patternRows){gameplay.scoring.patternPieces=gameplay.scoring.placedBlocks;gameplay.scoring.patternTime=metricTime;}
+    gameplay.scoring.secretGrade=std::max(gameplay.scoring.secretGrade,metrics.secretGrade);
+    gameplay.scoring.patternRows=std::max(gameplay.scoring.patternRows,metrics.checkerboardRows);
+    if(context.config.challengeRules==Runtime::ChallengeRules::ConstructSymmetry)
+        for(int y=0;y<field.height();++y)for(int x=0;x<field.width();++x)Render::draw_board_cell(context,player,y,x,field.cell(y,x));
+    if(!context.config.mode.replayMode && context.config.challengeRules==Runtime::ChallengeRules::Audio) {
+        Render::play_audio_cue(Render::AudioCue::Clear,placement.clear.clearedLines);
+        std::vector<int> heights;for(int x=0;x<field.width();++x){int height=0;for(int y=0;y<field.height();++y)if(field.cell(y,x).occupied()){height=field.height()-y;break;}heights.push_back(height);}Render::play_audio_heights(heights);
+    }
+    if(context.config.challengeRules==Runtime::ChallengeRules::StageMaster) {
+        auto& task=gameplay.challenge;task.stageLines+=placement.clear.clearedLines;
+        task.stageQuads+=placement.clear.clearedLines==4;task.stageSpins+=placement.spin.spin && placement.clear.clearedLines>0;
+        const bool complete=task.stage==0?task.stageLines>=10:task.stage==1?task.stageQuads>=2:task.stage==2?task.stageSpins>=2:placement.allClear;
+        if(complete && task.stage<4){++task.stage;task.stageLines=task.stageQuads=task.stageSpins=0;gameplay.scoring.challengeStages=task.stage;}
+        Runtime::set_current_epld(context,Runtime::Duration::from_seconds(std::array<double,4>{.8,.5,.25,.12}[std::min(task.stage,3)]));
+    }
+    {
+        if(auto* app=context.app_component();app && app->challenge_observer(&context)) {
+            int ruleColumn=movementState.pose.position.col;
+            const auto family=Piece::metadata(piece.type()).familyIndex;
+            const auto& cells=piece.cells(movementState.pose.rotation);
+            if(family==0) {
+                int minimum=cells.front()[1];for(const auto& cell:cells)minimum=std::min(minimum,cell[1]);ruleColumn+=minimum;
+            } else if(family==5) {
+                // The T junction is its physical rotation centre. Comparing
+                // raw pose origins lets equivalent I/T rotations evade a
+                // column-history rule in rotation systems with shifted poses.
+                for(const auto& center:cells) {
+                    int neighbors=0;for(const auto& cell:cells)neighbors+=std::abs(cell[0]-center[0])+std::abs(cell[1]-center[1])==1;
+                    if(neighbors==3){ruleColumn+=center[1];break;}
+                }
+            }
+            const Challenges::Placement sample{piece.type().index(),ruleColumn,
+                placement.clear.clearedLines,placement.clear.clearedGarbageLines,
+                placement.spin.spin,placement.attack.effectiveMini,placement.allClear,
+                placement.chain.previousB2B>0 && placement.chain.b2bTransition==Rules::B2BTransition::Break,metrics.symmetric,finesseFault};
+            if(app->challenge_observer(&context)(sample,player))return Rules::PlayResult::Dead;
+        }
+    }
+    if(context.config.challengeRules==Runtime::ChallengeRules::StageMaster && gameplay.challenge.stage>=4)return Rules::PlayResult::Won;
+    if(Runtime::construction_map_matches(context.config,field))return Rules::PlayResult::Won;
+    if(context.config.challengeRules==Runtime::ChallengeRules::PerfectClearSeries && placement.allClear && gameplay.scoring.allClearCount<3) {
+        const auto next=Runtime::challenge_puzzle(static_cast<int>(gameplay.scoring.allClearCount));
+        field.clear();gameplay.playfield.garbageHeight=0;
+        for(int y=0;y<next.height;++y)for(int x=0;x<next.width;++x) {
+            const auto cell=Runtime::map_cell(next.rows[y][x]);field.set_cell(y,x,cell);field.mark_initial_cell(y,x);
+            if(cell.is_normal_garbage())gameplay.playfield.garbageHeight=std::max(gameplay.playfield.garbageHeight,next.height-y);
+        }
+        // The outer loop consumes this lock's current piece after returning.
+        while(player.pieces.bag.size()>1)player.pieces.bag.pop_back();
+        for(auto type:next.sequence)player.pieces.bag.push_back({type,false});
+        Render::redraw_player_board(context,player);
+    }
     if (!context.config.mode.replayMode) {
         Render::OutputGuard output(context);
         std::fflush(stdout);

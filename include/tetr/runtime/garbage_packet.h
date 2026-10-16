@@ -25,11 +25,14 @@ public:
 
     void consume_lines(int lines) noexcept { lineCount_ -= lines; }
     void mark_preserve_hole() noexcept { preserveHole_ = true; }
+    int source_slot() const noexcept {return sourceSlot_;}
+    void set_source_slot(int slot) noexcept {sourceSlot_=slot;}
 
 private:
     int lineCount_ = 0;
     TimePoint arrivalTime_{};
     bool preserveHole_ = false;
+    int sourceSlot_ = -1;
 };
 
 } // namespace Runtime
