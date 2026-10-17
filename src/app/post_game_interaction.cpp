@@ -110,6 +110,12 @@ static void clear_replay_prompt_lines(
 
 static void draw_replay_prompt_rows(Runtime::GameContext& context,
     Runtime::PlayerSessionState& player, int replayPos, const std::vector<std::string>& rows) {
+    if(Frontend::ui_surface_active()) {
+        TerminalCanvas canvas;
+        const int start=std::max(0,36-static_cast<int>(rows.size()));
+        for(std::size_t i=0;i<rows.size();++i)canvas.write(start+static_cast<int>(i),4,rows[i],120,{{210,230,248}},{{9,17,28}});
+        Frontend::present_ui({std::move(canvas.pending),{},false,true});return;
+    }
     Render::OutputGuard output(context);
     clear_replay_prompt_lines(context,player);
     const auto layout=Render::board_text_layout(context,player);
@@ -248,6 +254,17 @@ static ReplaySaveResult save_replay_interactively(
     std::size_t draftCaret=0;
     const auto redraw=[&](const std::string& value,std::size_t caret) {
         draft=value; draftCaret=caret;
+        if(Frontend::ui_surface_active() && !statistics) {
+            TerminalCanvas canvas;
+            canvas.box(11,12,100,7,UiText::tr("Save Replay"),{{58,222,240}},{{230,240,255}},{{9,17,28}});
+            canvas.write(13,15,".tetr/replay/"+defaultName,94,{{230,240,255}},{{9,17,28}});
+            canvas.write(14,15,UiText::tr("Enter Default name   Esc Cancel"),94,{{130,165,190}},{{9,17,28}});
+            const auto prompt=UiText::tr("Custom replay name: ");
+            const int at=static_cast<int>(Util::TerminalText::width(prompt+value.substr(0,caret)));
+            const int scroll=std::max(0,at-92);
+            canvas.write(16,15,Util::TerminalText::slice(prompt+value,scroll,94),94,{{230,240,255}},{{14,48,60}});
+            Frontend::present_ui({std::move(canvas.pending),std::pair{16,15+at-scroll},false,true});return;
+        }
         if (statistics) {
             statistics->show_replay_save_prompt(defaultName,value,caret);
             statistics->render(context,std::string{},results_terminal_size(context));

@@ -6,7 +6,7 @@
 
 namespace Graphical {
 namespace {
-constexpr int atlasSize=2048;
+constexpr int atlasSize=4096;
 GLuint shader(GLenum type,const char* source) {
     const auto id=glCreateShader(type);
     glShaderSource(id,1,&source,nullptr);glCompileShader(id);
@@ -73,6 +73,13 @@ Renderer::~Renderer() {
 }
 void Renderer::begin(int width,int height) {
     vertices_.clear();
+    if(atlasY_>atlasSize-256) {
+        glyphs_.clear();atlasX_=atlasY_=2;atlasRow_=0;
+        glBindTexture(GL_TEXTURE_2D,atlas_);
+        std::vector<unsigned char> empty(atlasSize*atlasSize);empty[0]=255;
+        glTexImage2D(GL_TEXTURE_2D,0,GL_R8,atlasSize,atlasSize,0,GL_RED,GL_UNSIGNED_BYTE,empty.data());
+        glyph(U'?');
+    }
     const float scale=std::min(width/1200.f,height/800.f);
     const int w=static_cast<int>(1200*scale),h=static_cast<int>(800*scale);
     glViewport((width-w)/2,(height-h)/2,w,h);
@@ -124,6 +131,57 @@ void Renderer::end() {
     glBufferData(GL_ARRAY_BUFFER,vertices_.size()*sizeof(Vertex),vertices_.data(),GL_STREAM_DRAW);
     glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(vertices_.size()));
     if(const auto error=glGetError();error!=GL_NO_ERROR) throw std::runtime_error("OpenGL draw error: "+std::to_string(error));
+}
+void Renderer::surface(const Frontend::UiFrame& frame) {
+    const float cw=1136.f/std::max(1,frame.extent.first),ch=650.f/std::max(1,frame.extent.second);
+    const float ox=32,oy=92;
+    if(!frame.overlay) {rect(24,84,1152,674,panelColor);outline(24,84,1152,674,{.12f,.28f,.38f});}
+    const auto color=[](std::array<int,3> c,bool background,bool obscured) -> Color {
+        if(!obscured) {
+            if(c==std::array<int,3>{237,109,0} || c==std::array<int,3>{255,188,92})return cyan;
+            if(c==std::array<int,3>{56,34,16})return {.055f,.18f,.23f};
+            if(background && c==std::array<int,3>{12,12,12})return panelColor;
+        }
+        return {c[0]/255.f,c[1]/255.f,c[2]/255.f};
+    };
+    for(std::size_t row=0;row<frame.rows.size();++row) {
+        const auto& cells=frame.rows[row];
+        for(std::size_t col=0;col<cells.size();++col) {
+            const auto& cell=cells[col];const float x=ox+col*cw,y=oy+row*ch;
+            rect(x,y,cw+.2f,ch+.2f,color(cell.background,true,frame.obscured));
+        }
+        for(std::size_t col=0;col<cells.size();++col) {
+            const auto& cell=cells[col];if(cell.continuation || cell.glyph==" ")continue;
+            const float x=ox+col*cw,y=oy+row*ch;
+            const float span=(col+1<cells.size() && cells[col+1].continuation)?2.f:1.f;
+            const auto fg=color(cell.color,false,frame.obscured);
+            if(cell.glyph=="█" || cell.glyph=="▉") {rect(x,y,cw*span,ch,fg);continue;}
+            // Draw thin box strokes at display resolution so downscaled font
+            // bitmaps cannot erase menu borders or editor cursor outlines.
+            const std::string borders[]={"─","│","┌","┐","└","┘","├","┤","┬","┴","┼"};
+            const auto border=std::find(std::begin(borders),std::end(borders),cell.glyph);
+            if(border!=std::end(borders)) {
+                const int i=static_cast<int>(border-std::begin(borders));
+                const bool left=i==0 || i==3 || i==5 || i==7 || i>=8;
+                const bool right=i==0 || i==2 || i==4 || i==6 || i>=8;
+                const bool up=i==1 || i==4 || i==5 || i==6 || i==7 || i==9 || i==10;
+                const bool down=i==1 || i==2 || i==3 || i==6 || i==7 || i==8 || i==10;
+                if(left)rect(x,y+ch/2,cw/2+1,1,fg);
+                if(right)rect(x+cw/2,y+ch/2,cw/2+1,1,fg);
+                if(up)rect(x+cw/2,y,1,ch/2+1,fg);
+                if(down)rect(x+cw/2,y+ch/2,1,ch/2+1,fg);
+                continue;
+            }
+            const char* cursor=cell.glyph.c_str();
+            while(const auto code=SDL_StepUTF8(&cursor,nullptr)) {
+                const auto g=glyph(code);
+                const float scale=std::min((ch-1)/54.f,(cw*span-1)/std::max(1.f,std::max(g.w,g.advance)));
+                quad(x+(cw*span-g.advance*scale)/2+g.left*scale,y+ch*.80f-g.top*scale,
+                    g.w*scale,g.h*scale,g.x/atlasSize,g.y/atlasSize,g.w/atlasSize,g.h/atlasSize,fg);
+            }
+        }
+    }
+    if(frame.caret)rect(ox+frame.caret->second*cw,oy+(frame.caret->first+1)*ch-2,cw,2,cyan);
 }
 void Renderer::screenshot(const std::string& path,int w,int h) {
     std::vector<unsigned char> pixels(w*h*4),flipped(pixels.size());

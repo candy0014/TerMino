@@ -475,6 +475,8 @@ void TerminalSettingsView::print_shortcuts(bool editing) const {
 }
 void TerminalSettingsView::print_menu(const Model::SettingNode& menu, std::size_t selected,
                                     const std::string& breadcrumb,bool render) const {
+    surface_->metadata={Frontend::UiKind::Menu,menu.key,menu.title,breadcrumb,{},selected};
+    for(const auto& node:menu.children)surface_->metadata.entries.push_back({node.key,node.title,node.enabled});
     configure_layout(&menu, nullptr, false);
     if(terminalSize_ && !menu.children.empty() && menu.children[selected].mapPreview) {
         const auto& map=*menu.children[selected].mapPreview;
@@ -516,6 +518,8 @@ void TerminalSettingsView::print_selection(const Model::SettingNode& menu, std::
 }
 void TerminalSettingsView::print_edit(const Model::SettingItem& item, const std::string& breadcrumb,
     const std::string& value, std::size_t caret) const {
+    surface_->metadata={item.keyBinding?Frontend::UiKind::KeyCapture:Frontend::UiKind::Text,
+        std::to_string(static_cast<int>(item.id)),item.label,breadcrumb};
     if (Model::uses_inline_input(item) && parent_) {
         print_scalar_input(item, breadcrumb, value, caret);
         return;
@@ -551,6 +555,7 @@ void TerminalSettingsView::print_scalar_input(const Model::SettingItem& item, co
                                               const std::string& value, std::size_t caret) const {
     configure_layout(parent_, nullptr, false);
     const auto prompt = "> " + item_label(item) + " = ";
+    surface_->metadata={Frontend::UiKind::Text,std::to_string(static_cast<int>(item.id)),item.label,breadcrumb};
     auto& box = boxes_.back();
     // Expand the right border with the draft, preserving the column's left
     // edge. Scroll only after the box reaches the terminal's usable right edge.
@@ -575,6 +580,9 @@ void TerminalSettingsView::print_scalar_input(const Model::SettingItem& item, co
 }
 void TerminalSettingsView::print_choices(const Model::SettingItem& item, std::size_t selected,
                                        const std::string& breadcrumb) const {
+    surface_->metadata={Frontend::UiKind::Choices,std::to_string(static_cast<int>(item.id)),item.label,breadcrumb,{},selected};
+    for(std::size_t i=0;i<item.choice.labels.size();++i)
+        surface_->metadata.entries.push_back({std::to_string(item.choice.values[i]),item.choice.labels[i],true});
     configure_layout(parent_, &item, true);
     print_frame(tr("Select ") + item_label(item), breadcrumb + " > " + item.label, true);
     print_box(boxes_.size() - 1, item_label(item));

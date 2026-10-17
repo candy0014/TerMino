@@ -2,6 +2,14 @@
 #include "tetr/app/application_state.h"
 #include "tetr/app/game.h"
 #include "tetr/app/init.h"
+#include "tetr/app/client_loop.h"
+#include "tetr/app/start_screen_navigation.h"
+#include "tetr/app/settings_menu.h"
+#include "tetr/config/normalization.h"
+#include "tetr/legacy/bot_strategy.h"
+#include "tetr/network/network_services.h"
+#include "tetr/engine/multiplayer_scene.h"
+#include "../../app/ui_text.h"
 #include "tetr/engine/replay_playback_controls.h"
 #include "tetr/engine/pause.h"
 #include "tetr/input/services.h"
@@ -43,6 +51,21 @@ Session::Session(UserConfig::Settings settings,std::string replayPath)
     :worker_([this,settings=std::move(settings),replayPath=std::move(replayPath)]() mutable {
         run(std::move(settings),std::move(replayPath));
     }) {}
+Session::Session(UserConfig::Settings first,UserConfig::Settings second,LaunchOptions options)
+    :worker_([this,first=std::move(first),second=std::move(second),options]() mutable {
+        run_full(std::move(first),std::move(second),options);
+    }) {}
+void Session::begin_text_input() {std::lock_guard<std::mutex> lock(mutex_);textEvents_.clear();textMode_=true;}
+void Session::end_text_input() {std::lock_guard<std::mutex> lock(mutex_);textMode_=false;textEvents_.clear();}
+std::optional<Frontend::TextEditEvent> Session::poll_text_event() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if(textEvents_.empty())return std::nullopt;
+    auto event=std::move(textEvents_.front());textEvents_.pop_front();return event;
+}
+void Session::text_event(Frontend::TextEditEvent event) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if(textMode_ && textEvents_.size()<512)textEvents_.push_back(std::move(event));
+}
 Session::~Session() {
     stop_=true;
     if(worker_.joinable()) worker_.join();
@@ -138,6 +161,117 @@ void Session::run(UserConfig::Settings settings,std::string replayPath) {
         std::lock_guard<std::mutex> lock(mutex_);view_.status=SessionStatus::Error;view_.message=error.what();++view_.revision;
     } catch(...) {
         std::lock_guard<std::mutex> lock(mutex_);view_.status=SessionStatus::Error;view_.message="Unexpected session failure";++view_.revision;
+    }
+}
+
+void Session::run_full(UserConfig::Settings first,UserConfig::Settings second,LaunchOptions options) {
+    try {
+        Render::DetachedOutputScope output(options.audio);
+        auto states=std::make_unique<std::array<Runtime::SessionState,2>>();
+        Runtime::RuntimeServices clocks[2];
+        Runtime::GameContext a((*states)[0],clocks[0]),b((*states)[1],clocks[1]);
+        Runtime::GameContext* contexts[]={&a,&b};
+        App::ApplicationState app;
+        Input::Services inputs[2];Network::NetworkServices networks[2];
+        Replay::ReplaySessionState replays[2];Legacy::BotStrategy bots[2];
+        UserConfig::Settings* users[]={&first,&second};
+        app.primaryContext=&a;app.localPlayerTwoContext=&b;
+        app.qpContinuousCancellation=options.continuousCancellation;
+        app.localVersusSettingsAvailable=!second.persistencePath.empty() && std::filesystem::exists(std::filesystem::u8path(second.persistencePath));
+        if(options.playerTwoActive) {app.singlePlayerOwner=1;app.savedPlayerOneSettings=first;first=second;}
+        app.textInputSession=this;
+        for(int i=0;i<2;++i) {
+            auto& c=*contexts[i];c.attach_app(app);c.attach_input(inputs[i]);c.attach_network(networks[i]);
+            c.attach_replay(replays[i]);c.attach_user_settings(*users[i]);c.attach_autoplay(bots[i]);
+            c.attach_output_mutex(app.terminalOutputMutex);
+            inputs[i].focusSource=&input_;inputs[i].keyEventSource=&input_.events();inputs[i].initialized=true;
+            Input::refresh_bindings(inputs[i],users[i]->keyCodes,users[i]->additionalKeyCodes);
+            App::install_start_screen_navigation(c);
+        }
+        App::UiText::initialize_language(first.uiLanguage);
+        first.uiLanguage=App::UiText::language()==App::UiText::Language::English?1:0;
+        App::Settings::synchronize_shared_appearance(a);
+        Frontend::UiSurfaceScope ui([&](Frontend::UiFrame frame) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            view_.ui=frame.rows.empty()?nullptr:std::make_shared<const Frontend::UiFrame>(std::move(frame));
+            ++view_.revision;
+        });
+        bool ready=false;
+        std::chrono::steady_clock::time_point lastPublish[2]{};
+        const auto publish=[&](int index,bool force=false) {
+            const auto now=std::chrono::steady_clock::now();
+            if(!ready || (!force && now-lastPublish[index]<std::chrono::milliseconds(8)))return;
+            lastPublish[index]=now;auto& c=*contexts[index];
+            const bool local=c.config.mode.mode==Runtime::GameMode::LocalVersus;
+            auto board=Presentation::capture_board_view(c,c.session.player);
+            std::vector<SceneBoard> peers;
+            std::string status,notice,controls;
+            const auto& scene=c.session.roomScene;
+            if(index==0) {
+                if(scene.enabled) {
+                    const auto full=Engine::full_multiplayer_slots(c);
+                    for(int slot:full) {
+                        if(slot==scene.ownSlot && !scene.spectator)continue;
+                        if(const auto it=scene.players.find(slot);it!=scene.players.end())
+                            peers.push_back({slot,false,Presentation::capture_board_view(c,it->second)});
+                    }
+                    for(const auto& [slot,mini]:networks[0].peerMiniBoards) {
+                        if(std::find(full.begin(),full.end(),slot)!=full.end() || slot==scene.ownSlot)continue;
+                        Presentation::BoardView value;value.width=mini.columns;value.bottom=mini.rows;
+                        if(const auto name=scene.usernames.find(slot);name!=scene.usernames.end())value.username=name->second;
+                        for(const auto& cell:mini.cells)value.cells.push_back({cell,cell.occupied()?Presentation::CellAppearance::Visible:Presentation::CellAppearance::Empty});
+                        peers.push_back({slot,true,std::move(value)});
+                    }
+                    status=networks[0].room.name+" / "+networks[0].roomMessage;
+                }
+                if(app.challengeRound)notice=app.challengeRound->notice;
+                static constexpr const char* labels[]={"L","R","SD","HD","CW","CCW","180","HOLD","RETRY","SET","SAVE","UNDO","PAUSE"};
+                for(std::size_t i=0;i<13;++i)controls+=std::string(i?"  ":"")+App::UiText::binding_label(c.user_settings(),i)+labels[i];
+            }
+            std::lock_guard<std::mutex> lock(mutex_);
+            if(index==1) {
+                auto found=std::find_if(view_.peers.begin(),view_.peers.end(),[](const auto& peer){return peer.slot==-2;});
+                if(found==view_.peers.end())view_.peers.push_back({-2,false,std::move(board)});else found->board=std::move(board);
+            } else {
+                view_.board=std::move(board);
+                if(!local)view_.peers=std::move(peers);
+                view_.status=c.session.player.timing.completedGameTime?SessionStatus::Finished:
+                    c.pause.paused?SessionStatus::Paused:!c.session.gameStartTime?SessionStatus::Countdown:SessionStatus::Playing;
+                view_.replay=c.config.mode.replayMode;
+                if(view_.replay) {
+                    view_.replayPosition=Replay::playback_progress_elapsed(c,c.now()).seconds();
+                    view_.replayDuration=Replay::playback_duration(c).seconds();view_.replaySpeed=Replay::playback_speed(c);
+                    view_.replayPaused=Replay::playback_paused(c);
+                    if(view_.replayPaused && view_.status!=SessionStatus::Finished)view_.status=SessionStatus::Paused;
+                }
+                view_.roomStatus=std::move(status);view_.challengeNotice=std::move(notice);view_.controls=std::move(controls);
+                view_.spectator=scene.enabled && scene.spectator;view_.focusSlot=scene.focusSlot;
+            }
+            ++view_.revision;
+        };
+        for(int i=0;i<2;++i) {
+            const auto navigate=inputs[i].controlInterrupt;
+            const auto interrupt=[&,i] {
+                if(stop_) {app.startScreenRequested=true;throw App::StartScreenRequested{};}
+                if(menu_.exchange(false))App::request_start_screen(*contexts[i]);
+                publish(i);
+            };
+            inputs[i].controlInterrupt=[navigate,interrupt]{interrupt();navigate();};
+            clocks[i].clock.waitInterrupt=[&,i,interrupt]{interrupt();inputs[i].poll_control_interrupt();};
+        }
+        app.beforeGame=[&] {ready=false;};
+        app.gameReady=[&] {
+            {std::lock_guard<std::mutex> lock(mutex_);view_.peers.clear();view_.ui.reset();}
+            ready=true;publish(0,true);
+            if(a.config.mode.mode==Runtime::GameMode::LocalVersus)publish(1,true);
+        };
+        App::run_client(a,!options.startScreen);
+        Network::disconnect_online(networks[0]);
+        std::lock_guard<std::mutex> lock(mutex_);view_.status=SessionStatus::Closed;++view_.revision;
+    } catch(const App::StartScreenRequested&) {
+        std::lock_guard<std::mutex> lock(mutex_);view_.status=SessionStatus::Closed;++view_.revision;
+    } catch(const std::exception& error) {
+        std::lock_guard<std::mutex> lock(mutex_);view_.status=SessionStatus::Error;view_.message=error.what();++view_.revision;
     }
 }
 }

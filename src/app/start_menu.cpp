@@ -8,9 +8,16 @@
 #include "tetr/app/application_state.h"
 #include "tetr/util/terminal_text.h"
 #include "settings_navigation.h"
+#include "terminal_canvas.h"
+#include "tetr/frontend/ui_surface.h"
 #include "ui_text.h"
 #include <algorithm>
 #include <iostream>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <linux/input.h>
+#endif
 
 namespace App {
 namespace {
@@ -53,6 +60,22 @@ std::string binding_label(const Runtime::GameContext& context, std::size_t bindi
 }
 void draw_start_menu(const Runtime::GameContext& context,std::optional<Render::TerminalSize> requestedSize) {
     using UiText::tr;
+    if(Frontend::ui_surface_active()) {
+        TerminalCanvas frame;const auto size=Frontend::ui_surface_size().value_or(Frontend::UiSize{128,38});
+        frame.columnsLimit=size.first;frame.rowsLimit=size.second;
+        const int x=std::max(2,(size.first-64)/2);
+        const TerminalCanvas::Color fg{{224,238,255}},bg{{9,17,28}},accent{{58,222,240}},selected{{14,48,60}};
+        frame.box(4,x,60,24,"TerMino / OPENGL",accent,fg,bg);
+        frame.write(7,x+4,tr("Start")+" / "+context.user_settings().username,54,fg,bg);
+        const auto* app=context.app_component();
+        const int selection=app?app->startMenuSelection:0;
+        frame.metadata={Frontend::UiKind::Start,"start","TerMino",{},{{"play","Start"},{"settings","Settings"},{"quit","Quit"}},static_cast<std::size_t>(selection)};
+        const char* labels[]={"Start","Settings","Quit"};
+        for(int i=0;i<3;++i) frame.write(12+i*4,x+4,(selection==i?">  ":"   ")+tr(labels[i]),52,
+            selection==i?accent:fg,selection==i?selected:bg);
+        frame.write(26,x+4,"Tab / Shift+Tab / Up / Down / Enter / Esc",54,accent,bg);
+        frame.present({},false);return;
+    }
     Render::OutputGuard output(context);
     Render::clear_screen();
     constexpr const char* logo[] = {
@@ -106,6 +129,26 @@ bool run_start_menu(Runtime::GameContext& context) {
             shownSize = size;
         }
         if (input.update(NavigationKey::Back, false)) return false;
+        if(Frontend::ui_surface_active()) {
+            const bool up=input.update(NavigationKey::Up,true);
+            const bool down=input.update(NavigationKey::Down,true);
+            const bool tab=input.update(NavigationKey::Tab,false);
+            const bool shifted=
+#ifdef _WIN32
+                context.input_services().key_down(VK_LSHIFT) || context.input_services().key_down(VK_RSHIFT);
+#else
+                context.input_services().key_down(KEY_LEFTSHIFT) || context.input_services().key_down(KEY_RIGHTSHIFT);
+#endif
+            const int delta=(down?1:0)-(up?1:0)+(tab?(shifted?-1:1):0);
+            if(app && delta) {app->startMenuSelection=(app->startMenuSelection+delta+3)%3;draw_start_menu(context);}
+            if(input.update(NavigationKey::Confirm,false)) {
+                const int selected=app?app->startMenuSelection:0;
+                if(selected==2)return false;
+                if(selected==0)return start_playing();
+                if(run_menu(context,true)==MenuResult::StartGame)return start_playing();
+                input.suppress_held_keys();draw_start_menu(context);
+            }
+        }
         const bool retryDown = key_down(context, 8);
         const bool play = retryDown && !retryWasDown;
         retryWasDown = retryDown;

@@ -125,6 +125,9 @@ struct TextDisplaySpan {
 };
 
 struct PlayerPresentationState {
+    Piece::Type eventSpinPiece=Piece::Type::none();
+    int eventClearLines=0;
+    bool eventMini=false,eventPerfectClear=false,eventHalfClear=false;
     std::string username;
     // Last remote placement HUD survives the following active-piece checkpoint.
     std::uint64_t remotePlacementRevision=0;

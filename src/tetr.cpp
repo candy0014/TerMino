@@ -1,3 +1,4 @@
+#include "tetr/app/client_loop.h"
 #include "tetr/app/application_state.h"
 #include "tetr/app/game.h"
 #include "tetr/app/init.h"
@@ -128,60 +129,5 @@ int main(int argc, char* argv[]) {
     Render::TerminalSession terminalSession(&inputServices);
     applicationState.textInputSession = &terminalSession;
     if (std::getenv("TETR_TEST_BATCH")) Render::begin_output_suppression();
-    if (!skipStart && !std::getenv("TETR_TEST_BATCH") && !std::getenv("TETR_EXIT_AFTER_GAME") &&
-        !App::run_start_menu(context)) {
-        Network::disconnect_online(networkServices);
-        return 0;
-    }
-    bool watchInterruptedRoom=false;
-    for (;;) {
-        if (applicationState.startScreenRequested) {
-            watchInterruptedRoom=false;
-            applicationState.startScreenRequested = false;
-            applicationState.replayResume = {};
-            if(networkServices.connection==Network::ConnectionState::Connected && networkServices.multiplayerRoom && !networkServices.room.name.empty())
-                Network::send_lobby_signal(context,Network::ClientLobbySignal::Cancel);
-            else Network::disconnect_online(networkServices);
-            if (!App::run_start_menu(context)) {
-                Network::disconnect_online(networkServices);
-                return 0;
-            }
-        }
-        try {
-            if(watchInterruptedRoom) {
-                watchInterruptedRoom=false;
-                App::watch_room_match(context);
-                if(applicationState.startScreenRequested) continue;
-            }
-            App::initialize_game(context);
-            App::run(context);
-        } catch (const App::StartScreenRequested&) {
-            continue;
-        } catch (const App::RoomSettingsRequested&) {
-            networkServices.matchCanceled=false;
-            App::Settings::run_menu(context);
-            continue;
-        } catch (const Network::LobbyInterrupted&) {
-            if(networkServices.multiplayerRoom && networkServices.matchCanceled) {
-                networkServices.matchCanceled=false;
-                App::Settings::run_menu(context);
-                continue;
-            }
-            if(networkServices.multiplayerRoom && context.session.roomScene.enabled && !networkServices.startFromMenu &&
-                context.session.roomScene.finished && networkServices.matchEpoch!=context.session.roomScene.epoch)
-                watchInterruptedRoom=true;
-            continue;
-        } catch (const Network::ConnectionError&) {
-            applicationState.settingsCategoryIndex = 6; // NETWORK, after Player
-            App::Settings::run_menu(context);
-            continue;
-        } catch (const App::MapUnavailable& unavailable) {
-            App::Settings::run_map_menu(unavailable.context);
-            continue;
-        }
-        if (std::getenv("TETR_EXIT_AFTER_GAME")) {
-            Network::disconnect_online(networkServices);
-            return 0;
-        }
-    }
+    return App::run_client(context,skipStart);
 }

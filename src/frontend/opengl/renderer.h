@@ -7,6 +7,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include "tetr/frontend/ui_surface.h"
 
 namespace Graphical {
 struct Color {float r,g,b,a=1;};
@@ -20,6 +21,7 @@ public:
     void rect(float x,float y,float w,float h,Color color);
     void outline(float x,float y,float w,float h,Color color,float thickness=1);
     void text(float x,float y,const std::string& value,float size=20,Color color=textColor);
+    void surface(const Frontend::UiFrame& frame);
     void end();
     void screenshot(const std::string& path,int width,int height);
 private:

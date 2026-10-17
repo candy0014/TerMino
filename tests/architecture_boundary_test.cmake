@@ -24,6 +24,8 @@ file(GLOB PURE_PRESENTATION
     "${ROOT}/include/tetr/presentation/visibility.h"
     "${ROOT}/include/tetr/presentation/board_view.h"
     "${ROOT}/src/presentation/visibility.cpp"
+    "${ROOT}/src/presentation/ui_surface.cpp"
+    "${ROOT}/src/presentation/text_field.cpp"
     "${ROOT}/src/presentation/board_view.cpp")
 foreach(FILE IN LISTS FRONTEND_CONTRACTS PURE_PRESENTATION)
     foreach(FORBIDDEN "tetr/render/" "tetr/app/" "tetr/network/" "tetr/replay/"

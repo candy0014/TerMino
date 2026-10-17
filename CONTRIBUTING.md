@@ -18,7 +18,7 @@ Runtime/Rules 保持纯语义边界。`tetr_presentation` 和 `tetr/frontend` �
 
 ## 检查和发行
 
-日常运行受影响模块回归、前端契约测试和架构检查。共享变更运行终端完整 CTest；图形接入后加入两端全键盘、绘制与混合联网检查。Linux/Windows 的实际验证范围如实记录，Wine 结果不视为原生 Windows 显卡或输入设备验收。
+日常运行受影响模块回归、前端契约测试和架构检查。完整图形会话检查为 `graphical_application`，画布/UTF-8 编辑契约为 `frontend_ui`；它们均不创建窗口。菜单、地图和预设通过共享控制器与 `UiFrame` 同步维护，棋盘新增信息同时扩展 `BoardView` 与两端绘制。共享变更运行终端完整 CTest；图形接入后加入两端全键盘、绘制与混合联网检查。Linux/Windows 的实际验证范围如实记录，Wine 结果不视为原生 Windows 显卡或输入设备验收。
 
 图形测试使用隐藏窗口或离屏环境，不在用户桌面显示测试界面。`--smoke-test`、`--frames N` 已默认隐藏，其他自动化运行必须显式使用 `--hidden` 或隔离显示服务。
 

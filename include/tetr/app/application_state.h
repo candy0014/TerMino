@@ -72,6 +72,8 @@ struct ApplicationState {
     // frontends may copy a view or unwind to their menu, never share mutable state.
     std::function<void()> openSettings;
     std::function<void()> roundFinished;
+    std::function<void()> beforeGame,gameReady;
+    int startMenuSelection=0;
     Runtime::GameContext* primaryContext = nullptr;
     Runtime::GameContext* localPlayerTwoContext = nullptr;
     std::recursive_mutex terminalOutputMutex;

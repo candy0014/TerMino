@@ -3,6 +3,7 @@
 #include "tetr/app/game.h"
 #include "tetr/app/init.h"
 #include "tetr/input/services.h"
+#include "tetr/network/board_state_codec.h"
 #include "tetr/presentation/context_view.h"
 #include "tetr/render/terminal_renderer.h"
 #include "tetr/replay/session_state.h"
@@ -116,6 +117,16 @@ int main() {
             assert(terminal.cells[i].value==final.cells[i].value);
             assert(playback.board.cells[i].value==final.cells[i].value);
         }
+        state->player.timing.remoteGameTime=Runtime::Duration::from_seconds(2);
+        auto& remote=state->player.presentation;remote.remotePlacementRevision=1;
+        remote.remoteSpinPiece=Piece::Type::from_index(5);remote.remoteMini=true;
+        remote.remoteClearLines=2;remote.remotePerfectClear=true;
+        using G=Network::RemoteGarbageCell;
+        remote.garbageBufferDisplay={static_cast<int>(G::Ready),static_cast<int>(G::EarlyBuffer),static_cast<int>(G::Incoming),static_cast<int>(G::Empty)};
+        const auto remoteHud=Presentation::capture_board_view(context,state->player);
+        assert(remoteHud.spinPiece.valid() && remoteHud.mini && remoteHud.clearLines==2 && remoteHud.perfectClear);
+        assert(remoteHud.garbage==std::vector<int>({1,1,1}));
+        assert(remoteHud.garbageReadyIn[0]==0 && remoteHud.garbageReadyIn[1]==.1 && remoteHud.garbageReadyIn[2]==1);
         Render::end_output_suppression();assert(Render::output_suppressed());
         assert(!Render::terminal_size());
     }

@@ -145,6 +145,11 @@ LobbyWaitResult wait_for_multiplayer_lobby(Runtime::GameContext& context) {
             shownSize=Render::terminal_size();
             if(network.multiplayerRoom && !matchInProgress) {
                 paint_room_waiting(context,waitingSurface,shownSize.value_or(Render::TerminalSize{80,40}),hostChoice,rosterOffset,true);
+            } else if(Frontend::ui_surface_active()) {
+                TerminalCanvas canvas;canvas.box(8,8,104,7,"NETWORK",{{58,222,240}},{{230,240,255}},{{9,17,28}});
+                canvas.write(10,11,status,98,{{230,240,255}},{{9,17,28}});
+                canvas.write(13,11,"P: Settings / disconnect    R: Reconnect    Esc: Start",98,{{58,222,240}},{{9,17,28}});
+                canvas.present({},false);
             } else {
                 Render::clear_screen();Render::set_ui_color(Render::ColorRole::Text,context.config.display.obscuredColors);
                 Render::move_cursor(2,4);std::cout<<status;

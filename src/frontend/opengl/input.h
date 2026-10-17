@@ -23,11 +23,7 @@ private:
     std::uint64_t ticks_;
     std::chrono::steady_clock::time_point steady_;
 };
-inline void deliver_key(Input::FocusState& input,const SDL_KeyboardEvent& event,const EventClock& clock) {
-    if(event.repeat) return;
-    if(const int key=native_key(event.scancode);key>0)
-        input.update(key,event.down,clock.at(event.timestamp));
-}
+void deliver_key(Input::FocusState& input,const SDL_KeyboardEvent& event,const EventClock& clock);
 // SDL may not report releases after switching windows. Reconcile physical
 // releases on focus regain, retaining the shared held-key suppression policy.
 void regain_focus(Input::FocusState& input);

@@ -15,6 +15,8 @@ int main() {
     assert(native_key(SDL_SCANCODE_UNKNOWN)==0);
     assert(native_key(SDL_SCANCODE_LSHIFT)!=native_key(SDL_SCANCODE_RSHIFT));
     assert(native_key(SDL_SCANCODE_MINUS)>0 && native_key(SDL_SCANCODE_EQUALS)>0);
+    assert(native_key(SDL_SCANCODE_VOLUMEUP)>0 && native_key(SDL_SCANCODE_MEDIA_NEXT_TRACK)>0);
+    assert(native_key(SDL_SCANCODE_LANG1)>0 && native_key(SDL_SCANCODE_INTERNATIONAL4)>0);
     const auto origin=steady_clock::now();EventClock clock(1000000,origin);
     assert(clock.at(1012345)-origin==nanoseconds(12345));
     assert(clock.at(987655)-origin==nanoseconds(-12345));

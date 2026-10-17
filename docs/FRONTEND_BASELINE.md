@@ -57,3 +57,20 @@ git worktree add --detach ../termino-phase1 migration/frontend-foundation-202610
 第二阶段测试记录、构建日志及执行前的个人数据 SHA256 清单位于 Git 忽略的
 `build-migration-backups/phase2-20261017/`。测试使用临时运行目录，禁止把个人 `.tetr`
 加入提交或预览安装组件。
+
+## 第三阶段检查点
+
+第三阶段开始时 `main` 的提交为 `9a45ee9757cfe9b2677fd099f21c4243a35f97ea`，
+第二阶段标签为 `migration/opengl-preview-20261017`。执行前的 Git 信息和 195 个本地
+数据文件的 SHA256 已记录在 `build-migration-backups/phase3-20261017/`。
+
+第三阶段作为独立提交保存，完成标签为 `migration/frontend-parity-20261017`。
+只撤销本阶段时使用 `git revert migration/frontend-parity-20261017`；只读检查第二阶段：
+
+```sh
+git worktree add --detach ../termino-phase2 migration/opengl-preview-20261017
+```
+
+完成后的完整历史备份为 `build-migration-backups/phase3-20261017/frontend-parity.bundle`。
+用 `git bundle verify` 校验后可在其他目录恢复。本地迁移标签和提交不表示 GitHub
+已同步或已发布；正式四组合发行仍按第四阶段验收。

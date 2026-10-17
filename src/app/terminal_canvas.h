@@ -1,6 +1,7 @@
 #ifndef TETR_APP_TERMINAL_CANVAS_H
 #define TETR_APP_TERMINAL_CANVAS_H
 #include "tetr/render/terminal_renderer.h"
+#include "tetr/frontend/ui_surface.h"
 #include "tetr/util/terminal_text.h"
 #include <algorithm>
 #include <array>
@@ -12,16 +13,7 @@
 namespace App {
 struct TerminalCanvas {
     using Color = std::array<int,3>;
-    struct Cell {
-        std::string glyph = " ";
-        Color color{{0,0,0}};
-        Color background{{12,12,12}};
-        bool continuation = false;
-        bool operator==(const Cell& other) const {
-            return glyph == other.glyph && continuation == other.continuation && background == other.background &&
-                (glyph == " " || glyph.empty() || color == other.color);
-        }
-    };
+    using Cell=Frontend::UiCell;
     using Frame = std::vector<std::vector<Cell>>;
     Frame shown, pending;
     bool initialized = false;
@@ -31,6 +23,7 @@ struct TerminalCanvas {
     // Message-only settings updates reuse the layout of the displayed frame.
     std::optional<int> hintRow;
     int leftLimit=0;
+    Frontend::UiMetadata metadata;
 
     void begin_frame() { pending.clear(); }
     void begin_update() { pending = shown; }
@@ -78,6 +71,11 @@ struct TerminalCanvas {
         }
     }
     void present(std::optional<std::pair<int,int>> cursor, bool obscuredColors) {
+        if(Frontend::ui_surface_active()) {
+            Frontend::UiFrame frame{pending,cursor,obscuredColors};frame.metadata=metadata;
+            Frontend::present_ui(std::move(frame));
+            shown=pending;initialized=true;return;
+        }
         // Erasure must always use the normal background, including the first
         // frame after leaving an input prompt or another screen.
         Render::set_ui_color(Render::ColorRole::Text,obscuredColors);

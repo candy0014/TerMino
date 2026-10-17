@@ -111,6 +111,8 @@ target_link_libraries(tetr_rules PUBLIC tetr_headers PRIVATE tetr_util tetr_runt
 
 
 add_library(tetr_presentation STATIC
+    src/presentation/ui_surface.cpp
+    src/presentation/text_field.cpp
     src/presentation/visibility.cpp
     src/presentation/board_view.cpp
 )
@@ -129,6 +131,15 @@ if(BUILD_TESTING)
         target_compile_options(frontend_snapshot_test PRIVATE -UNDEBUG)
     endif()
     set_tests_properties(frontend_snapshot PROPERTIES TIMEOUT 10)
+    add_executable(frontend_ui_test tests/frontend_ui_test.cpp)
+    target_link_libraries(frontend_ui_test PRIVATE tetr_presentation Threads::Threads)
+    add_test(NAME frontend_ui COMMAND frontend_ui_test)
+    if(MSVC)
+        target_compile_options(frontend_ui_test PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(frontend_ui_test PRIVATE -UNDEBUG)
+    endif()
+    set_tests_properties(frontend_ui PROPERTIES TIMEOUT 10)
 endif()
 
 if(TETR_BUILD_TERMINAL OR TETR_BUILD_OPENGL OR TETR_BUILD_SERVER)
@@ -200,7 +211,7 @@ add_library(tetr_terminal STATIC
     src/render/terminal_viewport.cpp
     src/render/terminal_renderer.cpp
 )
-target_link_libraries(tetr_terminal PUBLIC tetr_headers PRIVATE tetr_util)
+target_link_libraries(tetr_terminal PUBLIC tetr_headers PRIVATE tetr_util tetr_presentation)
 
 add_library(tetr_config STATIC
     src/config/settings_schema.cpp
@@ -602,6 +613,7 @@ target_link_libraries(tetr_engine INTERFACE
     tetr_engine_core tetr_engine_presentation tetr_engine_integration tetr_gameplay)
 
 add_library(tetr_app STATIC
+    src/app/client_loop.cpp
     src/app/init.cpp
     src/app/init_replay.cpp
     src/app/init_multiplayer.cpp

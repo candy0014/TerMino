@@ -2,6 +2,7 @@
 #include "tetr/runtime/constants.h"
 #include "tetr/runtime/player_session_state.h"
 #include "tetr/runtime/runtime_config.h"
+#include "tetr/runtime/construction.h"
 #include <algorithm>
 #include <stdexcept>
 
@@ -27,7 +28,11 @@ BoardView capture_board_view(const Runtime::RuntimeConfig& config,
         for (int column = 0; column < view.width; ++column) {
             const auto value = field.cell(row, column);
             const auto appearance = board_cell_appearance(config, player, row, column, value, elapsed);
-            view.cells.push_back({appearance == CellAppearance::Empty ? Runtime::BoardCell::empty() : value, appearance});
+            const bool spawn=config.display.showSpawnPosition && player.gameplay.playfield.nextCount>0 &&
+                !player.pieces.nextPreview.empty() && std::any_of(player.presentation.spawnMarkerCells.begin(),player.presentation.spawnMarkerCells.end(),
+                    [&](auto cell){return cell.row==row && cell.col==column;});
+            view.cells.push_back({appearance == CellAppearance::Empty ? Runtime::BoardCell::empty() : value, appearance,
+                spawn || Runtime::construction_cell(config,field,row,column)});
         }
     }
     const auto type = player.presentation.activePieceType;
@@ -51,6 +56,34 @@ BoardView capture_board_view(const Runtime::RuntimeConfig& config,
     const auto& score = player.gameplay.scoring;
     view.score = score.score; view.lines = score.totalLines; view.attack = score.totalAttack;
     view.pieces = score.placedBlocks; view.combo = score.combo; view.b2b = score.b2b;
+    view.squareStyle=config.display.squareStyle;
+    view.spinPiece=player.presentation.eventSpinPiece;
+    view.mini=player.presentation.eventMini;view.clearLines=player.presentation.eventClearLines;
+    view.perfectClear=player.presentation.eventPerfectClear;view.halfClear=player.presentation.eventHalfClear;
+    view.spike=player.presentation.spike.attack;view.clutch=player.clutch.consecutive;
+    view.blighted=player.gameplay.quickPlay.blighted;view.headline=player.presentation.roundEndHeadline;
+    view.rank=score.battleRank;view.stages=score.challengeStages;
+    view.wins=score.wins;view.population=Runtime::challenge_population(config.challengeRules);
+    if(config.challengeRules==Runtime::ChallengeRules::StageMaster) {
+        constexpr const char* tasks[]={"10 LINES","2 QUADS","2 SPINS","1 PC"};
+        view.stageTask=tasks[std::clamp(score.challengeStages,0,3)];
+    }
+    if(config.quickPlay.allSpin==Runtime::AllSpinMode::Extended)
+        for(const auto& operation:player.gameplay.quickPlay.operations)view.spinHistory.emplace_back(operation.pieceClass,operation.lineClass);
+    for(const auto& packet:player.garbage.buffer) view.garbage.push_back(packet.line_count());
+    view.goal=Runtime::active_goal(config);
+    switch(view.goal) {
+    case Runtime::GameGoal::Time:view.goalTarget=static_cast<int>(config.mode.blitzTime.seconds());view.goalProgress=static_cast<int>(elapsed.seconds());break;
+    case Runtime::GameGoal::Lines:view.goalTarget=config.mode.racingDistance;view.goalProgress=score.totalLines;break;
+    case Runtime::GameGoal::Garbage:view.goalTarget=config.mode.garbageTarget;view.goalProgress=score.totalGarbageLines;break;
+    case Runtime::GameGoal::Pieces:view.goalTarget=config.mode.pieceTarget;view.goalProgress=score.placedBlocks;break;
+    case Runtime::GameGoal::Attack:view.goalTarget=config.mode.attackTarget;view.goalProgress=score.totalAttack;break;
+    case Runtime::GameGoal::AllClear:view.goalTarget=config.mode.allClearTarget;view.goalProgress=static_cast<int>(score.allClearCount);break;
+    case Runtime::GameGoal::InitialCells:
+        if(config.initialMap) for(const auto& row:config.initialMap->rows) for(auto cell:row) view.goalTarget+=cell!=' ';
+        view.goalProgress=view.goalTarget-field.remaining_initial_cells();break;
+    default:break;
+    }
     return view;
 }
 

@@ -182,7 +182,8 @@ struct EditorView {
         columns=std::max(1,size.columns);rows=std::max(1,size.rows);
         // Keep the last column blank to avoid autowrap at the terminal edge.
         canvas.columnsLimit=std::max(0,columns-1);canvas.rowsLimit=rows;
-        canvas.begin_frame();canvas.write(1,2,title,columns-3,ui_style().heading,plain.background);
+        canvas.begin_frame();canvas.metadata={Frontend::UiKind::MapEditor,"map-editor",title};
+        canvas.write(1,2,title,columns-3,ui_style().heading,plain.background);
     }
     void shape(Piece::Type type,int y,int x,int maxWidth,int maxHeight) {
         if(maxWidth<2 || maxHeight<=0) return;

@@ -296,6 +296,20 @@ std::string read_scalar_text(Runtime::GameContext& context, const CheckMenuContr
     // Release the action that opened the editor, then discard its queued text.
     wait_for_confirm_release(context, checkControls);
     Frontend::TextInputScope textInput(context.app_component() ? context.app_component()->textInputSession : nullptr);
+    if(auto* session=context.app_component()?context.app_component()->textInputSession:nullptr;
+        session && session->owns_text_events()) {
+        Frontend::TextField field(initialValue);
+        if(redraw)redraw(field.value,field.caret);
+        while(!field.done) {
+            checkControls();
+            if(auto event=session->poll_text_event()) {
+                field.apply(*event);
+                if(redraw)redraw(field.value,field.caret);
+            } else context.services.clock.sleep_for(Runtime::Duration::from_seconds(.001));
+        }
+        if(savedByEscape)*savedByEscape=field.cancelled;
+        return field.value;
+    }
 #ifdef _WIN32
     FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
 #else

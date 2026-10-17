@@ -4,6 +4,7 @@
 #include <windows.h>
 #else
 #include <linux/input-event-codes.h>
+#include "../../../third_party/sdl/linux_keymap.h"
 #endif
 
 namespace Graphical {
@@ -33,7 +34,16 @@ int native_key(SDL_Scancode key) {
         {SDL_SCANCODE_LCTRL,VK_LCONTROL},{SDL_SCANCODE_RCTRL,VK_RCONTROL},
         {SDL_SCANCODE_LSHIFT,VK_LSHIFT},{SDL_SCANCODE_RSHIFT,VK_RSHIFT},
         {SDL_SCANCODE_LALT,VK_LMENU},{SDL_SCANCODE_RALT,VK_RMENU},
-        {SDL_SCANCODE_LGUI,VK_LWIN},{SDL_SCANCODE_RGUI,VK_RWIN},{SDL_SCANCODE_APPLICATION,VK_APPS}
+        {SDL_SCANCODE_LGUI,VK_LWIN},{SDL_SCANCODE_RGUI,VK_RWIN},{SDL_SCANCODE_APPLICATION,VK_APPS},
+        {SDL_SCANCODE_MUTE,VK_VOLUME_MUTE},{SDL_SCANCODE_VOLUMEUP,VK_VOLUME_UP},{SDL_SCANCODE_VOLUMEDOWN,VK_VOLUME_DOWN},
+        {SDL_SCANCODE_MEDIA_NEXT_TRACK,VK_MEDIA_NEXT_TRACK},{SDL_SCANCODE_MEDIA_PREVIOUS_TRACK,VK_MEDIA_PREV_TRACK},
+        {SDL_SCANCODE_MEDIA_STOP,VK_MEDIA_STOP},{SDL_SCANCODE_MEDIA_PLAY_PAUSE,VK_MEDIA_PLAY_PAUSE},
+        {SDL_SCANCODE_MEDIA_SELECT,VK_LAUNCH_MEDIA_SELECT},{SDL_SCANCODE_SLEEP,VK_SLEEP},
+        {SDL_SCANCODE_AC_BACK,VK_BROWSER_BACK},{SDL_SCANCODE_AC_FORWARD,VK_BROWSER_FORWARD},
+        {SDL_SCANCODE_AC_REFRESH,VK_BROWSER_REFRESH},{SDL_SCANCODE_AC_STOP,VK_BROWSER_STOP},
+        {SDL_SCANCODE_AC_SEARCH,VK_BROWSER_SEARCH},{SDL_SCANCODE_AC_HOME,VK_BROWSER_HOME},
+        {SDL_SCANCODE_AC_BOOKMARKS,VK_BROWSER_FAVORITES},{SDL_SCANCODE_LANG1,VK_HANGUL},{SDL_SCANCODE_LANG2,VK_HANJA},
+        {SDL_SCANCODE_INTERNATIONAL4,VK_CONVERT},{SDL_SCANCODE_INTERNATIONAL5,VK_NONCONVERT}
     };
 #else
     static constexpr int letters[]={KEY_A,KEY_B,KEY_C,KEY_D,KEY_E,KEY_F,KEY_G,KEY_H,KEY_I,
@@ -69,12 +79,28 @@ int native_key(SDL_Scancode key) {
     };
 #endif
     for(const auto& item:keys) if(item.first==key) return item.second;
+#ifndef _WIN32
+    if(key!=SDL_SCANCODE_UNKNOWN)
+        for(const auto& item:linux_extended_keys)if(item.first==key)return item.second;
+#endif
     return 0;
+}
+void deliver_key(Input::FocusState& input,const SDL_KeyboardEvent& event,const EventClock& clock) {
+    if(event.repeat)return;
+    const auto time=clock.at(event.timestamp);
+    if(const int key=native_key(event.scancode);key>0)input.update(key,event.down,time);
+#ifdef _WIN32
+    // Older Windows profiles may bind VK_SHIFT/CONTROL/MENU instead of sides.
+    const int pairs[][3]={{VK_SHIFT,VK_LSHIFT,VK_RSHIFT},{VK_CONTROL,VK_LCONTROL,VK_RCONTROL},{VK_MENU,VK_LMENU,VK_RMENU}};
+    const int key=native_key(event.scancode);
+    for(const auto& pair:pairs)if(key==pair[1] || key==pair[2])
+        input.update(pair[0],input.key_down(pair[1]) || input.key_down(pair[2]),time);
+#endif
 }
 void regain_focus(Input::FocusState& input) {
     const bool* physical=SDL_GetKeyboardState(nullptr);
     for(int scan=1;scan<SDL_SCANCODE_COUNT;++scan) if(const int key=native_key(static_cast<SDL_Scancode>(scan));key>0)
-        input.update(key,physical[scan]);
+        {SDL_KeyboardEvent event{};event.scancode=static_cast<SDL_Scancode>(scan);event.down=physical[scan];event.timestamp=SDL_GetTicksNS();deliver_key(input,event,EventClock{});}
     input.set_focused(true);
 }
 }

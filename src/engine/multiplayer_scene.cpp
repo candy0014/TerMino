@@ -1,4 +1,5 @@
 #include "tetr/engine/multiplayer_scene.h"
+#include "tetr/frontend/ui_surface.h"
 #include "tetr/engine/game_terminal_layout.h"
 #include "tetr/engine/remote_board_state_adapter.h"
 #include "tetr/engine/frame_coordinator.h"
@@ -333,7 +334,10 @@ void position_multiplayer_scene(Runtime::GameContext& c,Render::TerminalSize siz
     center_dynamic_scene(c,size);
 }
 void draw_multiplayer_scene(Runtime::GameContext& c,bool force,std::optional<Render::TerminalSize> sizeOverride) {
-    auto& s=c.session.roomScene;if(!s.enabled || Render::output_suppressed()) return;
+    // Graphical sessions suppress ANSI, but still need scene layout, remote
+    // board subscriptions and the transition that dismisses the lobby canvas.
+    auto& s=c.session.roomScene;
+    if(!s.enabled || (Render::output_suppressed() && !Frontend::ui_surface_active())) return;
     const auto now=c.real_now();const auto renderInterval=Runtime::Duration::from_seconds(1.0/120.0);
     if(!force && (now-s.lastPaint<renderInterval || local_input_pending(c))) return;
     const auto size=sizeOverride.value_or(Render::terminal_size().value_or(Render::TerminalSize{120,40}));

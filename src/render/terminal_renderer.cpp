@@ -1,6 +1,7 @@
 #include "tetr/render/terminal_renderer.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/input/services.h"
+#include "tetr/frontend/ui_surface.h"
 #include "terminal_viewport.h"
 
 #include <cstdio>
@@ -22,9 +23,10 @@
 
 namespace Render {
 
-namespace { bool detachedOutput = false; }
+namespace { bool detachedOutput = false,detachedAudio=false; }
 
 std::optional<TerminalSize> terminal_size() noexcept {
+    if(const auto size=Frontend::ui_surface_size()) return TerminalSize{size->first,size->second};
     if(detachedOutput) return std::nullopt;
 #ifdef _WIN32
     CONSOLE_SCREEN_BUFFER_INFO info{};
@@ -291,6 +293,7 @@ void TerminalSession::end_text_input(){
 }
 
 void clear_screen(){
+    Frontend::clear_ui();
     if(output_suppressed()) return;
     std::fflush(stdout);
 #ifdef _WIN32
@@ -459,15 +462,18 @@ bool output_suppressed() noexcept {
     return savedOutputBuffer!=nullptr;
 }
 
-DetachedOutputScope::DetachedOutputScope() {
+DetachedOutputScope::DetachedOutputScope(bool allowAudio) {
     if(detachedOutput || terminalSessionActive)
         throw std::logic_error("Only one terminal or detached output session may run in a process");
     begin_output_suppression();
     detachedOutput=true;
+    detachedAudio=allowAudio;
 }
 DetachedOutputScope::~DetachedOutputScope() {
+    detachedAudio=false;
     detachedOutput=false;
     end_output_suppression();
 }
+bool detached_audio_enabled() noexcept {return detachedAudio;}
 
 } // namespace Render

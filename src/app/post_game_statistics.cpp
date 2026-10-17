@@ -233,6 +233,7 @@ void PostGameStatisticsView::render(Runtime::GameContext& context,const std::str
     if (shownFooter_!=footer) {dirty_=true;shownFooter_=footer;}
     if (!dirty_) return;
     Render::OutputGuard output(context);dirty_=false;
+    canvas_.metadata={Frontend::UiKind::Statistics,"statistics",std::to_string(static_cast<int>(page_))};
     const auto insets=ui_insets(size);
     canvas_.columnsLimit=size.columns-insets.right;canvas_.rowsLimit=size.rows;canvas_.begin_frame();
     const bool obscured=context.config.display.obscuredColors;

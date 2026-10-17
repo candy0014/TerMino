@@ -101,6 +101,25 @@ void text_input_lifecycle() {
     assert(session.begins == 1 && session.ends == 1);
     Frontend::TextInputScope withoutWindow(nullptr);
 }
+void complete_hud_projection() {
+    Fixture f;auto& p=f.player;
+    f.config.mode.goal=Runtime::GameGoal::Pieces;f.config.mode.pieceTarget=50;
+    p.gameplay.scoring.placedBlocks=12;p.gameplay.scoring.wins=3;
+    p.garbage.buffer.emplace_back(4,Runtime::TimePoint::from_seconds(5));
+    f.config.quickPlay.allSpin=Runtime::AllSpinMode::Extended;
+    p.gameplay.quickPlay.operations.push_back({5,1});
+    p.presentation.eventSpinPiece=Piece::Type::from_index(5);p.presentation.eventMini=true;
+    p.presentation.eventClearLines=2;p.presentation.eventPerfectClear=true;
+    f.config.display.showSpawnPosition=true;p.presentation.spawnMarkerCells.push_back({0,4});
+    auto view=f.capture(2);
+    assert(view.goal==Runtime::GameGoal::Pieces && view.goalTarget==50 && view.goalProgress==12);
+    assert(view.garbage==std::vector<int>{4} && view.wins==3);
+    assert(view.spinPiece.valid() && view.mini && view.clearLines==2 && view.perfectClear);
+    assert(view.spinHistory.size()==1 && view.at(0,4).hint);
+    p.gameplay.quickPlay.operations.clear();assert(view.spinHistory.size()==1);
+    f.config.challengeRules=Runtime::ChallengeRules::StageMaster;p.gameplay.scoring.challengeStages=2;
+    assert(f.capture(2).stageTask=="2 SPINS");
+}
 }
 
-int main() { immutable_snapshot(); visibility_and_replay(); text_input_lifecycle(); }
+int main() { immutable_snapshot(); visibility_and_replay(); text_input_lifecycle(); complete_hud_projection(); }

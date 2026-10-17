@@ -64,11 +64,11 @@ public:
 AudioWorker& audio_worker(){static AudioWorker worker;return worker;}
 }
 void play_audio_cue(AudioCue cue,int value,int extra) {
-    if(output_suppressed())return;
+    if(output_suppressed() && !detached_audio_enabled())return;
     audio_worker().push(cue_frequencies(cue,value,extra));
 }
 void play_audio_heights(const std::vector<int>& heights) {
-    if(output_suppressed())return;
+    if(output_suppressed() && !detached_audio_enabled())return;
     std::vector<double> notes;for(int height:heights)notes.push_back(cue_frequencies(AudioCue::Height,height).front());
     audio_worker().push(std::move(notes));
 }

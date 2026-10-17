@@ -89,6 +89,7 @@ void print_spin(
     Runtime::PlayerSessionState& player,
     Piece::Type pieceType,
     bool mini) {
+    player.presentation.eventSpinPiece=pieceType;player.presentation.eventMini=mini;
     OutputGuard output(context);
     int nameOffset = 10;
     Piece::Metadata metadata;
@@ -113,6 +114,7 @@ void print_spin(
 }
 
 void print_clear(const Runtime::GameContext& context, Runtime::PlayerSessionState& player, int lines) {
+    player.presentation.eventClearLines=lines;
     OutputGuard output(context);
     move_to(context, player, 2 + board_info_top_row(player), -7, 1);
     ui_color(context, ColorRole::Text);
@@ -169,6 +171,7 @@ void print_all_clear(
     const Runtime::GameContext& context,
     Runtime::PlayerSessionState& player,
     bool enabled, bool halfClear) {
+    player.presentation.eventPerfectClear=enabled;player.presentation.eventHalfClear=halfClear;
     OutputGuard output(context);
     move_to(context, player, 7 + board_info_top_row(player), -5, 0);
     std::cout << "　　　　";

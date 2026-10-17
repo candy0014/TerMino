@@ -105,6 +105,7 @@ void paint_room_waiting(Runtime::GameContext& c,TerminalCanvas& surface,Render::
     int ready=0,battles=0;
     for(const auto& m:n.roomMembers) if(m.role==Network::PlayerRole::Battle) {++battles;if(n.matchPhase==Network::RoomMatchPhase::Preparing && m.ready)++ready;}
     surface.columnsLimit=std::max(0,size.columns-insets.right);surface.rowsLimit=size.rows;surface.begin_frame();
+    surface.metadata={Frontend::UiKind::Lobby,"room-waiting",n.room.name};
     const auto line=[&](int row,const std::string& label,TerminalCanvas::Color color) {
         surface.write(row,left,label,std::max(1,size.columns-left-insets.right),color,text.background);
     };

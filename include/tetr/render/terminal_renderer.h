@@ -103,11 +103,12 @@ bool output_suppressed() noexcept;
 // Replay seeking cannot restore ANSI output while this scope is alive.
 class DetachedOutputScope {
 public:
-    DetachedOutputScope();
+    explicit DetachedOutputScope(bool allowAudio=false);
     ~DetachedOutputScope();
     DetachedOutputScope(const DetachedOutputScope&) = delete;
     DetachedOutputScope& operator=(const DetachedOutputScope&) = delete;
 };
+bool detached_audio_enabled() noexcept;
 
 } // namespace Render
 
