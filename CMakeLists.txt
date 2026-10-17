@@ -10,9 +10,6 @@ option(BUILD_TESTING "Build the regression suite (opt in)" OFF)
 option(TETR_BUILD_TERMINAL "Build the complete original terminal client and FT7 tools" ON)
 option(TETR_BUILD_OPENGL "Build the OpenGL client (migration phase 2)" OFF)
 option(TETR_BUILD_SERVER "Build the standalone relay server" ON)
-if(TETR_BUILD_OPENGL)
-    message(FATAL_ERROR "The OpenGL frontend is planned for migration phase 2; it is not implemented yet. See docs/FRONTEND_MIGRATION.md. Use TETR_BUILD_TERMINAL=ON for the complete client.")
-endif()
 if(BUILD_TESTING AND TETR_BUILD_TERMINAL AND NOT TETR_BUILD_SERVER)
     message(FATAL_ERROR "The full terminal integration suite requires TETR_BUILD_SERVER=ON. Headless foundation tests support both server settings.")
 endif()
@@ -35,7 +32,7 @@ endif()
 find_package(Threads REQUIRED)
 include(cmake/PortableBuild.cmake)
 include(cmake/WebSocketDependencies.cmake)
-if(TETR_BUILD_TERMINAL OR TETR_BUILD_SERVER)
+if(TETR_BUILD_TERMINAL OR TETR_BUILD_OPENGL OR TETR_BUILD_SERVER)
     tetr_setup_websocket()
 endif()
 
@@ -134,7 +131,7 @@ if(BUILD_TESTING)
     set_tests_properties(frontend_snapshot PROPERTIES TIMEOUT 10)
 endif()
 
-if(TETR_BUILD_TERMINAL OR TETR_BUILD_SERVER)
+if(TETR_BUILD_TERMINAL OR TETR_BUILD_OPENGL OR TETR_BUILD_SERVER)
     add_library(tetr_network STATIC
         src/network/curl_runtime.cpp
         src/network/udp_socket.cpp
@@ -178,7 +175,7 @@ if(TETR_BUILD_SERVER)
 endif()
 
 # A headless/server build never configures terminal input or BOT libraries.
-if(NOT TETR_BUILD_TERMINAL)
+if(NOT TETR_BUILD_TERMINAL AND NOT TETR_BUILD_OPENGL)
     if(BUILD_TESTING)
         foreach(name core_geometry core_rules)
             add_executable(${name}_test tests/${name}_test.cpp)
@@ -636,14 +633,22 @@ add_library(tetr_app STATIC
 )
 target_link_libraries(tetr_app PUBLIC tetr_headers tetr_runtime tetr_rules tetr_engine tetr_replay tetr_input tetr_config tetr_bot_capabilities)
 
+if(TETR_BUILD_TERMINAL)
 add_executable(tetr src/tetr.cpp)
 target_link_libraries(tetr PRIVATE tetr_headers tetr_app tetr_bot_legacy Threads::Threads)
 
 add_executable(tetr_ft7 src/tetr_ft7.cpp)
 target_link_libraries(tetr_ft7 PRIVATE tetr_headers tetr_app tetr_bot_legacy Threads::Threads)
+endif()
+
+if(TETR_BUILD_OPENGL)
+    include(cmake/OpenGLFrontend.cmake)
+endif()
 
 if(TETR_PORTABLE_BUILD)
-    install(TARGETS tetr RUNTIME DESTINATION . COMPONENT Portable)
+    if(TETR_BUILD_TERMINAL)
+        install(TARGETS tetr RUNTIME DESTINATION . COMPONENT Portable)
+    endif()
     configure_file(cmake/portable/InstallResources.cmake.in
         portable-install-resources.cmake @ONLY)
     install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/portable-install-resources.cmake"
@@ -651,7 +656,7 @@ if(TETR_PORTABLE_BUILD)
 endif()
 
 
-if(BUILD_TESTING)
+if(BUILD_TESTING AND TETR_BUILD_TERMINAL)
     # A bundled dependency may have included CTest with its tests disabled.
     # Explicitly enable the parent project's tests regardless of that guard.
     enable_testing()

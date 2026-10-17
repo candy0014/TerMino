@@ -99,6 +99,16 @@ void begin_output_suppression();
 void end_output_suppression();
 bool output_suppressed() noexcept;
 
+// Migration bridge for a non-console session using the existing orchestration.
+// Replay seeking cannot restore ANSI output while this scope is alive.
+class DetachedOutputScope {
+public:
+    DetachedOutputScope();
+    ~DetachedOutputScope();
+    DetachedOutputScope(const DetachedOutputScope&) = delete;
+    DetachedOutputScope& operator=(const DetachedOutputScope&) = delete;
+};
+
 } // namespace Render
 
 #endif

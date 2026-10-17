@@ -22,7 +22,10 @@
 
 namespace Render {
 
+namespace { bool detachedOutput = false; }
+
 std::optional<TerminalSize> terminal_size() noexcept {
+    if(detachedOutput) return std::nullopt;
 #ifdef _WIN32
     CONSOLE_SCREEN_BUFFER_INFO info{};
     if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE),&info)) {
@@ -444,6 +447,7 @@ void begin_output_suppression(){
 
 void end_output_suppression(){
     std::lock_guard<std::mutex> lock(outputSuppressionMutex);
+    if(detachedOutput) return;
     if(!savedOutputBuffer) return;
     std::cout.rdbuf(savedOutputBuffer);
     savedOutputBuffer=nullptr;
@@ -453,6 +457,17 @@ void end_output_suppression(){
 bool output_suppressed() noexcept {
     std::lock_guard<std::mutex> lock(outputSuppressionMutex);
     return savedOutputBuffer!=nullptr;
+}
+
+DetachedOutputScope::DetachedOutputScope() {
+    if(detachedOutput || terminalSessionActive)
+        throw std::logic_error("Only one terminal or detached output session may run in a process");
+    begin_output_suppression();
+    detachedOutput=true;
+}
+DetachedOutputScope::~DetachedOutputScope() {
+    detachedOutput=false;
+    end_output_suppression();
 }
 
 } // namespace Render

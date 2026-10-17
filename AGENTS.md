@@ -17,5 +17,7 @@ gameplay work. The baseline and recovery instructions are in
   testing or packaging. Use isolated temporary test data and clean default packages.
 - Validate affected behavior and architecture boundaries. Record real platform
   coverage; Wine does not establish native Windows graphics/input correctness.
+- Graphical tests must use hidden windows or an offscreen display. Do not show
+  test windows on the user's desktop; smoke/frame-limited runs are hidden.
 - Keep migration changes reviewable and independently reversible. Do not claim a
   graphical build or feature exists while it is still planned.

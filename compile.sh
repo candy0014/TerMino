@@ -29,22 +29,30 @@ if [[ -f build/CMakeCache.txt ]]; then
 fi
 
 build_tests=OFF
-if [[ "${1:-}" == "--test" ]]; then
-    build_tests=ON
-    shift
-fi
-if (( $# )); then
-    printf 'Usage: %s [--test]\n' "$0" >&2
-    exit 2
-fi
+frontend=terminal
+while (( $# )); do
+    case "$1" in
+        --test) build_tests=ON; shift ;;
+        --frontend) frontend=${2:?--frontend requires terminal, opengl or both}; shift 2 ;;
+        *) printf 'Usage: %s [--test] [--frontend terminal|opengl|both]\n' "$0" >&2; exit 2 ;;
+    esac
+done
+case "$frontend" in
+    terminal) build_directory=build; terminal=ON; graphical=OFF ;;
+    opengl) build_directory=build-opengl; terminal=OFF; graphical=ON ;;
+    both) build_directory=build-both; terminal=ON; graphical=ON ;;
+    *) printf 'Unknown frontend: %s\n' "$frontend" >&2; exit 2 ;;
+esac
 
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING="$build_tests"
-cmake --build build --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+cmake -S . -B "$build_directory" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING="$build_tests" \
+    -DTETR_BUILD_TERMINAL="$terminal" -DTETR_BUILD_OPENGL="$graphical" -DTETR_BUILD_SERVER=ON
+cmake --build "$build_directory" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
 if [[ "$build_tests" == ON ]]; then
-    ctest --test-dir build --output-on-failure
+    ctest --test-dir "$build_directory" --output-on-failure
 fi
 
 echo
 echo "Build complete."
-echo "Game:       ./build/tetr"
-echo "Server:     ./build/tetr_server"
+if [[ "$terminal" == ON ]]; then echo "Terminal:   ./$build_directory/tetr"; fi
+if [[ "$graphical" == ON ]]; then echo "OpenGL:     ./$build_directory/tetr_gl"; fi
+echo "Server:     ./$build_directory/tetr_server"

@@ -99,7 +99,11 @@ void run(Runtime::GameContext& context){
         if(roomBattle) {inputScope.end();watch_room_match(context,true);}
         return;
     }
-    if(countdown==Engine::CountdownResult::OpenSettings){ inputScope.end(); Settings::run_menu(context); return; }
+    const auto openSettings=[&] {
+        if(auto* app=context.app_component();app && app->openSettings) app->openSettings();
+        else Settings::run_menu(context);
+    };
+    if(countdown==Engine::CountdownResult::OpenSettings){ inputScope.end(); openSettings(); return; }
     if(roomBattle && !roomParticipant) {watch_room_match(context);return;}
     Engine::finish_start_precharge(context,pieceLoopState.input);
 
@@ -158,7 +162,7 @@ void run(Runtime::GameContext& context){
                     Network::send_lobby_signal(context,Network::ClientLobbySignal::Cancel);
                 }
                 else if(!context.config.mode.replayMode&&context.config.garbage.mode == Runtime::GarbageMode::Multiplayer) Engine::close_multiplayer_round(context);
-                inputScope.end(); Settings::run_menu(context); return;
+                inputScope.end(); openSettings(); return;
             }
             if(outcome==Engine::GameLoopExit::Retry){
                 if(roomBattle) {

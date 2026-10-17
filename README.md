@@ -70,7 +70,11 @@ ctest --preset terminal-linux
 
 无窗口、无终端输入依赖的核心与视图检查使用 `frontend-headless-linux` / `frontend-headless-windows`。
 单独构建服务端可配置 `-DTETR_BUILD_TERMINAL=OFF -DTETR_BUILD_SERVER=ON`。
-OpenGL 前端处于迁移计划阶段，当前尚无图形可执行文件；现有终端全部功能继续保留。
+OpenGL 第二阶段预览已提供 `tetr_gl`：SDL3/OpenGL 窗口、共享引擎游玩、单棋盘回放和全键盘导航。
+使用 `./compile.sh --frontend opengl` / `--frontend both`，Windows 使用
+`./compile.ps1 -Frontend opengl` / `-Frontend both`；不带参数仍构建完整终端版。
+图形预览尚未覆盖终端全部界面，完整功能迁移在第三阶段验收；现有终端全部内容继续保留。
+依赖、预设、键盘操作、数据隔离和运行说明见 [图形预览说明](docs/OPENGL_PREVIEW.md)。
 
 ## 默认操作
 

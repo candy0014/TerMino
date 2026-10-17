@@ -8,3 +8,7 @@
 *.yaml text eol=lf
 *.ps1 text eol=lf
 *.bat text eol=crlf
+# Preserve upstream whitespace in generated code and original license notices.
+third_party/glad/src/gl.c -whitespace
+resources/fonts/LICENSE-DejaVu.txt -whitespace
+resources/licenses/SDL3.txt -whitespace

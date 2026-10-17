@@ -3,7 +3,7 @@
 The dual-frontend migration now adds a platform-independent `tetr_presentation`
 library, a separate `tetr_presentation_context` timeline adapter and a semantic
 `Frontend::TextInputSession` interface. The original terminal client remains the
-complete product; no OpenGL executable exists at this migration checkpoint.
+complete product; the phase-2 `tetr_gl` preview uses the same game engine.
 The implementation and remaining migration work are tracked in
 [FRONTEND_MIGRATION.md](FRONTEND_MIGRATION.md).
 
@@ -494,3 +494,19 @@ ownership. Stage 113 also adds a timed UDP wait regression so `receive_for()` ca
 silently collapse back into a hot `try_receive()` loop. BOT-specific tests continue
 to pin the active ID/name table, Settings choice model, historical Replay mapping and
 absence of retired implementation files.
+## OpenGL phase-2 adapter
+
+`tetr_gl` uses SDL3 events and OpenGL 3.3 Core drawing, never ANSI screen
+capture. `tetr_graphical_session` owns the existing App/Engine on one worker;
+the main/video thread only injects physical key transitions and reads copied
+BoardView values. `tetr_sdl_input` maps SDL timestamps to steady time and the
+existing platform binding namespace. Presentation and rules have no SDL/GL
+dependencies. The graphical target still links legacy presentation as a
+temporary bridge: DetachedOutputScope prevents output, including across replay
+seeks, and no native keyboard monitor or TerminalSession is started.
+
+App's optional openSettings/roundFinished callbacks select frontend UI endpoints
+without changing the shared rules or the terminal fallback. Full settings,
+multi-board scenes and migration away from blocking orchestration remain phase-3
+work; the complete terminal frontend stays supported. See
+[preview scope and builds](OPENGL_PREVIEW.md).

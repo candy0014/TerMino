@@ -68,6 +68,10 @@ struct ApplicationState {
     const auto& challenge_round(const Runtime::GameContext* context) const {return context==localPlayerTwoContext?playerTwoChallengeRound:challengeRound;}
     auto& challenge_observer(const Runtime::GameContext* context) {return context==localPlayerTwoContext?playerTwoChallengePlacementObserver:challengePlacementObserver;}
     Frontend::TextInputSession* textInputSession = nullptr;
+    // Optional UI endpoints. The session owner invokes these on its own thread;
+    // frontends may copy a view or unwind to their menu, never share mutable state.
+    std::function<void()> openSettings;
+    std::function<void()> roundFinished;
     Runtime::GameContext* primaryContext = nullptr;
     Runtime::GameContext* localPlayerTwoContext = nullptr;
     std::recursive_mutex terminalOutputMutex;

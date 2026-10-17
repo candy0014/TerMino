@@ -370,6 +370,10 @@ void run_post_game_interaction(Runtime::GameContext& context, Runtime::PlayerSes
     if (!context.config.mode.replayMode) context.undoHistory.reset();
     if(!context.config.mode.replayMode) Replay::add_replay(context,Replay::OperationKind::EndAll);
     remember_finished_replay(context);
+    if(auto* app=context.app_component();app && app->roundFinished) {
+        app->roundFinished();
+        return;
+    }
     if (std::getenv("TETR_TEST_BATCH")) {
         if (const char* path = std::getenv("TETR_TEST_REPLAY"); path && *path) {
             const auto replayPath = Replay::replay_path_for_saving(path);

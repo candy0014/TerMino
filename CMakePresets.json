@@ -144,6 +144,36 @@
       }
     },
     {
+      "name": "opengl-linux",
+      "inherits": "terminal-linux",
+      "cacheVariables": { "TETR_BUILD_TERMINAL": "OFF", "TETR_BUILD_OPENGL": "ON", "TETR_BUILD_SERVER": "OFF" }
+    },
+    {
+      "name": "both-linux",
+      "inherits": "terminal-linux",
+      "cacheVariables": { "TETR_BUILD_OPENGL": "ON" }
+    },
+    {
+      "name": "opengl-windows",
+      "inherits": "terminal-windows",
+      "cacheVariables": { "TETR_BUILD_TERMINAL": "OFF", "TETR_BUILD_OPENGL": "ON", "TETR_BUILD_SERVER": "OFF" }
+    },
+    {
+      "name": "both-windows",
+      "inherits": "terminal-windows",
+      "cacheVariables": { "TETR_BUILD_OPENGL": "ON" }
+    },
+    {
+      "name": "opengl-windows-mingw",
+      "inherits": "terminal-windows-mingw",
+      "cacheVariables": { "TETR_BUILD_TERMINAL": "OFF", "TETR_BUILD_OPENGL": "ON", "TETR_BUILD_SERVER": "OFF" }
+    },
+    {
+      "name": "both-windows-mingw",
+      "inherits": "terminal-windows-mingw",
+      "cacheVariables": { "TETR_BUILD_OPENGL": "ON" }
+    },
+    {
       "name": "frontend-headless-linux",
       "inherits": "frontend-common",
       "generator": "Unix Makefiles",
@@ -174,6 +204,12 @@
     }
   ],
   "buildPresets": [
+    { "name": "opengl-linux", "configurePreset": "opengl-linux", "configuration": "Release", "jobs": 2 },
+    { "name": "both-linux", "configurePreset": "both-linux", "configuration": "Release", "jobs": 2 },
+    { "name": "opengl-windows", "configurePreset": "opengl-windows", "configuration": "Release", "jobs": 2 },
+    { "name": "both-windows", "configurePreset": "both-windows", "configuration": "Release", "jobs": 2 },
+    { "name": "opengl-windows-mingw", "configurePreset": "opengl-windows-mingw", "configuration": "Release", "jobs": 2 },
+    { "name": "both-windows-mingw", "configurePreset": "both-windows-mingw", "configuration": "Release", "jobs": 2 },
     { "name": "chatgpt-stable", "configurePreset": "chatgpt-stable", "configuration": "Release", "targets": ["tetr"] },
     { "name": "chatgpt-key-piece", "configurePreset": "chatgpt-key-piece", "configuration": "Release", "targets": ["tetr"] },
     { "name": "chatgpt-coverage", "configurePreset": "chatgpt-coverage", "configuration": "Release", "targets": ["tetr"] },
@@ -216,6 +252,12 @@
     }
   ],
   "testPresets": [
+    { "name": "opengl-linux", "configurePreset": "opengl-linux", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
+    { "name": "both-linux", "configurePreset": "both-linux", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
+    { "name": "opengl-windows", "configurePreset": "opengl-windows", "configuration": "Release", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
+    { "name": "both-windows", "configurePreset": "both-windows", "configuration": "Release", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
+    { "name": "opengl-windows-mingw", "configurePreset": "opengl-windows-mingw", "configuration": "Release", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
+    { "name": "both-windows-mingw", "configurePreset": "both-windows-mingw", "configuration": "Release", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
     {
       "name": "terminal-linux",
       "configurePreset": "terminal-linux",

@@ -59,7 +59,7 @@ SDL 事件和 OpenGL 由主线程拥有；最终会话调度器是游戏状态�
 
 保留 `tetr`、`tetr_ft7`、`tetr_server` 及现有默认脚本。最终新增 `tetr_gl`，提供终端、图形、双端、服务端和无界面测试配置。CMake 开关为 `TETR_BUILD_TERMINAL`、`TETR_BUILD_OPENGL`、`TETR_BUILD_SERVER`。默认构建继续生成完整终端版。
 
-第一阶段提供 terminal/headless/server 配置；`TETR_BUILD_OPENGL=ON` 在图形实现落地前明确报未实现，不能生成空壳或自动降级后宣称已构建图形版。第二阶段增加可工作的 OpenGL 配置，并扩展 Bash/PowerShell 入口以选择 `terminal / opengl / both`。
+第一阶段提供 terminal/headless/server 配置。第二阶段已新增可工作的 `tetr_gl` 和 OpenGL/both 配置，Bash/PowerShell 入口支持 `terminal / opengl / both`。具体命令、依赖和阶段限制见 [OpenGL 预览说明](OPENGL_PREVIEW.md)。
 
 | 平台 | 正式目标 | 独立验证 |
 | --- | --- | --- |
@@ -83,7 +83,7 @@ CI 在 Linux/Windows 构建并测试两端；核心测试每个平台运行一�
 | 阶段 | 验收目标 | 当前状态 |
 | --- | --- | --- |
 | 第一阶段 | Git 基线、维护文档、共用显示契约、终端调用共用可见性、文本输入接口、公开菜单模型、无界面构建入口和回归 | 首批基础改造已验证；完整解耦继续推进 |
-| 第二阶段 | SDL/OpenGL 窗口、时钟与输入适配、基础棋盘、回放、键盘导航和实际图形构建 | 待实施 |
+| 第二阶段 | SDL/OpenGL 窗口、时钟与输入适配、基础棋盘、回放、键盘导航和实际图形构建 | 预览实现及回归通过；完整图形功能继续第三阶段 |
 | 第三阶段 | 覆盖终端所有内容，包含全部设置、地图编辑、挑战、Bot、房间、观战、双人及命令能力 | 待实施 |
 | 第四阶段 | 全功能与全键盘验收、四组合 CI、统一打包和正式双端发布 | 待实施 |
 
@@ -106,7 +106,34 @@ CI 在 Linux/Windows 构建并测试两端；核心测试每个平台运行一�
 | 工程检查 | 架构边界、workflow 语法、源码审计与文档相对链接检查通过 |
 | 本地个人数据 | `.tetr` 的 195 个文件大小和 SHA256 与迁移前一致 |
 
-完整本地检查记录存于 Git 忽略的 `build-migration-backups/phase1-20261017/`。Windows 检查使用 MinGW 的 Windows 工具链和 Wine；原生 Windows MSVC、设备输入及显卡验证由后续原生 CI/实机完成。当前没有 OpenGL 窗口或图形可执行文件。
+完整本地检查记录存于 Git 忽略的 `build-migration-backups/phase1-20261017/`。Windows 检查使用 MinGW 的 Windows 工具链和 Wine；原生 Windows MSVC、设备输入及显卡验证由后续原生 CI/实机完成。
+
+## 第二阶段实现
+
+新增真实 `tetr_gl` 程序：SDL3 主线程管理窗口、事件与 OpenGL 3.3 Core，glad 加载函数，FreeType 字形图集绘制文本。使用深色网格、青紫边框、清晰键盘焦点和稳定方块，没有高干扰特效；窗口按比例缩放。
+
+`Graphical::Session` 是过渡会话适配器。工作线程独占原 `App::initialize_game / App::run` 及其 Runtime、Replay、Input、Undo 和 Pause 状态；SDL 输入注入已有事件缓冲，通过原 `BindingSet` 解释。SDL 纳秒事件映射到同一个 steady clock，规则仍使用原时钟。渲染线程只读取值快照，绘制频率不能推进规则或覆盖待处理输入。
+
+本阶段仅新增两个应用 UI 端点（打开设置、对局完成）；未挂接时仍进入原有完整终端流程。图形会话临时链接旧终端呈现库并关闭 ANSI 输出，回放定位不能重新开启输出；不创建 TerminalSession、不读取 evdev 或 Windows 全局键盘。完整非阻塞会话状态机和终端缓存抽离仍在后续完成，不将这一过渡桥接描述成已完全解耦。
+
+已开放基础单人游玩、Hold/Next/Ghost、基本统计、暂停、撤销、重试、结束保存、单棋盘回放暂停/速度/定位和键盘路径输入。默认预览不写配置，可显式只读导入原平台档案，录像继续使用原编码/校验与目录规则。完整设置、地图编辑、预设、136 项挑战界面、所有 Bot 入口、联网/观战、双人和统计页必须在第三阶段逐项完成；终端能力基线和全部入口继续保留。
+
+构建新增 Linux/Windows 的 opengl/both 预设、脚本选择及只安装图形程序与资源的 `OpenGLPreview` 组件。图形依赖仅在图形开关打开时查找；无界面和终端默认构建不引入图形包。新增原生 Windows 编译/无窗口测试和 Linux 两端/软件 OpenGL 冒烟 CI；本地实际执行结果单独记录，不把 CI 配置等同于 CI 已运行。
+
+第二阶段本地验证（2026-10-17）：
+
+| 检查 | 结果 |
+| --- | --- |
+| Linux 独立完整终端构建 / CTest | 159/159 通过；未配置 SDL/OpenGL/字体依赖 |
+| Linux 独立图形构建 / 新前端回归 | `tetr_gl` 编译成功，3/3 通过 |
+| 共享会话与录像 | Hold、移动/旋转、硬降、暂停计时、撤销、保存、回放暂停/倍速/定位；图形录像与原 App 入口的最终棋盘/分数/攻击一致 |
+| Linux 隐藏 OpenGL 检查 | X11、Wayland、llvmpipe 软件渲染和纯 offscreen 驱动全部通过，SDL 菜单导航及输入确实到达共享引擎 |
+| 图形资源安装 | 独立安装目录启动通过；字体从可执行文件旁加载；组件未复制个人数据 |
+| Windows MinGW / Wine | 四个可执行文件构建成功；3/3 新前端回归、隐藏 WGL 启动及 SDL 输入冒烟通过；GUI 静态链接 SDL/FreeType/编译器运行库 |
+| 无界面与维护检查 | Linux headless 3/3；71 项 Python、Node 压力、136 项固定挑战目录、架构边界、源码审计、预设及文档链接检查通过 |
+| 个人数据 | 本地 `.tetr` 的 195 个文件大小和 SHA256 与第二阶段执行前完全一致 |
+
+新增 `--hidden`，`--smoke-test` / `--frames N` 从创建时默认隐藏窗口。后续测试禁止在桌面显示界面，要求同步写入 AGENTS 和维护约定。CI 配置已新增，但本地结果不代表远程 CI 已执行；Windows 的原生 MSVC、真实设备输入、DPI、IME 和显卡验收仍需原生环境完成。检查记录位于 `build-migration-backups/phase2-20261017/`。
 
 ## 技术资料
 

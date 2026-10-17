@@ -20,4 +20,6 @@ Runtime/Rules 保持纯语义边界。`tetr_presentation` 和 `tetr/frontend` �
 
 日常运行受影响模块回归、前端契约测试和架构检查。共享变更运行终端完整 CTest；图形接入后加入两端全键盘、绘制与混合联网检查。Linux/Windows 的实际验证范围如实记录，Wine 结果不视为原生 Windows 显卡或输入设备验收。
 
+图形测试使用隐藏窗口或离屏环境，不在用户桌面显示测试界面。`--smoke-test`、`--frames N` 已默认隐藏，其他自动化运行必须显式使用 `--hidden` 或隔离显示服务。
+
 正式版本使用同一标签和提交构建 Linux/Windows 的终端与 OpenGL 包；全部验证通过后统一发布。图形版未覆盖终端全部内容前只能作为预览版分发。

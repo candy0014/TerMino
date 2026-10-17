@@ -40,3 +40,20 @@ git -C ../termino-restored switch --detach v2026.10.17
 后续迁移按可独立回退的提交保存。遇到问题时，先保留未提交工作，再对有问题的迁移提交执行 `git revert <提交>`，形成可同步的回退记录。整个迁移需要回退时，按时间从新到旧撤销迁移提交，并运行终端完整回归。
 
 不要用删除 `.tetr` 或清理个人数据的方式回退。Git 基线不包含配置、地图、预设、挑战成绩和录像；这些内容使用各自的备份恢复。
+
+## 第二阶段之前的检查点
+
+第一阶段提交为 `8422ab773e017a55d6939e5d945fe75e6595e31a`，标签
+`migration/frontend-foundation-20261017`。第二阶段按一个独立提交保存，完成检查点为
+`migration/opengl-preview-20261017`；仅撤销第二阶段时可对该标签所指的提交执行
+`git revert migration/opengl-preview-20261017`，保留第一阶段和原终端全部内容。
+
+只读比较可使用独立 worktree，不需要改动当前工作目录或个人数据：
+
+```sh
+git worktree add --detach ../termino-phase1 migration/frontend-foundation-20261017
+```
+
+第二阶段测试记录、构建日志及执行前的个人数据 SHA256 清单位于 Git 忽略的
+`build-migration-backups/phase2-20261017/`。测试使用临时运行目录，禁止把个人 `.tetr`
+加入提交或预览安装组件。

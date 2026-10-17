@@ -6,6 +6,8 @@ param(
     [string]$Configuration = "Release",
     [ValidateRange(1, 256)]
     [int]$Parallel = 2,
+    [ValidateSet("terminal", "opengl", "both")]
+    [string]$Frontend = "terminal",
     [switch]$Test
 )
 
@@ -22,9 +24,13 @@ try {
             (-not $Generator -and $env:CMAKE_GENERATOR -eq "MinGW Makefiles")) {
             "build-windows-mingw"
         } else { "build-windows" }
+        if ($Frontend -ne "terminal") { $BuildDirectory += "-$Frontend" }
     }
     $configureArguments = @("-S", $PSScriptRoot, "-B", $BuildDirectory,
-        "-DCMAKE_BUILD_TYPE=$Configuration", "-DBUILD_TESTING=$(if ($Test) { 'ON' } else { 'OFF' })")
+        "-DCMAKE_BUILD_TYPE=$Configuration", "-DBUILD_TESTING=$(if ($Test) { 'ON' } else { 'OFF' })",
+        "-DTETR_BUILD_TERMINAL=$(if ($Frontend -eq 'opengl') { 'OFF' } else { 'ON' })",
+        "-DTETR_BUILD_OPENGL=$(if ($Frontend -eq 'terminal') { 'OFF' } else { 'ON' })",
+        "-DTETR_BUILD_SERVER=ON")
     if ($Generator) { $configureArguments += @("-G", $Generator) }
     & cmake @configureArguments
     if ($LASTEXITCODE -ne 0) {
@@ -38,13 +44,15 @@ try {
     }
 
     $executableDirectory = Join-Path $BuildDirectory $Configuration
-    if (-not (Test-Path -LiteralPath (Join-Path $executableDirectory "tetr.exe"))) {
+    $entryExecutable = if ($Frontend -eq "opengl") { "tetr_gl.exe" } else { "tetr.exe" }
+    if (-not (Test-Path -LiteralPath (Join-Path $executableDirectory $entryExecutable))) {
         $executableDirectory = $BuildDirectory
     }
     Write-Host $(if ($Test) { "Build and tests complete." } else { "Build complete." })
-    Write-Host "Game:   $(Join-Path $executableDirectory 'tetr.exe')"
+    if ($Frontend -ne "opengl") { Write-Host "Terminal: $(Join-Path $executableDirectory 'tetr.exe')" }
+    if ($Frontend -ne "terminal") { Write-Host "OpenGL: $(Join-Path $executableDirectory 'tetr_gl.exe')" }
     Write-Host "Server: $(Join-Path $executableDirectory 'tetr_server.exe')"
-    Write-Host "FT7:    $(Join-Path $executableDirectory 'tetr_ft7.exe')"
+    if ($Frontend -ne "opengl") { Write-Host "FT7: $(Join-Path $executableDirectory 'tetr_ft7.exe')" }
 } catch {
     Write-Error $_ -ErrorAction Continue
     exit 1

@@ -1,4 +1,4 @@
-name: Frontend foundation
+name: Terminal and OpenGL frontends
 
 on:
   push:
@@ -13,6 +13,48 @@ env:
   PYTHONUTF8: '1'
 
 jobs:
+  graphical:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            preset: both-linux
+          - os: windows-2022
+            preset: opengl-windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Linux window and software rendering dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev libwayland-dev libxkbcommon-dev libegl1-mesa-dev libgl1-mesa-dev libfreetype6-dev xvfb
+          python -m pip install -r deploy/websocket-requirements.txt
+      - name: Configure selected frontends
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build real graphical executable and regressions
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: Preserve terminal catalog
+        run: python -m unittest discover -s tests -p frontend_baseline_test.py -v
+      - name: Shared session and frontend regressions
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure -j 2
+      - name: Linux real SDL and OpenGL smoke
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          SDL_VIDEO_DRIVER: x11
+        run: |
+          xvfb-run -a ./build-both-linux/tetr_gl --data-dir "$RUNNER_TEMP/termino-gl-smoke" --smoke-test --screenshot "$RUNNER_TEMP/termino-gl-smoke.bmp"
+      - name: Install clean preview resources
+        run: cmake --install build-${{ matrix.preset }} --config Release --prefix build-preview-install --component OpenGLPreview
+
   headless:
     strategy:
       fail-fast: false
