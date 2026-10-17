@@ -5,7 +5,7 @@
 #include "tetr/input/services.h"
 #include "tetr/replay/config_codec.h"
 #include "tetr/runtime/game_context.h"
-#include "../src/app/settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "../src/app/ui_text.h"
 
 #include <cassert>

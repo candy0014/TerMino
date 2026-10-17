@@ -5,6 +5,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Both clients must consume the same runtime/rules/presentation contracts.
+option(BUILD_TESTING "Build the regression suite (opt in)" OFF)
+option(TETR_BUILD_TERMINAL "Build the complete original terminal client and FT7 tools" ON)
+option(TETR_BUILD_OPENGL "Build the OpenGL client (migration phase 2)" OFF)
+option(TETR_BUILD_SERVER "Build the standalone relay server" ON)
+if(TETR_BUILD_OPENGL)
+    message(FATAL_ERROR "The OpenGL frontend is planned for migration phase 2; it is not implemented yet. See docs/FRONTEND_MIGRATION.md. Use TETR_BUILD_TERMINAL=ON for the complete client.")
+endif()
+if(BUILD_TESTING AND TETR_BUILD_TERMINAL AND NOT TETR_BUILD_SERVER)
+    message(FATAL_ERROR "The full terminal integration suite requires TETR_BUILD_SERVER=ON. Headless foundation tests support both server settings.")
+endif()
+
 if(WIN32)
     # Apply to every target, including the upstream BOT libraries.
     add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0601)
@@ -23,7 +35,9 @@ endif()
 find_package(Threads REQUIRED)
 include(cmake/PortableBuild.cmake)
 include(cmake/WebSocketDependencies.cmake)
-tetr_setup_websocket()
+if(TETR_BUILD_TERMINAL OR TETR_BUILD_SERVER)
+    tetr_setup_websocket()
+endif()
 
 if(WIN32 AND NOT MSVC)
     # Recent MinGW runtimes already link an asInvoker manifest. Probe the
@@ -67,12 +81,6 @@ add_library(tetr_util STATIC
 )
 target_link_libraries(tetr_util PUBLIC tetr_headers)
 
-add_library(tetr_terminal STATIC
-    src/render/terminal_viewport.cpp
-    src/render/terminal_renderer.cpp
-)
-target_link_libraries(tetr_terminal PUBLIC tetr_headers PRIVATE tetr_util)
-
 add_library(tetr_runtime STATIC
     src/runtime/piece_catalog_data.cpp
     src/runtime/piece_rotation_data.cpp
@@ -84,6 +92,118 @@ add_library(tetr_runtime STATIC
     src/runtime/dynamic_rules.cpp
 )
 target_link_libraries(tetr_runtime PUBLIC tetr_headers tetr_util Threads::Threads)
+
+add_library(tetr_rules STATIC
+    src/rules/lock_analysis.cpp
+    src/rules/spin.cpp
+    src/rules/chain.cpp
+    src/rules/attack.cpp
+    src/rules/scoring.cpp
+    src/rules/spike.cpp
+    src/rules/placement_resolution.cpp
+    src/rules/qp_post_lock.cpp
+    src/rules/quick_play.cpp
+    src/rules/line_clear.cpp
+    src/rules/garbage_queue.cpp
+    src/rules/garbage_generation.cpp
+    src/rules/frame_update.cpp
+    src/rules/blitz.cpp
+    src/rules/game_completion.cpp
+)
+target_link_libraries(tetr_rules PUBLIC tetr_headers PRIVATE tetr_util tetr_runtime)
+
+
+add_library(tetr_presentation STATIC
+    src/presentation/visibility.cpp
+    src/presentation/board_view.cpp
+)
+target_link_libraries(tetr_presentation PUBLIC tetr_headers tetr_runtime)
+
+# These tests build without terminal input, console output, Replay or a GPU.
+include(CTest)
+if(BUILD_TESTING)
+    enable_testing()
+    add_executable(frontend_snapshot_test tests/frontend_snapshot_test.cpp)
+    target_link_libraries(frontend_snapshot_test PRIVATE tetr_presentation)
+    add_test(NAME frontend_snapshot COMMAND frontend_snapshot_test)
+    if(MSVC)
+        target_compile_options(frontend_snapshot_test PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(frontend_snapshot_test PRIVATE -UNDEBUG)
+    endif()
+    set_tests_properties(frontend_snapshot PROPERTIES TIMEOUT 10)
+endif()
+
+if(TETR_BUILD_TERMINAL OR TETR_BUILD_SERVER)
+    add_library(tetr_network STATIC
+        src/network/curl_runtime.cpp
+        src/network/udp_socket.cpp
+        src/network/websocket_socket.cpp
+        src/network/network_services.cpp
+        src/network/transport.cpp
+        src/network/board_state_codec.cpp
+        src/network/lobby_protocol.cpp
+        src/network/hybrid_protocol.cpp
+        src/network/board_view.cpp
+        src/network/hybrid_sync.cpp
+        src/network/lobby_channel.cpp
+        src/network/frame_packet.cpp
+        src/network/frame_pump.cpp
+        src/network/multiplayer_channel.cpp
+        src/network/relay_server.cpp
+        src/network/multiplayer_relay.cpp
+        src/network/multiplayer_client.cpp
+        src/network/round_statistics.cpp
+        src/network/room_config_protocol.cpp
+        src/network/room_config_channel.cpp
+    )
+    target_link_libraries(tetr_network PUBLIC tetr_headers tetr_runtime PRIVATE tetr_util tetr_rules)
+    target_link_libraries(tetr_network PRIVATE CURL::libcurl)
+    if(TETR_STATIC_DNS_ENABLED)
+        target_sources(tetr_network PRIVATE src/network/portable_dns.cpp)
+        target_compile_definitions(tetr_network PRIVATE TETR_PORTABLE_DNS=1)
+        target_link_libraries(tetr_network PRIVATE c-ares::cares_static)
+    endif()
+    if(WIN32)
+        target_link_libraries(tetr_network PUBLIC ws2_32)
+    endif()
+endif()
+
+if(TETR_BUILD_SERVER)
+    add_executable(tetr_server src/server.cpp)
+    target_link_libraries(tetr_server PRIVATE tetr_headers tetr_network)
+    if(TETR_PORTABLE_BUILD)
+        install(TARGETS tetr_server RUNTIME DESTINATION . COMPONENT Portable)
+    endif()
+endif()
+
+# A headless/server build never configures terminal input or BOT libraries.
+if(NOT TETR_BUILD_TERMINAL)
+    if(BUILD_TESTING)
+        foreach(name core_geometry core_rules)
+            add_executable(${name}_test tests/${name}_test.cpp)
+            target_link_libraries(${name}_test PRIVATE tetr_rules tetr_runtime)
+            if(MSVC)
+                target_compile_options(${name}_test PRIVATE /UNDEBUG)
+            else()
+                target_compile_options(${name}_test PRIVATE -UNDEBUG)
+            endif()
+            add_test(NAME ${name} COMMAND ${name}_test)
+        endforeach()
+    endif()
+    foreach(frontend_target tetr_terminal tetr_input tetr_render tetr_app tetr_bot_legacy)
+        if(TARGET ${frontend_target})
+            message(FATAL_ERROR "Headless/server build leaked a frontend target: ${frontend_target}")
+        endif()
+    endforeach()
+    return()
+endif()
+
+add_library(tetr_terminal STATIC
+    src/render/terminal_viewport.cpp
+    src/render/terminal_renderer.cpp
+)
+target_link_libraries(tetr_terminal PUBLIC tetr_headers PRIVATE tetr_util)
 
 add_library(tetr_config STATIC
     src/config/settings_schema.cpp
@@ -110,38 +230,8 @@ endif()
 target_link_libraries(tetr_input PUBLIC tetr_headers Threads::Threads)
 target_link_libraries(tetr_terminal PRIVATE tetr_input)
 
-add_library(tetr_network STATIC
-    src/network/curl_runtime.cpp
-    src/network/udp_socket.cpp
-    src/network/websocket_socket.cpp
-    src/network/network_services.cpp
-    src/network/transport.cpp
-    src/network/board_state_codec.cpp
-    src/network/lobby_protocol.cpp
-    src/network/hybrid_protocol.cpp
-    src/network/board_view.cpp
-    src/network/hybrid_sync.cpp
-    src/network/lobby_channel.cpp
-    src/network/frame_packet.cpp
-    src/network/frame_pump.cpp
-    src/network/multiplayer_channel.cpp
-    src/network/relay_server.cpp
-    src/network/multiplayer_relay.cpp
-    src/network/multiplayer_client.cpp
-    src/network/round_statistics.cpp
-    src/network/room_config_protocol.cpp
-    src/network/room_config_channel.cpp
-)
-target_link_libraries(tetr_network PUBLIC tetr_headers tetr_runtime PRIVATE tetr_util tetr_rules)
-target_link_libraries(tetr_network PRIVATE CURL::libcurl)
-if(TETR_STATIC_DNS_ENABLED)
-    target_sources(tetr_network PRIVATE src/network/portable_dns.cpp)
-    target_compile_definitions(tetr_network PRIVATE TETR_PORTABLE_DNS=1)
-    target_link_libraries(tetr_network PRIVATE c-ares::cares_static)
-endif()
-if(WIN32)
-    target_link_libraries(tetr_network PUBLIC ws2_32)
-endif()
+add_library(tetr_presentation_context STATIC src/presentation/context_view.cpp)
+target_link_libraries(tetr_presentation_context PUBLIC tetr_presentation tetr_runtime PRIVATE tetr_replay)
 
 add_library(tetr_bot_zzztoj_upstream STATIC
     zzztoj_standalone/upstream/src/ai_zzz.cpp
@@ -407,27 +497,7 @@ add_library(tetr_render STATIC
     src/render/piece_renderer.cpp
     src/render/spawn_marker.cpp
 )
-target_link_libraries(tetr_render PUBLIC tetr_headers tetr_runtime tetr_terminal tetr_replay tetr_rules ${CMAKE_DL_LIBS})
-
-add_library(tetr_rules STATIC
-    src/rules/lock_analysis.cpp
-    src/rules/spin.cpp
-    src/rules/chain.cpp
-    src/rules/attack.cpp
-    src/rules/scoring.cpp
-    src/rules/spike.cpp
-    src/rules/placement_resolution.cpp
-    src/rules/qp_post_lock.cpp
-    src/rules/quick_play.cpp
-    src/rules/line_clear.cpp
-    src/rules/garbage_queue.cpp
-    src/rules/garbage_generation.cpp
-    src/rules/frame_update.cpp
-    src/rules/blitz.cpp
-    src/rules/game_completion.cpp
-)
-target_link_libraries(tetr_rules PUBLIC tetr_headers PRIVATE tetr_util tetr_runtime)
-
+target_link_libraries(tetr_render PUBLIC tetr_headers tetr_runtime tetr_terminal tetr_presentation_context tetr_replay tetr_rules ${CMAKE_DL_LIBS})
 
 add_library(tetr_replay STATIC
     src/replay/challenge_prefix.cpp
@@ -572,11 +642,8 @@ target_link_libraries(tetr PRIVATE tetr_headers tetr_app tetr_bot_legacy Threads
 add_executable(tetr_ft7 src/tetr_ft7.cpp)
 target_link_libraries(tetr_ft7 PRIVATE tetr_headers tetr_app tetr_bot_legacy Threads::Threads)
 
-add_executable(tetr_server src/server.cpp)
-target_link_libraries(tetr_server PRIVATE tetr_headers tetr_network)
-
 if(TETR_PORTABLE_BUILD)
-    install(TARGETS tetr tetr_server RUNTIME DESTINATION . COMPONENT Portable)
+    install(TARGETS tetr RUNTIME DESTINATION . COMPONENT Portable)
     configure_file(cmake/portable/InstallResources.cmake.in
         portable-install-resources.cmake @ONLY)
     install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/portable-install-resources.cmake"
@@ -584,8 +651,6 @@ if(TETR_PORTABLE_BUILD)
 endif()
 
 
-option(BUILD_TESTING "Build the regression suite (opt in)" OFF)
-include(CTest)
 if(BUILD_TESTING)
     # A bundled dependency may have included CTest with its tests disabled.
     # Explicitly enable the parent project's tests regardless of that guard.
@@ -1247,6 +1312,11 @@ if(BUILD_TESTING)
     add_executable(challenge_catalog_test tests/challenge_catalog_test.cpp)
     target_link_libraries(challenge_catalog_test PRIVATE tetr_app tetr_bot_legacy)
     add_test(NAME challenge_catalog COMMAND challenge_catalog_test)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME frontend_terminal_baseline COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/frontend_baseline_test.py $<TARGET_FILE:challenge_catalog_test>)
+        set_tests_properties(frontend_terminal_baseline PROPERTIES TIMEOUT 15)
+    endif()
     set_tests_properties(challenge_catalog PROPERTIES TIMEOUT 60)
     target_link_libraries(challenge_modes_test PRIVATE tetr_app tetr_bot_legacy)
     add_test(NAME challenge_modes COMMAND challenge_modes_test)

@@ -1,5 +1,30 @@
 # Current architecture after Stage 113
 
+The dual-frontend migration now adds a platform-independent `tetr_presentation`
+library, a separate `tetr_presentation_context` timeline adapter and a semantic
+`Frontend::TextInputSession` interface. The original terminal client remains the
+complete product; no OpenGL executable exists at this migration checkpoint.
+The implementation and remaining migration work are tracked in
+[FRONTEND_MIGRATION.md](FRONTEND_MIGRATION.md).
+
+`tetr_presentation` captures value-owned board views and owns the visibility
+rules consumed by terminal rendering. It depends only on Runtime; the context
+adapter obtains replay/live/remote/completed time without depending on terminal
+rendering. Terminal garbage diff rendering already consumes the shared board
+view. `ApplicationState` stores a frontend text-input interface, implemented by
+`TerminalSession`, rather than a concrete terminal-session pointer.
+
+Settings metadata is publicly declared in `include/tetr/app/settings_model.h`.
+It still includes mutable settings references for the existing synchronous menu;
+a future graphical thread must consume an immutable projection and submit typed
+commands, never retain these references across threads. Terminal layout/paint
+caches and blocking menu/game loops remain migration work.
+
+Headless foundation builds disable `TETR_BUILD_TERMINAL` and
+`TETR_BUILD_SERVER`, require neither terminal input nor graphics/network
+dependencies, and exercise core geometry, rules, view snapshots and text-entry
+lifecycle. A server-only configuration also avoids client/BOT targets.
+
 The normal game is organized around explicit state ownership, one-way library
 boundaries and typed domain values. Stage 113 finishes the current non-BOT
 architecture pass: Engine is split into core/presentation/integration/gameplay

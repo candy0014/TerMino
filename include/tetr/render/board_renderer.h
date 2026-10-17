@@ -1,5 +1,6 @@
 #ifndef TETR_RENDER_BOARD_RENDERER_H
 #define TETR_RENDER_BOARD_RENDERER_H
+#include "tetr/presentation/visibility.h"
 
 #include "tetr/runtime/strong_types.h"
 #include "tetr/runtime/board_cell.h"
@@ -12,7 +13,7 @@ namespace Render {
 
 bool board_cell_visible(const Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player, int row, int column, Runtime::BoardCell cell);
-enum class BoardCellAppearance { Empty, Visible, Dimmed };
+using BoardCellAppearance = Presentation::CellAppearance;
 BoardCellAppearance board_cell_appearance(const Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player, int row, int column, Runtime::BoardCell cell);
 void draw_board_cell(const Runtime::GameContext& context, const Runtime::PlayerSessionState& player,

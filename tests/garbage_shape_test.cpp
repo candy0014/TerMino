@@ -4,7 +4,7 @@
 #include "tetr/replay/session_state.h"
 #include "tetr/rules/garbage_generation.h"
 #include "tetr/runtime/game_context.h"
-#include "../src/app/settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "../src/app/ui_text.h"
 #include <algorithm>
 #include <cassert>

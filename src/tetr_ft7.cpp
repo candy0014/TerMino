@@ -164,7 +164,7 @@ int main(int argc, char** argv) {
         Totals totals[2];
         {
             Render::TerminalSession terminal;
-            app.terminalSession = &terminal;
+            app.textInputSession = &terminal;
             if (headless) Render::begin_output_suppression();
             for (int round = 1; !match.finished(); ++round) {
                 // Positive MINSTD seed, with independent piece/hole streams.

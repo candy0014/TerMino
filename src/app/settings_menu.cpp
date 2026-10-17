@@ -2,7 +2,7 @@
 #include "tetr/app/settings_menu.h"
 #include "tetr/app/application_state.h"
 #include "settings_input.h"
-#include "settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "settings_navigation.h"
 #include "settings_view.h"
 #include "settings_targets.h"

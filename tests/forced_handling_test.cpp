@@ -4,7 +4,7 @@
 #include "tetr/config/map_store.h"
 #include "tetr/runtime/piece.h"
 #include "tetr/replay/config_codec.h"
-#include "../src/app/settings_model.h"
+#include "tetr/app/settings_model.h"
 #include <cassert>
 #include <filesystem>
 #include <iostream>

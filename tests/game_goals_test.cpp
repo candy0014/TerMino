@@ -7,7 +7,7 @@
 #include "tetr/render/board_renderer.h"
 #include "tetr/rules/game_completion.h"
 #include "tetr/runtime/game_context.h"
-#include "../src/app/settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "support/terminal_screen.h"
 
 #include <cassert>

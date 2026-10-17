@@ -1,7 +1,7 @@
 #ifndef TETR_APP_SETTINGS_TARGETS_H
 #define TETR_APP_SETTINGS_TARGETS_H
 
-#include "settings_model.h"
+#include "tetr/app/settings_model.h"
 
 namespace App::Settings {
 struct MenuLocation {

@@ -7,7 +7,7 @@
 #include "tetr/runtime/game_context.h"
 #include "tetr/runtime/piece.h"
 #include "tetr/input/services.h"
-#include "../src/app/settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "../src/app/settings_targets.h"
 
 #include <cassert>

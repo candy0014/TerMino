@@ -11,7 +11,7 @@
 #include "tetr/config/presets.h"
 #include "tetr/config/map_store.h"
 #include "tetr/replay/recent.h"
-#include "../src/app/settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "../src/app/settings_input.h"
 #include "../src/app/settings_view.h"
 #include "../src/app/multiplayer_battle.h"

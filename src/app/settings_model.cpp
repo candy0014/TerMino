@@ -1,5 +1,5 @@
 #include "single_player_challenges.h"
-#include "settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "settings_presets.h"
 #include "settings_maps.h"
 #include "tetr/config/map_store.h"

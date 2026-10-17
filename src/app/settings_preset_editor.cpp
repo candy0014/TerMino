@@ -120,7 +120,7 @@ void run_editor(Runtime::GameContext& source,UserConfig::Presets::SavedPreset pr
         ~Disconnect(){Network::disconnect_online(network);}
     } disconnect{network};
     App::ApplicationState app;
-    if(source.app_component()) app.terminalSession=source.app_component()->terminalSession;
+    if(source.app_component()) app.textInputSession=source.app_component()->textInputSession;
     Runtime::GameContext context(source.session,source.services);
     context.config=source.config;context.attach_user_settings(user);context.attach_input(input);context.attach_app(app);
     context.attach_network(network);

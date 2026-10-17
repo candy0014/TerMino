@@ -1,4 +1,5 @@
 #include "tetr/engine/frame_coordinator.h"
+#include "tetr/presentation/context_view.h"
 #include "tetr/app/application_state.h"
 #include "tetr/engine/remote_board_state_adapter.h"
 #include "tetr/engine/frame_board_adapter.h"
@@ -27,12 +28,12 @@
 namespace Engine {
 
 bool synchronize_field_visibility(Runtime::GameContext& context, Runtime::PlayerSessionState& player) {
-    const auto elapsed=Runtime::Duration::from_seconds(Render::board_elapsed_seconds(context,player));
+    const auto elapsed=Presentation::board_elapsed(context,player);
     const auto& config=context.config.field;
     const bool flash=config.invisible && config.periodicInvisible && Runtime::periodic_invisible_flash(
         elapsed,config.invisibilityInterval,config.invisibilityDuration);
     bool changed=flash!=player.presentation.invisibleFlash;
-    const bool shown=Render::active_piece_visible(context,player);
+    const bool shown=Presentation::active_piece_visible(context.config,player,elapsed);
     changed=changed || shown!=player.presentation.activePieceShown;
     player.presentation.activePieceShown=shown;
     if(config.invisible && !config.periodicInvisible && config.invisibilityDelay>Runtime::Duration{}) {

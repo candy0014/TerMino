@@ -99,6 +99,78 @@
       "name": "chatgpt-own-material",
       "inherits": "chatgpt-options-off",
       "cacheVariables": { "TETR_CHATGPT_OWN_MATERIAL": "ON" }
+    },
+    {
+      "name": "frontend-common",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build-${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "ON",
+        "TETR_BUILD_TERMINAL": "ON",
+        "TETR_BUILD_OPENGL": "OFF",
+        "TETR_BUILD_SERVER": "ON"
+      }
+    },
+    {
+      "name": "terminal-linux",
+      "inherits": "frontend-common",
+      "generator": "Unix Makefiles",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "terminal-windows",
+      "inherits": "frontend-common",
+      "generator": "Visual Studio 17 2022",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "architecture": "x64"
+    },
+    {
+      "name": "terminal-windows-mingw",
+      "inherits": "frontend-common",
+      "generator": "MinGW Makefiles",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "frontend-headless-linux",
+      "inherits": "frontend-common",
+      "generator": "Unix Makefiles",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "TETR_BUILD_TERMINAL": "OFF",
+        "TETR_BUILD_SERVER": "OFF"
+      }
+    },
+    {
+      "name": "frontend-headless-windows",
+      "inherits": "frontend-common",
+      "generator": "Visual Studio 17 2022",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "architecture": "x64",
+      "cacheVariables": {
+        "TETR_BUILD_TERMINAL": "OFF",
+        "TETR_BUILD_SERVER": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -111,6 +183,98 @@
     { "name": "chatgpt-release-choice", "configurePreset": "chatgpt-release-choice", "configuration": "Release", "targets": ["tetr"] },
     { "name": "chatgpt-bag-tail", "configurePreset": "chatgpt-bag-tail", "configuration": "Release", "targets": ["tetr"] },
     { "name": "chatgpt-material-reserve", "configurePreset": "chatgpt-material-reserve", "configuration": "Release", "targets": ["tetr"] },
-    { "name": "chatgpt-own-material", "configurePreset": "chatgpt-own-material", "configuration": "Release", "targets": ["tetr"] }
+    { "name": "chatgpt-own-material", "configurePreset": "chatgpt-own-material", "configuration": "Release", "targets": ["tetr"] },
+    {
+      "name": "terminal-linux",
+      "configurePreset": "terminal-linux",
+      "configuration": "Release",
+      "jobs": 2
+    },
+    {
+      "name": "terminal-windows",
+      "configurePreset": "terminal-windows",
+      "configuration": "Release",
+      "jobs": 2
+    },
+    {
+      "name": "terminal-windows-mingw",
+      "configurePreset": "terminal-windows-mingw",
+      "configuration": "Release",
+      "jobs": 2
+    },
+    {
+      "name": "frontend-headless-linux",
+      "configurePreset": "frontend-headless-linux",
+      "configuration": "Release",
+      "jobs": 2
+    },
+    {
+      "name": "frontend-headless-windows",
+      "configurePreset": "frontend-headless-windows",
+      "configuration": "Release",
+      "jobs": 2
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "terminal-linux",
+      "configurePreset": "terminal-linux",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 2,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "terminal-windows",
+      "configurePreset": "terminal-windows",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 2,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "terminal-windows-mingw",
+      "configurePreset": "terminal-windows-mingw",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 2,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "frontend-headless-linux",
+      "configurePreset": "frontend-headless-linux",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 2,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "frontend-headless-windows",
+      "configurePreset": "frontend-headless-windows",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 2,
+        "noTestsAction": "error"
+      }
+    }
   ]
 }

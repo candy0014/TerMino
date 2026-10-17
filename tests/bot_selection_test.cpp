@@ -1,7 +1,7 @@
 #include "tetr/compat/legacy_encoding.h"
 #include "tetr/config/user_config.h"
 #include "tetr/runtime/game_modes.h"
-#include "../src/app/settings_model.h"
+#include "tetr/app/settings_model.h"
 
 #include <array>
 #include <cassert>

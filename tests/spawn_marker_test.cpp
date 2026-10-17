@@ -16,7 +16,7 @@
 #include "tetr/runtime/constants.h"
 #include "tetr/runtime/player_session_state.h"
 #include "tetr/runtime/construction.h"
-#include "../src/app/settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "../src/app/ui_text.h"
 #include "../src/engine/garbage_rendering.h"
 #include "support/terminal_screen.h"

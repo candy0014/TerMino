@@ -10,6 +10,8 @@
 
 namespace Runtime { struct MapDefinition; }
 namespace App::Settings::Model {
+// Shared menu metadata. Frontends identify controls by SettingId/node key;
+// labels and terminal coordinates are never command identities.
 using SettingId = UserConfig::SettingId;
 using SettingValue = UserConfig::SettingReference;
 

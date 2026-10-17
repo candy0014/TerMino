@@ -3,7 +3,7 @@
 #include "tetr/app/application_state.h"
 #include "settings_input.h"
 
-#include "tetr/render/terminal_renderer.h"
+#include "tetr/frontend/text_input.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/util/terminal_text.h"
 
@@ -54,17 +54,6 @@ bool text_line_ready() {
     return select(STDIN_FILENO + 1, &readable, nullptr, nullptr, &timeout) > 0;
 }
 #endif
-
-struct TextInputScope {
-    Render::TerminalSession* terminal = nullptr;
-    explicit TextInputScope(Runtime::GameContext& context) {
-        if (auto* app = context.app_component()) terminal = app->terminalSession;
-        if (terminal) terminal->begin_text_input();
-    }
-    ~TextInputScope() {
-        if (terminal) terminal->end_text_input();
-    }
-};
 
 #ifndef _WIN32
 struct InlineInputScope {
@@ -306,7 +295,7 @@ std::string read_scalar_text(Runtime::GameContext& context, const CheckMenuContr
     if (savedByEscape) *savedByEscape = false;
     // Release the action that opened the editor, then discard its queued text.
     wait_for_confirm_release(context, checkControls);
-    TextInputScope textInput(context);
+    Frontend::TextInputScope textInput(context.app_component() ? context.app_component()->textInputSession : nullptr);
 #ifdef _WIN32
     FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
 #else

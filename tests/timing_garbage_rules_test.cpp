@@ -14,7 +14,7 @@
 #include "tetr/rules/placement_resolution.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/runtime/tetrio_random.h"
-#include "../src/app/settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "../src/app/ui_text.h"
 #include <algorithm>
 #include <cassert>

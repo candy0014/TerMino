@@ -1,6 +1,6 @@
 #ifndef TETR_APP_SETTINGS_VIEW_H
 #define TETR_APP_SETTINGS_VIEW_H
-#include "settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "terminal_canvas.h"
 #include "tetr/render/terminal_renderer.h"
 #include <array>

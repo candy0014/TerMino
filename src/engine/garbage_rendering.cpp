@@ -1,4 +1,5 @@
 #include "garbage_rendering.h"
+#include "tetr/presentation/context_view.h"
 
 #include "tetr/render/board_renderer.h"
 #include "tetr/render/piece_renderer.h"
@@ -35,13 +36,15 @@ FieldImage capture_field(const Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player, const Runtime::Playfield& field,
     const Piece::Definition* piece, std::optional<Piece::Pose> pose) {
     FieldImage image;
-    image.width=field.width();
-    image.bottom=std::clamp(player.gameplay.playfield.visibleHeight,0,field.height());
+    const auto view=Presentation::capture_board_view(context.config,player,field,Presentation::board_elapsed(context,player));
+    image.width=view.width;
+    image.bottom=view.bottom;
     image.cells.reserve((image.bottom+Runtime::kDisplayHiddenRows)*image.width);
     for (int row=-Runtime::kDisplayHiddenRows;row<image.bottom;++row)
         for (int column=0;column<image.width;++column) {
-            const auto value=field.cell(row,column);
-            const auto appearance=Render::board_cell_appearance(context,player,row,column,value);
+            const auto& cell=view.at(row,column);
+            const auto value=cell.value;
+            const auto appearance=cell.appearance;
             image.cells.push_back({color_id(context,value),value.timed_countdown(),
                 appearance!=Render::BoardCellAppearance::Empty,appearance==Render::BoardCellAppearance::Dimmed});
         }

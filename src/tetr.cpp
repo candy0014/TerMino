@@ -126,7 +126,7 @@ int main(int argc, char* argv[]) {
         App::UiText::language() == App::UiText::Language::English ? 1 : 0;
     App::Settings::synchronize_shared_appearance(context);
     Render::TerminalSession terminalSession(&inputServices);
-    applicationState.terminalSession = &terminalSession;
+    applicationState.textInputSession = &terminalSession;
     if (std::getenv("TETR_TEST_BATCH")) Render::begin_output_suppression();
     if (!skipStart && !std::getenv("TETR_TEST_BATCH") && !std::getenv("TETR_EXIT_AFTER_GAME") &&
         !App::run_start_menu(context)) {

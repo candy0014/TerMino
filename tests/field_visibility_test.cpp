@@ -16,7 +16,7 @@
 #include "../src/engine/garbage_rendering.h"
 #include "tetr/runtime/field_visibility.h"
 #include "tetr/runtime/game_context.h"
-#include "../src/app/settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "support/terminal_screen.h"
 
 #include <cassert>

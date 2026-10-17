@@ -1,4 +1,5 @@
 #include "tetr/render/board_renderer.h"
+#include "tetr/presentation/context_view.h"
 
 #include "tetr/render/terminal_renderer.h"
 #include "tetr/runtime/constants.h"
@@ -28,33 +29,17 @@ void ui_color(const Runtime::GameContext& context, ColorRole role) {
 } // namespace
 
 double board_elapsed_seconds(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player) {
-    const double timelineElapsed=context.config.mode.replayMode
-        ? Replay::playback_game_elapsed(context,context.now()).seconds()
-        : Runtime::elapsed_game_time(context.session,context.now()).seconds()*context.config.timeMultiplier;
-    return std::max(0.0,player.timing.completedGameTime ? player.timing.completedGameTime->seconds() :
-        player.timing.remoteGameTime ? player.timing.remote_elapsed(context.services.clock.now()).seconds() : timelineElapsed);
+    return Presentation::board_elapsed(context,player).seconds();
 }
 
 bool board_cell_visible(const Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player, int row, int column, Runtime::BoardCell cell) {
-    if (!cell.occupied()) return false;
-    if (context.config.garbage.mode == Runtime::GarbageMode::QuickPlay &&
-        Runtime::reverse(context.config.quickPlay.invisible) && cell.is_normal_garbage()) {
-        const auto& field=player.gameplay.playfield;
-        return row < field.activeHeight-field.garbageHeight+3;
-    }
-    const auto& config=context.config.field;
-    if(!config.invisible || cell.is_garbage_like() || player.presentation.invisibleFlash) return true;
-    if(config.periodicInvisible || config.invisibilityDelay<=Runtime::Duration{}) return false;
-    const auto locked=player.gameplay.playfield.field.cell_lock_time(row,column);
-    return board_elapsed_seconds(context,player)<(locked+config.invisibilityDelay).seconds();
+    return Presentation::board_cell_visible(context.config,player,row,column,cell,Presentation::board_elapsed(context,player));
 }
 
 BoardCellAppearance board_cell_appearance(const Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player, int row, int column, Runtime::BoardCell cell) {
-    if (!cell.occupied()) return BoardCellAppearance::Empty;
-    if (board_cell_visible(context,player,row,column,cell)) return BoardCellAppearance::Visible;
-    return context.config.mode.replayMode ? BoardCellAppearance::Dimmed : BoardCellAppearance::Empty;
+    return Presentation::board_cell_appearance(context.config,player,row,column,cell,Presentation::board_elapsed(context,player));
 }
 
 void draw_board_cell(const Runtime::GameContext& context, const Runtime::PlayerSessionState& player,

@@ -59,6 +59,19 @@ node tests/moch_pressure_test.cjs
 启用 Python 依赖后重新配置 CMake，WebSocket 用例会加入 CTest。
 需要外部官方引擎或自备录像的离线参照工具另见各脚本的用法；个人录像不随仓库提供。
 
+前端迁移另提供独立 CMake 预设。Linux 使用 `terminal-linux`，Windows Visual Studio 使用
+`terminal-windows`，Windows MinGW 使用 `terminal-windows-mingw`。例如：
+
+```sh
+cmake --preset terminal-linux
+cmake --build --preset terminal-linux
+ctest --preset terminal-linux
+```
+
+无窗口、无终端输入依赖的核心与视图检查使用 `frontend-headless-linux` / `frontend-headless-windows`。
+单独构建服务端可配置 `-DTETR_BUILD_TERMINAL=OFF -DTETR_BUILD_SERVER=ON`。
+OpenGL 前端处于迁移计划阶段，当前尚无图形可执行文件；现有终端全部功能继续保留。
+
 ## 默认操作
 
 | 操作 | 按键 |
@@ -112,6 +125,7 @@ bash package.sh --parallel 2
 
 ## 文档与源码
 
+- [终端与 OpenGL 迁移及维护方案](docs/FRONTEND_MIGRATION.md)、[迁移前 Git 基线与回退](docs/FRONTEND_BASELINE.md)、[开发约定](CONTRIBUTING.md)
 - [单机挑战](docs/SINGLE_PLAYER_CHALLENGES.md)、[挑战目录](docs/SINGLE_PLAYER_CHALLENGE_CATALOG.txt)
 - [地图](docs/MAPS.md)、[预设](docs/PRESETS.md)、[多人房间](docs/MULTIPLAYER_ROOMS.md)
 - [快速游戏规则](docs/QUICK_PLAY_RULES.md)、[模拟时间](docs/SIMULATION_TIME.md)

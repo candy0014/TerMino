@@ -1,4 +1,5 @@
 #include "tetr/render/piece_renderer.h"
+#include "tetr/presentation/context_view.h"
 
 #include "tetr/render/board_renderer.h"
 #include "tetr/render/terminal_renderer.h"
@@ -11,13 +12,14 @@
 
 namespace Render {
 bool active_piece_visible(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player) {
-    const auto rule=context.config.challengeRules;
-    if(rule==Runtime::ChallengeRules::Blind || rule==Runtime::ChallengeRules::Audio)return false;
-    return rule!=Runtime::ChallengeRules::Instinct || board_elapsed_seconds(context,player)<player.presentation.activePieceBorn.seconds()+.2;
+    return Presentation::active_piece_visible(context.config,player,Presentation::board_elapsed(context,player));
 }
 PieceDrawMode active_piece_draw_mode(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player) {
-    if(active_piece_visible(context,player))return PieceDrawMode::Normal;
-    return context.config.mode.replayMode?PieceDrawMode::Dimmed:PieceDrawMode::Erase;
+    switch(Presentation::active_piece_appearance(context.config,player,Presentation::board_elapsed(context,player))) {
+        case Presentation::CellAppearance::Visible: return PieceDrawMode::Normal;
+        case Presentation::CellAppearance::Dimmed: return PieceDrawMode::Dimmed;
+        default: return PieceDrawMode::Erase;
+    }
 }
 PieceDrawMode hold_draw_mode(const Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player, int additionalUses) {

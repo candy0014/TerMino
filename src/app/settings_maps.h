@@ -1,6 +1,6 @@
 #ifndef TETR_APP_SETTINGS_MAPS_H
 #define TETR_APP_SETTINGS_MAPS_H
-#include "settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "tetr/config/map_store.h"
 namespace Runtime { class GameContext; }
 namespace App::Settings {

@@ -13,7 +13,7 @@
 #include "tetr/config/user_config.h"
 #include "tetr/challenges/challenges.h"
 
-namespace Render { class TerminalSession; }
+namespace Frontend { class TextInputSession; }
 namespace Runtime { class GameContext; struct PlayerSessionState; }
 
 namespace App {
@@ -67,7 +67,7 @@ struct ApplicationState {
     auto& challenge_round(const Runtime::GameContext* context) {return context==localPlayerTwoContext?playerTwoChallengeRound:challengeRound;}
     const auto& challenge_round(const Runtime::GameContext* context) const {return context==localPlayerTwoContext?playerTwoChallengeRound:challengeRound;}
     auto& challenge_observer(const Runtime::GameContext* context) {return context==localPlayerTwoContext?playerTwoChallengePlacementObserver:challengePlacementObserver;}
-    Render::TerminalSession* terminalSession = nullptr;
+    Frontend::TextInputSession* textInputSession = nullptr;
     Runtime::GameContext* primaryContext = nullptr;
     Runtime::GameContext* localPlayerTwoContext = nullptr;
     std::recursive_mutex terminalOutputMutex;

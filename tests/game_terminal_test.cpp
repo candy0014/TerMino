@@ -1,6 +1,6 @@
 #include "../src/app/game_terminal.h"
 #include "../src/app/ui_text.h"
-#include "../src/app/settings_model.h"
+#include "tetr/app/settings_model.h"
 #include "tetr/app/application_state.h"
 #include "tetr/app/init.h"
 #include "tetr/app/start_screen_navigation.h"

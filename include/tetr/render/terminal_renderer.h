@@ -2,6 +2,7 @@
 #define TETR_RENDER_TERMINAL_RENDERER_H
 
 #include "tetr/runtime/board_cell.h"
+#include "tetr/frontend/text_input.h"
 
 #include <memory>
 #include <array>
@@ -55,16 +56,16 @@ private:
 // scrollback. Destruction restores the exact console/terminal state captured
 // on construction. Linux input-mode transitions discard pending tty input so
 // gameplay keys cannot leak into a text prompt or the shell after exit.
-class TerminalSession {
+class TerminalSession final : public Frontend::TextInputSession {
 public:
     explicit TerminalSession(Input::Services* input=nullptr);
-    ~TerminalSession();
+    ~TerminalSession() override;
 
     TerminalSession(const TerminalSession&) = delete;
     TerminalSession& operator=(const TerminalSession&) = delete;
 
-    void begin_text_input();
-    void end_text_input();
+    void begin_text_input() override;
+    void end_text_input() override;
 
 private:
     std::unique_ptr<TerminalSessionState> state_;

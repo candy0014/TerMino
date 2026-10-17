@@ -16,6 +16,23 @@ function(assert_not_contains FILE NEEDLE REASON)
     endif()
 endfunction()
 
+# Frontend contracts and pure presentation are buildable without a terminal,
+# platform input, App, Replay, Network or graphics libraries. The context
+# adapter alone may obtain the common timeline through Replay.
+file(GLOB FRONTEND_CONTRACTS "${ROOT}/include/tetr/frontend/*.h")
+file(GLOB PURE_PRESENTATION
+    "${ROOT}/include/tetr/presentation/visibility.h"
+    "${ROOT}/include/tetr/presentation/board_view.h"
+    "${ROOT}/src/presentation/visibility.cpp"
+    "${ROOT}/src/presentation/board_view.cpp")
+foreach(FILE IN LISTS FRONTEND_CONTRACTS PURE_PRESENTATION)
+    foreach(FORBIDDEN "tetr/render/" "tetr/app/" "tetr/network/" "tetr/replay/"
+            "tetr/input/services.h" "SDL" "<GL/" "<windows.h>" "<linux/input.h>")
+        assert_not_contains("${FILE}" "${FORBIDDEN}" "frontend contract/presentation must remain platform independent")
+    endforeach()
+endforeach()
+assert_not_contains("${ROOT}/include/tetr/app/application_state.h" "Render::TerminalSession" "App must reference a frontend text-input interface")
+
 
 # Public/private headers with the same relative path are ambiguous because the
 # include search order can silently select different APIs in different targets.
