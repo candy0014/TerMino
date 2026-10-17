@@ -35,18 +35,13 @@ void append(std::string& output, std::string_view name, int value) {
 }
 
 void append(std::string& output, std::string_view name, double value) {
-    output += "{";
-    output += name;
-    output += ",";
-    output += std::to_string(value);
-    output += "}";
-}
-
-void append_precise(std::string& output, std::string_view name, double value) {
     std::ostringstream field;
     field.imbue(std::locale::classic());
     field << '{' << name << ',' << std::setprecision(17) << value << '}';
     output += field.str();
+}
+void append_precise(std::string& output, std::string_view name, double value) {
+    append(output,name,value);
 }
 
 int legacy_int(std::string_view value) {
@@ -54,6 +49,10 @@ int legacy_int(std::string_view value) {
 }
 
 double legacy_real(std::string_view value) {
+    // Correctly round well-formed numbers so exact challenge settings survive
+    // a replay round trip (the permissive digit parser turns 0.6 into the next
+    // double). Keep its historical fallback for noncanonical old recordings.
+    if(const auto parsed=Util::Text::parse_finite_real(value))return *parsed;
     return Compat::LegacyText::parse_real(value);
 }
 

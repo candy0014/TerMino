@@ -380,6 +380,49 @@ void test_replay_invisible_colors() {
     assert((screen.at(28,31).foreground==Test::TerminalScreen::Color{{0,0,0}}));
 }
 
+void test_replay_hidden_active_colors() {
+    for(int style:{0,1})for(auto rule:{Runtime::ChallengeRules::Blind,Runtime::ChallengeRules::Audio,Runtime::ChallengeRules::Instinct}) {
+        Runtime::SessionState session;Runtime::RuntimeServices services;Runtime::GameContext context(session,services);
+        auto& player=session.player;auto& board=player.gameplay.playfield;
+        board.width=10;board.visibleHeight=board.activeHeight=20;board.field.initialize(10,20);
+        player.presentation.margin=30;player.presentation.blockMaxHeight=player.presentation.blockMaxWidth=4;
+        context.config.display.squareStyle=style;context.config.field.ghost=false;context.config.challengeRules=rule;
+        context.config.mode.replayMode=true;player.timing.completedGameTime=Runtime::Duration::from_seconds(1);
+        auto piece=Piece::get_definition(Piece::Type::from_index(5));auto pose=Piece::spawn_pose(10,piece.type());pose.position.row=4;
+        player.presentation.activePose=pose;player.presentation.activePieceType=piece.type();
+        Test::TerminalScreen screen;
+        const auto check=[&](const Piece::Pose& at,bool dimmed) {
+            for(const auto& offset:piece.cells(at.rotation)) {
+                const auto cell=screen.at(at.position.row+offset[0]+9,31+2*(at.position.col+offset[1]));
+                const auto expected=dimmed?Test::TerminalScreen::Color{{58,26,55}}:Test::TerminalScreen::Color{{176,78,166}};
+                if(Render::board_hint_cell(context,player,at.position.row+offset[0],at.position.col+offset[1]))assert(cell.background==expected);
+                else {assert(cell.glyph=="█");assert(cell.foreground==expected);}
+            }
+        };
+        assert(!Render::active_piece_visible(context,player));
+        {Capture c;Render::redraw_player_board(context,player);screen.feed(c.str());}check(pose,true);
+        auto next=pose.translated(1,1);
+        {Capture c;Render::draw_piece_transition(context,piece,player,pose,next,board.field);screen.feed(c.str());}check(next,true);
+        // Repainting spawn hints must preserve the dim overlay color.
+        context.config.display.showSpawnPosition=true;board.nextCount=1;player.pieces.nextPreview={piece.type()};
+        player.presentation.nextSpawnPose=next;
+        {Capture c;Render::refresh_spawn_marker(context,player);screen.feed(c.str());}check(next,true);
+        context.config.display.showSpawnPosition=false;
+        {Capture c;Render::refresh_spawn_marker(context,player);screen.feed(c.str());}check(next,true);
+        if(rule==Runtime::ChallengeRules::Instinct) {
+            player.presentation.activePieceBorn=Runtime::Duration::from_seconds(1);
+            {Capture c;Render::draw_piece_transition(context,piece,player,next,next,board.field);screen.feed(c.str());}check(next,false);
+            player.timing.completedGameTime=Runtime::Duration::from_seconds(1.21);
+            {Capture c;Render::draw_piece_transition(context,piece,player,next,next,board.field);screen.feed(c.str());}check(next,true);
+        }
+        // Live challenges still erase hidden active pieces.
+        context.config.mode.replayMode=false;
+        {Capture c;Render::draw_piece(context,piece,player,next,board.field);screen.feed(c.str());}
+        assert(!player.presentation.paintedActivePose);
+        for(const auto& offset:piece.cells(next.rotation))assert(screen.at(next.position.row+offset[0]+9,31+2*(next.position.col+offset[1])).glyph==" ");
+    }
+}
+
 void test_racing_markers() {
     for (int height:{4,20}) for (int style:{0,1}) for (bool obscured:{false,true})
         for (bool cheese:{false,true}) {
@@ -675,6 +718,7 @@ int main(){
     test_short_next_preview();
     test_viewport_clips_without_wrapping();
     test_replay_invisible_colors();
+    test_replay_hidden_active_colors();
     assert(capture_square(0,Render::SquareFill::Filled)=="██");
     assert(capture_square(1,Render::SquareFill::Filled)=="█ ");
     assert(capture_square(1,Render::SquareFill::Empty)=="  ");

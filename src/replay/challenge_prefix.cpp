@@ -56,7 +56,7 @@ PrefixPreparation clip(const std::string& recording,const Challenges::PrefixBoun
     auto operations=decode_operation_stream(recording.substr(0,end),prefix.operationOffset);
     Runtime::Duration elapsed{};
     while(!operations.empty()){elapsed=operations.front().timestamp;operations.pop();}
-    output+="{wall_time,"+std::to_string(elapsed.seconds())+"}{end_all,"+std::to_string(boundary.gameSeconds)+"}";
+    output+="{wall_time,"+std::to_string(std::max(elapsed.seconds(),boundary.realSeconds))+"}{end_all,"+std::to_string(boundary.gameSeconds)+"}";
     return {PrefixPreparationStatus::Ready,std::move(output),boundary};
 }
 }

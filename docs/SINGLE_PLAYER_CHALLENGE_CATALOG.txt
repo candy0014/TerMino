@@ -1,5 +1,5 @@
 TerMino 当前单机挑战目录（已注册）
-固定挑战：129 项；本次新增 99 项；本机地图的消除与搭建挑战另行动态列出。
+固定挑战：136 项；本机地图的消除与搭建挑战另行动态列出。
 来源：challenge_catalog_test --catalog（本机地图已排除）。
 check 的集合/开闭区间、成绩规则与录像说明见 SINGLE_PLAYER_CHALLENGES.md。
 
@@ -37,7 +37,8 @@ check 的集合/开闭区间、成绩规则与录像说明见 SINGLE_PLAYER_CHAL
 │  ├─ 只消四挖掘 40 行 [dig-quads-40]
 │  ├─ 每 3 秒上涨一行 [cheese-timer-3]
 │  ├─ 每 2 秒上涨一行 [cheese-timer-2]
-│  └─ 每 1 秒上涨一行 [cheese-timer-1]
+│  ├─ 每 1 秒上涨一行 [cheese-timer-1]
+│  └─ Spin-1 挖掘 [spin-1-dig]
 ├─ 生存
 │  ├─ 40 APM
 │  │  ├─ 1 分钟 [survival-40-60]
@@ -75,6 +76,8 @@ check 的集合/开闭区间、成绩规则与录像说明见 SINGLE_PLAYER_CHAL
 ├─ 打分与长局
 │  ├─ 120 秒限时打分 [score-120]
 │  ├─ 120 秒加速打分 [score-blitz-120]
+│  ├─ WABI-SABI [wabi-sabi]
+│  ├─ EMPTY BOX [empty-box]
 │  ├─ 禅 200 行 [zen-200]
 │  └─ 无尽马拉松 [marathon-endless]
 ├─ 直列进攻
@@ -120,6 +123,9 @@ check 的集合/开闭区间、成绩规则与录像说明见 SINGLE_PLAYER_CHAL
 │  ├─ 连续 TSD：极限 [tsd-20-2]
 │  ├─ 纯消四：普通 [pure-quads]
 │  ├─ 纯消四：极限 [pure-quads-extreme]
+│  ├─ Spin-1 挑战 [spin-1]
+│  ├─ 1-8 STAKING [1-8-staking]
+│  ├─ MR.BOARDWIDE [mr-boardwide]
 │  ├─ 单消马拉松 200 行 [singles-marathon-200]
 │  ├─ 四列连击：普通 [c4w-0]
 │  ├─ 四列连击：困难 [c4w-1]
@@ -128,6 +134,7 @@ check 的集合/开闭区间、成绩规则与录像说明见 SINGLE_PLAYER_CHAL
 │  ├─ 极简操作竞速 40 行 [finesse-sprint-40-v1]
 │  └─ 极简操作科研 100 攻击 [finesse-research-100-v1]
 ├─ 全清
+│  ├─ 10PC [10pc]
 │  ├─ 100 行全清：普通 [pc-100-0]
 │  ├─ 100 行全清：困难 [pc-100-1]
 │  ├─ 100 行全清：疯狂 [pc-100-2]

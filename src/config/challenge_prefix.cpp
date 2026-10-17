@@ -31,6 +31,13 @@ bool PrefixTracker::observe(const Placement& placement,const Result& after) {
     }
     return stop;
 }
+void PrefixTracker::finish(const Result& result) {
+    for(auto& entry:entries_)if(!entry.snapshot.violated) {
+        entry.snapshot.result=result;
+        entry.snapshot.boundary.gameSeconds=result.gameSeconds;
+        entry.snapshot.boundary.realSeconds=result.realSeconds;
+    }
+}
 const PrefixSnapshot* PrefixTracker::find(const std::string& id) const {
     for(const auto& entry:entries_)if(entry.snapshot.boundary.challengeId==id)return &entry.snapshot;
     return nullptr;
@@ -44,9 +51,9 @@ std::optional<Result> PrefixTracker::result_for(const Definition& definition,con
     if(!definition.stopRule)return full;
     const auto* prefix=find(definition.id);
     if(!prefix || prefix->boundary.ruleVersion!=definition.ruleVersion)return {};
+    if(!prefix->violated)return full;
     auto result=prefix->result;
     result.undoCount=full.undoCount;result.pauseCount=full.pauseCount;result.finished=full.finished;
-    if(!prefix->violated){result.goalReached=full.goalReached;result.won=full.won;}
     return result;
 }
 }

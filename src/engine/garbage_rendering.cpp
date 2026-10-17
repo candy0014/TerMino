@@ -1,6 +1,7 @@
 #include "garbage_rendering.h"
 
 #include "tetr/render/board_renderer.h"
+#include "tetr/render/piece_renderer.h"
 #include "tetr/render/terminal_renderer.h"
 #include "tetr/runtime/constants.h"
 #include "tetr/runtime/game_context.h"
@@ -44,20 +45,21 @@ FieldImage capture_field(const Runtime::GameContext& context,
             image.cells.push_back({color_id(context,value),value.timed_countdown(),
                 appearance!=Render::BoardCellAppearance::Empty,appearance==Render::BoardCellAppearance::Dimmed});
         }
-    const auto overlay=[&](Piece::Pose at,int color) {
+    const auto overlay=[&](Piece::Pose at,int color,bool dimmed=false) {
         for (const auto& offset:piece->cells(at.rotation)) {
             const int row=at.position.row+offset[0], column=at.position.col+offset[1];
             if (row < -Runtime::kDisplayHiddenRows || row>=image.bottom || column<0 || column>=image.width) continue;
-            image.cells[(row+Runtime::kDisplayHiddenRows)*image.width+column]={color,0,true};
+            image.cells[(row+Runtime::kDisplayHiddenRows)*image.width+column]={color,0,true,dimmed};
         }
     };
-    if (piece && pose) {
+    const auto activeMode=Render::active_piece_draw_mode(context,player);
+    if (piece && pose && activeMode!=Render::PieceDrawMode::Erase) {
         if (context.config.field.ghost) {
             auto ghost=*pose;
             while (piece->can_place(ghost.translated(1,0),field)) ++ghost.position.row;
             overlay(ghost,-1);
         }
-        overlay(*pose,context.config.display.obscuredColors ? 0 : piece->color_id());
+        overlay(*pose,context.config.display.obscuredColors ? 0 : piece->color_id(),activeMode==Render::PieceDrawMode::Dimmed);
     }
     return image;
 }
@@ -116,8 +118,10 @@ void render_field_changes(const Runtime::GameContext& context,
         nextColumn=column+1==after.width ? -1 : column+1;
     }
     if (piece && pose) {
-        player.presentation.paintedActivePose=pose;
-        player.presentation.paintedActivePieceType=piece->type();
+        const auto mode=Render::active_piece_draw_mode(context,player);
+        player.presentation.paintedActivePose=mode==Render::PieceDrawMode::Erase?std::optional<Piece::Pose>{}:pose;
+        player.presentation.paintedActivePieceType=mode==Render::PieceDrawMode::Erase?std::optional<Piece::Type>{}:piece->type();
+        player.presentation.paintedActiveDimmed=mode==Render::PieceDrawMode::Dimmed;
         ++player.presentation.activePiecePaintRevision;
         if (player.presentation.activePieceType==piece->type()) player.presentation.activePose=pose;
     }

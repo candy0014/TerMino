@@ -86,7 +86,7 @@ void refresh_spawn_marker(const Runtime::GameContext& context,Runtime::PlayerSes
         const bool ghostCell=active && ghost && covers(*active,*ghost,cell.row,cell.col);
         if (activeCell || ghostCell) {
             move_to(context,player,cell.row,cell.col);
-            const auto colors=activeCell ? cell_colors(active->color_id(),context.config.display.obscuredColors) :
+            const auto colors=activeCell ? cell_colors(active->color_id(),context.config.display.obscuredColors,p.paintedActiveDimmed) :
                 ui_colors(ColorRole::Ghost,context.config.display.obscuredColors);
             if (marked) draw_spawn_square(context.config.display.squareStyle,colors);
             else {

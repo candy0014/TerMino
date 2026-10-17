@@ -8,7 +8,8 @@ namespace Runtime { class Playfield; class GameContext; struct PlayerSessionStat
 
 namespace Render {
 bool active_piece_visible(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player);
-enum class PieceDrawMode { Erase, Normal, Ghost };
+enum class PieceDrawMode { Erase, Normal, Ghost, Dimmed };
+PieceDrawMode active_piece_draw_mode(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player);
 PieceDrawMode hold_draw_mode(const Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player, int additionalUses=0);
 

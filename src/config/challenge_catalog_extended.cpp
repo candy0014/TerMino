@@ -6,6 +6,7 @@
 #include <cmath>
 #include <deque>
 #include <limits>
+#include <set>
 
 namespace Challenges {
 namespace {
@@ -126,6 +127,16 @@ std::vector<Definition> additional_definitions() {
             attack_rules(d);normal_gravity(d);fixed(d,Id::GravityInterval,.6);fixed(d,Id::GravityProgression,blitz?3:0);
             d.secondary=Secondary::Points;d.completedOnly=true;add(d);
         }
+        for(bool emptyBox:{false,true}) {
+            d=base(emptyBox?"empty-box":"wabi-sabi",emptyBox?"EMPTY BOX":"WABI-SABI","Score and endurance",Progress::Seconds,120);
+            attack_rules(d);normal_gravity(d);fixed(d,Id::GravityInterval,.6);fixed(d,Id::FieldHeight,20);
+            d.secondary=Secondary::Points;d.completedOnly=true;
+            if(emptyBox)fixed(d,Id::HoldEnabled,0);
+            else d.stopRule=[] {return [](const Placement& p,const Result&,const Result&){return p.allClear;};};
+            d.description=emptyBox?"标准 2 分钟打分，10×20 场地，禁用 HOLD。按分数排名，禁止暂停和撤销。":
+                "标准 2 分钟打分，10×20 场地，禁止 ALLCLEAR；出现全清立即结束。按分数排名，禁止暂停和撤销。";
+            add(d);
+        }
         d=base("zen-200","禅 200 行","Score and endurance",Progress::Lines,200);attack_rules(d);thinking(d);fixed(d,Id::GravityInterval,1e9+5.0);fixed(d,Id::InstantGravity,0);d.secondary=Secondary::Points;add(d);
         d=base("marathon-endless","无尽马拉松","Score and endurance",Progress::Lines,1000000000);marathon(d);attack_rules(d);fixed(d,Id::Goal,0);erase(d,Id::RacingDistance);d.secondary=Secondary::Points;add(d);
         d=*find("dig-100");d.id="dig-400";d.name=d.chineseName="挖掘 400 行";goal(d,Progress::Garbage,400);add(d);
@@ -173,6 +184,7 @@ std::vector<Definition> additional_definitions() {
         }
         for(int tier=0;tier<3;++tier) {
             d=base("tsd-20-"+std::to_string(tier),"连续 TSD："+std::vector<std::string>{"基础","困难","极限"}[tier],"Clear restrictions");
+            d.endless=true;d.target=1000000000;fixed(d,Id::Goal,0);erase(d,Id::RacingDistance);d.ruleVersion=2;
             d.stopRule=[tier] {return [tier,columns=std::deque<int>{}](const Placement& p,const Result&,const Result&) mutable {
                 if(!p.lines)return false;
                 if(p.lines!=2 || !p.spin || p.mini || Piece::metadata(Piece::Type::from_index(p.pieceType)).familyIndex!=5)return true;
@@ -183,10 +195,41 @@ std::vector<Definition> additional_definitions() {
         }
         for(bool extreme:{false,true}) {
             d=base(extreme?"pure-quads-extreme":"pure-quads","纯消四："+std::string(extreme?"极限":"普通"),"Clear restrictions",Progress::Lines,160);
-            d.stopRule=[extreme] {return [extreme,last=std::optional<int>{}](const Placement& p,const Result&,const Result&) mutable {
-                if(!p.lines)return false;if(p.lines!=4 || (extreme && last && *last==p.column))return true;last=p.column;return false;
+            d.endless=true;d.target=1000000000;fixed(d,Id::Goal,0);erase(d,Id::RacingDistance);d.ruleVersion=2;
+            d.stopRule=[extreme] {return [extreme,columns=std::deque<int>{}](const Placement& p,const Result&,const Result&) mutable {
+                if(!p.lines)return false;
+                if(p.lines!=4 || (extreme && std::find(columns.begin(),columns.end(),p.column)!=columns.end()))return true;
+                columns.push_back(p.column);if(columns.size()>8)columns.pop_front();return false;
             };};add(d);
         }
+        for(bool dig:{false,true}) {
+            d=dig?*find("dig-40"):base("spin-1","Spin-1 挑战","Clear restrictions");
+            d.id=dig?"spin-1-dig":"spin-1";d.name=d.chineseName=dig?"Spin-1 挖掘":"Spin-1 挑战";
+            goal(d,dig?Progress::Garbage:Progress::Lines,1000000000);d.endless=true;
+            fixed(d,Id::Goal,0);erase(d,dig?Id::GarbageTarget:Id::RacingDistance);erase(d,Id::GravityInterval);
+            put(d,{Id::RotationSystem,Restriction::Set,{0,1}});fixed(d,Id::SpinBonuses,5);
+            if(dig)range(d,Id::LayerHeight,1,10);
+            d.stopRule=[] {return [](const Placement& p,const Result&,const Result&){return p.lines && (p.lines!=1 || !p.spin);};};
+            d.description=std::string("仅允许 Spin Single 或 Mini Spin Single 消行，违规立即结束；仅限 SRS / SRS+，重力不限。")+
+                (dig?"固定垃圾层挖掘，垃圾层高度 1–10 行；按挖掘垃圾行数、用时排名。":"按消行数、用时排名。")+"禁止暂停和撤销。";
+            add(d);
+        }
+        for(bool boardwide:{false,true}) {
+            d=base(boardwide?"mr-boardwide":"1-8-staking",boardwide?"MR.BOARDWIDE":"1-8 STAKING","Clear restrictions");
+            fixed(d,Id::FieldHeight,20);
+            d.stopRule=[boardwide] {return [boardwide,columns=std::set<int>{}](const Placement& p,const Result&,const Result&) mutable {
+                if(!p.lines)return false;
+                if(p.lines!=4 || p.column<0 || p.column>=10)return true;
+                if(boardwide)return !columns.insert(p.column).second;
+                return p.column!=1 && p.column!=7;
+            };};
+            d.description=boardwide?"10×20 场地 40 行竞速。所有消行必须为消四，10 次消四必须分别位于 10 个不同列；违规立即结束。禁止暂停和撤销。":
+                "10×20 场地 40 行竞速。所有消行必须为第 2 列或第 8 列的消四（列从左起计数）；违规立即结束。禁止暂停和撤销。";
+            add(d);
+        }
+        d=base("10pc","10PC","Perfect clears");fixed(d,Id::FieldHeight,20);d.completedOnly=true;
+        d.stopRule=[] {return [](const Placement&,const Result&,const Result& after){return after.statistics.totalLines>=40 && after.statistics.allClearCount<10;};};
+        d.description="10×20 场地 40 行竞速，完成时至少达成 10 次 ALLCLEAR；不足 10 次视为失败，仅记录完成成绩。禁止暂停和撤销。";add(d);
         d=base("singles-marathon-200","单消马拉松 200 行","Clear restrictions",Progress::Lines,200);marathon(d);
         d.stopRule=[] {return [cleared=false](const Placement& p,const Result&,const Result&) mutable {const bool bad=p.spin || (p.lines && (p.lines!=1 || cleared));cleared=p.lines>0;return bad;};};add(d);
         for(int tier=0;tier<3;++tier) {
@@ -196,14 +239,16 @@ std::vector<Definition> additional_definitions() {
         }
         for(int tier=0;tier<3;++tier) {
             d=base("pc-100-"+std::to_string(tier),"100 行全清："+std::vector<std::string>{"普通","困难","疯狂"}[tier],"Perfect clears",Progress::Lines,100);
-            if(tier==0)thinking(d);else normal_gravity(d,tier==1?.6:.1,tier==1?.5:.2);d.secondary=Secondary::AllClears;add(d);
+            if(tier==0)thinking(d);else normal_gravity(d,tier==1?.6:.1,tier==1?.5:.2);d.secondary=Secondary::AllClears;d.rankSecondaryFirst=true;
+            d.description="100 行内尽可能多地全清；先按 ALLCLEAR 次数排名，再比较用时。禁止暂停和撤销。";add(d);
         }
         for(bool hard:{false,true}) {
             d=base(hard?"pc-consecutive-hard":"pc-consecutive",hard?"连续全清：困难":"连续全清：普通","Perfect clears",Progress::AllClears,1000000000);fixed(d,Id::Goal,0);erase(d,Id::AllClearTarget);
             if(hard){normal_gravity(d,.3,.3);fixed(d,Id::HoldEnabled,0);}else thinking(d);
             d.stopRule=[] {return [cycleLines=0](const Placement& p,const Result&,const Result& after) mutable {cycleLines+=p.lines;const bool bad=cycleLines+after.stackHeight>4;if(p.allClear)cycleLines=0;return bad;};};add(d);
         }
-        d=base("symmetry-40","对称 40 行","Construction");construction_hint(d,15);d.stopRule=[] {return [](const Placement& p,const Result&,const Result&){return p.lines && !p.symmetric;};};add(d);
+        d=base("symmetry-40","对称 40 行","Construction");construction_hint(d,15);d.ruleVersion=2;
+        d.stopRule=[] {return [](const Placement& p,const Result&,const Result&){return !p.symmetric;};};add(d);
         d=base("construct-secret","秘密段位：大于号","Construction",Progress::Pattern,19);construction_hint(d,12);fixed(d,Id::Goal,0);d.secondary=Secondary::Pieces;thinking(d);add(d);
         d=base("construct-checkerboard","棋盘格堆叠","Construction",Progress::Pattern,20);construction_hint(d,13);fixed(d,Id::Goal,0);d.secondary=Secondary::Pieces;thinking(d);add(d);
         for(int tier=0;tier<3;++tier) {

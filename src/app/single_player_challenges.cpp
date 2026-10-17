@@ -193,6 +193,7 @@ void finish_single_player_challenges(Runtime::GameContext& context,Runtime::Play
         (Runtime::active_goal(round.config)!=Runtime::GameGoal::None && Rules::goal_reached(round.config,result.statistics,
         player.gameplay.playfield.field.remaining_initial_cells(),Runtime::Duration::from_seconds(result.gameSeconds)));
     round.completedResult=result;
+    round.prefixes.finish(result);
     round.replayPrefixes=round.prefixes.boundaries();
     Challenges::History history;const auto path=Challenges::history_path(round.settings);
     round.historyWritable=Challenges::load(history,path);

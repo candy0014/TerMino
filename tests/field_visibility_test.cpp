@@ -13,6 +13,7 @@
 #include "tetr/replay/config_codec.h"
 #include "tetr/replay/session_state.h"
 #include "tetr/render/board_renderer.h"
+#include "../src/engine/garbage_rendering.h"
 #include "tetr/runtime/field_visibility.h"
 #include "tetr/runtime/game_context.h"
 #include "../src/app/settings_model.h"
@@ -152,6 +153,27 @@ void periodic_visibility() {
     assert(periodic_invisible_flash({}, {},seconds(1)));
     assert(!periodic_invisible_flash({}, {},{}));
 }
+void hidden_active_garbage_repaint() {
+    Fixture f;f.context.config.challengeRules=ChallengeRules::Blind;f.context.config.field.ghost=false;
+    f.context.config.mode.replayMode=true;
+    auto piece=Piece::get_definition(Piece::Type::from_index(5));auto pose=Piece::spawn_pose(10,piece.type());pose.position.row=5;
+    f.player.presentation.activePose=pose;f.player.presentation.activePieceType=piece.type();
+    const auto before=Engine::GarbageRendering::capture_field(f.context,f.player,f.field);
+    auto next=pose.translated(-1,0);
+    Capture output;
+    Engine::GarbageRendering::render_field_changes(f.context,f.player,f.field,before,&piece,next);
+    Test::TerminalScreen screen;screen.feed(output.text.str());
+    assert(f.player.presentation.paintedActiveDimmed && f.player.presentation.paintedActivePose==next);
+    for(const auto& offset:piece.cells(next.rotation)) {
+        const auto cell=screen.at(next.position.row+offset[0]+9,31+2*(next.position.col+offset[1]));
+        assert(cell.glyph=="█" && (cell.foreground==Test::TerminalScreen::Color{{58,26,55}}));
+    }
+    const auto painted=Engine::GarbageRendering::capture_field(f.context,f.player,f.field,&piece,next);
+    f.context.config.mode.replayMode=false;output.text.str("");
+    Engine::GarbageRendering::render_field_changes(f.context,f.player,f.field,painted,&piece,next);
+    screen.feed(output.text.str());assert(!f.player.presentation.paintedActivePose);
+    for(const auto& offset:piece.cells(next.rotation))assert(screen.at(next.position.row+offset[0]+9,31+2*(next.position.col+offset[1])).glyph==" ");
+}
 
 void row_moves_and_undo() {
     Fixture f;f.at(7);
@@ -191,4 +213,4 @@ void network_timing() {
     malformed=wire;malformed.replace(start+15,end-start-15,"999999:6,");assert(!Network::decode_board_state(malformed,10,20));
 }
 }
-int main() {configuration();independent_piece_timers();periodic_visibility();row_moves_and_undo();network_timing();}
+int main() {configuration();independent_piece_timers();periodic_visibility();hidden_active_garbage_repaint();row_moves_and_undo();network_timing();}

@@ -216,6 +216,10 @@ std::optional<Score> Definition::val(const UserConfig::Settings&,const Result& r
     return valid_score(score)?std::optional<Score>{score}:std::nullopt;
 }
 bool Definition::better(Score a,Score b) const {
+    if(rankSecondaryFirst) {
+        if(a.value!=b.value)return secondary==Secondary::Time || secondary==Secondary::Pieces?a.value<b.value:a.value>b.value;
+        return a.tie<b.tie;
+    }
     if(a.progress!=b.progress)return a.progress>b.progress;
     if(progress==Progress::Wins && a.progress==0)return a.value>b.value;
     if(a.value!=b.value)return secondary==Secondary::Time || secondary==Secondary::Pieces?a.value<b.value:a.value>b.value;

@@ -90,6 +90,10 @@ std::optional<Challenges::PrefixBoundary> analyze_challenge_replay(const std::st
                 Engine::consume_current_piece(p);
             }
         }
+        Challenges::Result full;full.config=original;full.statistics=p.gameplay.scoring;
+        full.gameSeconds=prefix.resultGameTime.value_or(replay.lastGameTimestamp).seconds();
+        full.realSeconds=prefix.resultRealTime.value_or(replay.lastConsumedTimestamp).seconds();
+        tracker.finish(full);
         const auto* result=tracker.find(definition.id);return result?std::optional<Challenges::PrefixBoundary>{result->boundary}:std::nullopt;
     }catch(const std::exception&){return {};}
 }

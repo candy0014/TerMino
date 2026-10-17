@@ -62,6 +62,7 @@ void catalog_and_ranges() {
         const auto runtime=preview_config(s);const auto encoded=Replay::encode_config_prefix(runtime)+"{block_seed,42}{garbage_seed,24}}";
         Runtime::RuntimeConfig decoded;Replay::ConfigPrefixResult prefix;assert(Replay::decode_config_prefix(encoded,decoded,prefix));
         assert(decoded.challengeRules==runtime.challengeRules && Runtime::effective_bag_randomizer(decoded)==Runtime::effective_bag_randomizer(runtime));
+        if(d.opponentConstraints.empty())assert(d.check(decoded));
         restore_adjustment(s,&opponent);assert(!s.challengeAdjustment && s.challengeRules==0);
     }
     auto sprint=*find("sprint-40");UserConfig::Settings s;sprint.change(s);
@@ -190,6 +191,74 @@ void placement_rules() {
         assert(tracker.observe(p,initial));
     }
 }
+void requested_challenges() {
+    for(bool dig:{false,true}) {
+        const auto d=*lookup(dig?"spin-1-dig":"spin-1");UserConfig::Settings s;assert(d.change(s));
+        assert(s.goal==0 && d.endless && d.secondary==Secondary::Time);
+        for(int rs:{0,1})for(double gravity:{0.0,.05,10.0,1e9+5}) {
+            s.rotationSystem=rs;s.gravityInterval=gravity;assert(d.check(s));
+        }
+        s.rotationSystem=2;assert(!d.check(s));s.rotationSystem=0;
+        s.spinBonuses=8;assert(!d.check(s));s.spinBonuses=5;
+        if(dig) {
+            assert(s.garbageMode==3);
+            for(int height:{1,7,10}){s.layerHeight=height;assert(d.check(s));}
+            for(int height:{0,11}){s.layerHeight=height;assert(!d.check(s));}
+            s.layerHeight=10;
+        }
+        Result initial;initial.config=preview_config(s);PrefixTracker tracker({d},s,initial,d.id);
+        Placement p;p.lines=0;assert(!tracker.observe(p,initial));
+        p.lines=1;p.spin=true;assert(!tracker.observe(p,initial));p.mini=true;assert(!tracker.observe(p,initial));
+        p.lines=2;assert(tracker.observe(p,initial));assert(tracker.find(d.id)->boundary.placements==3);
+        auto predicate=d.stopRule();p.lines=1;p.spin=false;assert(predicate(p,initial,initial));
+        Result scored=initial;scored.statistics.totalLines=3;scored.statistics.totalGarbageLines=dig?2:0;
+        scored.statistics.clearStatistics[{5,1}][1]=3;scored.gameSeconds=9;
+        const auto score=d.val(s,scored);assert(score && score->progress==(dig?2:3) && score->value==9);
+        assert(d.better({5,20},{4,10}) && d.better({5,10},{5,20}));
+    }
+    for(const auto& id:{"1-8-staking","mr-boardwide","10pc","wabi-sabi","empty-box"}) {
+        const auto d=*lookup(id);UserConfig::Settings s;assert(d.change(s));assert(s.fieldWidth==10 && s.fieldHeight==20);
+        s.fieldHeight=19;assert(!d.check(s));s.fieldHeight=20;
+        if(d.id=="empty-box"){assert(s.holdEnabled==0);s.holdEnabled=1;assert(!d.check(s));}
+    }
+    Result before,after;Placement p;p.lines=4;
+    auto staking=lookup("1-8-staking")->stopRule();
+    for(int column=0;column<10;++column){p.column=column;assert(staking(p,before,after)==(column!=1 && column!=7));}
+    p.column=1;p.lines=1;assert(staking(p,before,after));p.lines=0;assert(!staking(p,before,after));
+    auto boardwide=lookup("mr-boardwide")->stopRule();p.lines=4;
+    for(int column=0;column<10;++column){p.column=column;assert(!boardwide(p,before,after));}
+    p.column=0;assert(boardwide(p,before,after));
+    auto again=lookup("mr-boardwide")->stopRule();assert(!again(p,before,after));
+    const auto pc=*lookup("10pc");auto pcRule=pc.stopRule();after.statistics.totalLines=40;
+    after.statistics.allClearCount=9;assert(pcRule(p,before,after));after.statistics.allClearCount=10;assert(!pcRule(p,before,after));
+    UserConfig::Settings settings;assert(pc.change(settings));before.config=after.config=preview_config(settings);
+    before.statistics.totalLines=36;before.statistics.clearStatistics[{0,4}][0]=9;assert(!pc.val(settings,before));
+    after.statistics.clearStatistics[{0,4}][0]=10;assert(pc.val(settings,after));
+    const auto wabi=*lookup("wabi-sabi");assert(wabi.change(settings));before={};before.config=preview_config(settings);
+    PrefixTracker tracker({wabi},settings,before,wabi.id);after=before;after.statistics.score=500;after.gameSeconds=119;
+    p={};assert(!tracker.observe(p,after));after.gameSeconds=after.realSeconds=120;tracker.finish(after);
+    const auto score=wabi.val(settings,*tracker.result_for(wabi,after));assert(score && score->progress==120 && score->value==500);
+    assert(tracker.find(wabi.id)->boundary.gameSeconds==120);
+    PrefixTracker failed({wabi},settings,before,wabi.id);p.allClear=true;assert(failed.observe(p,after));
+    assert(!wabi.val(settings,*failed.result_for(wabi,after)));
+    // Run the real lock path in both vertical I orientations. The rules use
+    // the physical zero-based column, independently of the piece's pose origin.
+    for(int column=0;column<10;++column)for(int rotation:{1,3}) {
+        Rig rig(*lookup("1-8-staking"));auto& field=rig.session.player.gameplay.playfield.field;
+        for(int row=16;row<20;++row)for(int col=0;col<10;++col)if(col!=column)field.set_cell(row,col,Runtime::BoardCell::piece(3));
+        const auto type=Piece::Type::from_index(0);const auto piece=Piece::get_definition(type);const auto cells=piece.cells(Runtime::Rotation(rotation));
+        int offset=cells.front()[1];for(const auto& cell:cells)offset=std::min(offset,cell[1]);
+        const auto d=*lookup("1-8-staking");Result initial;initial.config=rig.c.config;PrefixTracker prefix({d},rig.user,initial,d.id);
+        rig.app.challengePlacementObserver=[&](const Placement& sample,auto& player){auto result=initial;result.statistics=player.gameplay.scoring;return prefix.observe(sample,result);};
+        const auto result=rig.lock(type,rig.floor(type,rotation,column-offset));
+        assert(result==((column==1 || column==7)?Rules::PlayResult::Locked:Rules::PlayResult::Dead));
+    }
+    auto extreme=lookup("pure-quads-extreme")->stopRule();p={};p.lines=4;
+    for(int column=0;column<8;++column){p.column=column;assert(!extreme(p,before,after));}
+    p.column=0;assert(extreme(p,before,after));p.column=8;assert(!extreme(p,before,after));p.column=0;assert(!extreme(p,before,after));
+    const auto pc100=*lookup("pc-100-0");assert(pc100.better({20,5,30},{100,4,20}));assert(pc100.better({20,5,10},{100,5,20}));
+    auto symmetric=lookup("symmetry-40")->stopRule();p={};p.symmetric=false;assert(symmetric(p,before,after));
+}
 void puzzles_and_stack() {
     Rig columns(*find("sprint-40"));std::vector<int> physicalColumns;
     columns.app.challengePlacementObserver=[&](const Placement& p,auto&){physicalColumns.push_back(p.column);return false;};
@@ -227,6 +296,20 @@ void puzzles_and_stack() {
     Engine::initialize_board(master.c,master.session.player);assert(task.stage==0);
 }
 void replay_analysis_and_finesse() {
+    {
+        const auto d=*lookup("wabi-sabi");Rig timed(d);Engine::prepare_next_preview(timed.c,timed.session.player);const auto type=Engine::current_piece(timed.session.player);
+        timed.session.gameStartTime=timed.c.now();
+        assert(timed.lock(type,timed.floor(type))==Rules::PlayResult::Locked);
+        timed.replay.data+="{wall_time,120}{end_all,120}";
+        Runtime::RuntimeConfig decoded;Replay::ConfigPrefixResult header;assert(Replay::decode_config_prefix(timed.replay.data,decoded,header));decoded.mode.replayMode=false;
+        assert(d.check(decoded));
+        auto legacy=timed.replay.data;const auto speed=legacy.find("{Speed,");assert(speed!=std::string::npos);
+        legacy.replace(speed,legacy.find('}',speed)-speed+1,"{Speed,0.600000}");
+        assert(Replay::decode_config_prefix(legacy,decoded,header) && d.check(decoded));
+        const auto boundary=App::analyze_challenge_replay(timed.replay.data,d);
+        assert(boundary && boundary->placements==1 && boundary->gameSeconds==120 && boundary->realSeconds==120);
+        assert(App::analyze_challenge_replay(legacy,d));
+    }
     auto d=*find("sprint-40");d.id="test-first-lock";d.stopRule=[] {return [](const Placement&,const Result&,const Result& r){return r.statistics.placedBlocks>=2;};};
     for(bool legacy:{false,true}) {
     Rig rig(d);
@@ -297,5 +380,5 @@ int main(int argc,char** argv){
     if(argc>1 && std::string(argv[1])=="--catalog") {
         for(const auto& d:available_definitions()) {for(const auto& category:d.categories)std::cout<<category<<" / ";std::cout<<'\t'<<d.id<<'\t'<<d.name<<(d.testing?"【测试】":"")<<'\n';}return 0;
     }
-    Render::begin_output_suppression();intervals();catalog_and_ranges();classic_handling_rules();digging_finish();placement_rules();puzzles_and_stack();replay_analysis_and_finesse();scores_and_history();drought_and_display();Render::end_output_suppression();std::cerr<<"Full challenge catalog, interval checks, real settlement, legacy replay analysis and new mechanics passed\n";
+    Render::begin_output_suppression();intervals();catalog_and_ranges();classic_handling_rules();digging_finish();placement_rules();requested_challenges();puzzles_and_stack();replay_analysis_and_finesse();scores_and_history();drought_and_display();Render::end_output_suppression();std::cerr<<"Full challenge catalog, interval checks, real settlement, legacy replay analysis and new mechanics passed\n";
 }

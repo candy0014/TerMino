@@ -73,6 +73,20 @@ void independent_prefixes() {
     PrefixTracker unqualified({quad},settings,changed,quad.id);
     assert(!unqualified.find(quad.id) && !unqualified.observe(p,full));
 }
+std::string recording(const std::vector<PrefixBoundary>& boundaries);
+void complete_timed_prefix() {
+    auto d=*lookup("wabi-sabi");UserConfig::Settings settings;assert(d.change(settings));
+    auto full=result(settings,1,0,119);PrefixTracker tracker({d},settings,result(settings,0,0,0),d.id);
+    assert(!tracker.observe({},full));full.gameSeconds=full.realSeconds=120;
+    tracker.finish(full);const auto boundary=tracker.find(d.id)->boundary;
+    assert(boundary.placements==1 && boundary.gameSeconds==120 && boundary.realSeconds==120);
+    assert(d.val(settings,*tracker.result_for(d,full)));
+    const auto clipped=Replay::prepare_challenge_replay(recording({boundary}),d.id,d.ruleVersion,true);
+    assert(clipped.status==Replay::PrefixPreparationStatus::Ready);
+    Runtime::RuntimeConfig config;Replay::ConfigPrefixResult prefix;assert(Replay::decode_config_prefix(clipped.recording,config,prefix));
+    auto operations=Replay::decode_operation_stream(clipped.recording,prefix.operationOffset);
+    assert(operations.back().kind==Replay::OperationKind::EndAll && operations.back().timestamp.seconds()==120);
+}
 std::string recording(const std::vector<PrefixBoundary>& boundaries) {
     Runtime::RuntimeConfig config;
     return Replay::encode_config_prefix(config)+"{block_seed,123}{result_game_time,99}{result_real_time,100}"+
@@ -171,6 +185,6 @@ void empty_prefix_spawns_nothing() {
 }
 }
 int main() {
-    independent_prefixes();replay_bounds();placement_hook_and_save();empty_prefix_spawns_nothing();
+    independent_prefixes();complete_timed_prefix();replay_bounds();placement_hook_and_save();empty_prefix_spawns_nothing();
     std::cerr<<"challenge prefix isolation, scoring, replay bounds and lock hook passed\n";
 }

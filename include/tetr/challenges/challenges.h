@@ -57,6 +57,7 @@ struct Definition {
     bool noRotation=false;
     bool completedOnly=false,requiresB2b=false;
     bool endless=false;
+    bool rankSecondaryFirst=false;
     bool testing=false;
     // Empty for the original catalog, preserving its localized names.
     std::string chineseName,description;
@@ -91,6 +92,8 @@ public:
                   const Result& initial,std::string selectedChallenge={});
     // Only an explicitly started challenge can request immediate termination.
     bool observe(const Placement& placement,const Result& after);
+    // Keep the final elapsed time when the attempt ended without a violation.
+    void finish(const Result& result);
     bool empty() const noexcept {return entries_.empty();}
     const PrefixSnapshot* find(const std::string& challengeId) const;
     std::vector<PrefixBoundary> boundaries() const;

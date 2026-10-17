@@ -140,6 +140,7 @@ struct PlayerPresentationState {
     // Actual piece overlay on the terminal, including full/periodic repaints.
     std::optional<Piece::Pose> paintedActivePose;
     std::optional<Piece::Type> paintedActivePieceType;
+    bool paintedActiveDimmed=false;
     // Actual queued type can differ from the disguised Fool NEXT preview.
     std::optional<Piece::Type> nextSpawnType;
     std::optional<Piece::Pose> nextSpawnPose; // Remote override, before Clutch/input.
