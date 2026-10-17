@@ -1,5 +1,9 @@
 #include "renderer.h"
 #include "input.h"
+#include "text_events.h"
+#include "window_config.h"
+#include "viewport.h"
+#include "tetr/util/runtime_directory_lock.h"
 #include "tetr/frontend/graphical/session.h"
 #include "tetr/input/action.h"
 #include "tetr/runtime/piece.h"
@@ -235,8 +239,9 @@ void scene_view(Renderer& r,const SessionView& view) {
 struct Options {
     std::string dataDir,profile,profileTwo,replay,font,screenshot;
     std::vector<std::string> bindings;
-    int frames=0,smoke=0;
-    bool play=false,vsync=true,hidden=false,continuous=false;
+    int frames=0,smoke=0,frameLimit=0;
+    std::optional<std::pair<int,int>> windowSize;
+    bool play=false,vsync=true,vsyncOverride=false,hidden=false,continuous=false;
 };
 Options options(int argc,char** argv) {
     Options result;
@@ -249,11 +254,20 @@ Options options(int argc,char** argv) {
         else if(arg=="--qp-continuous-cancel")result.continuous=true;
         else if(arg=="--replay") result.replay=value();
         else if(arg=="--font") result.font=value();
+        else if(arg=="--frame-limit") {result.frameLimit=std::stoi(value());if(result.frameLimit<30 || result.frameLimit>1000)throw std::runtime_error("--frame-limit requires 30..1000");}
+        else if(arg=="--window-size") {
+            const auto size=value();const auto x=size.find('x');
+            if(x==std::string::npos)throw std::runtime_error("--window-size requires WIDTHxHEIGHT");
+            const int w=std::stoi(size.substr(0,x)),h=std::stoi(size.substr(x+1));
+            if(w<840 || h<560 || w>16384 || h>16384)throw std::runtime_error("Window dimensions must be 840x560..16384x16384");
+            result.windowSize=std::pair{w,h};
+        }
         else if(arg=="--screenshot") result.screenshot=value();
         else if(arg=="--frames") {result.frames=std::stoi(value());result.hidden=true;}
-        else if(arg=="--smoke-test") {result.smoke=1;result.vsync=false;}
+        else if(arg=="--smoke-test") {result.smoke=1;result.vsync=false;result.vsyncOverride=true;}
         else if(arg=="--play") result.play=true;
-        else if(arg=="--no-vsync") result.vsync=false;
+        else if(arg=="--no-vsync") {result.vsync=false;result.vsyncOverride=true;}
+        else if(arg=="--vsync") {result.vsync=true;result.vsyncOverride=true;}
         else if(arg=="--hidden") result.hidden=true;
         else if(arg=="--help") {
             std::cerr<<"TerMino OpenGL / shared full application\n"
@@ -264,7 +278,9 @@ Options options(int argc,char** argv) {
                 "--replay FILE   open single-board or local-versus recording\n"
                 "--play         start with saved configuration\n--font FILE    UTF-8 font override\n"
                 "--qp-continuous-cancel  enable shared Quick Play cancellation penalties\n"
-                "--no-vsync     render at up to 240 Hz\n"
+                "--vsync / --no-vsync  override saved vertical synchronization\n"
+                "--window-size WIDTHxHEIGHT  override saved window geometry\n"
+                "--frame-limit FPS  render limit 30..1000 (default 240)\n"
                 "--hidden       do not display the window (test/offscreen use)\n"
                 "--frames N --screenshot FILE.bmp  bounded visual check\n"
                 "--smoke-test   exercise SDL keyboard input and exit\n";
@@ -298,18 +314,24 @@ int main(int argc,char** argv) {
         const auto absolute=[](const std::string& path) {return std::filesystem::absolute(std::filesystem::u8path(path)).generic_u8string();};
         for(auto* path:{&opt.font,&opt.profile,&opt.profileTwo,&opt.replay,&opt.screenshot})if(!path->empty())*path=absolute(*path);
         for(auto& binding:opt.bindings)binding=absolute(binding);
+        if(!opt.dataDir.empty()) {std::filesystem::create_directories(std::filesystem::u8path(opt.dataDir));std::filesystem::current_path(std::filesystem::u8path(opt.dataDir));}
+        Util::RuntimeDirectoryLock directoryLock(".tetr/client.lock");
+        if(!directoryLock.acquired())throw std::runtime_error(directoryLock.error());
+        auto windowConfig=load_window_config(".tetr/graphics.ini");
+        if(opt.windowSize){windowConfig.width=opt.windowSize->first;windowConfig.height=opt.windowSize->second;windowConfig.maximized=false;}
+        if(opt.frameLimit)windowConfig.frameLimit=opt.frameLimit;
+        if(opt.vsyncOverride)windowConfig.vsync=opt.vsync;
         if(!SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS))throw std::runtime_error(SDL_GetError());
         if(opt.font.empty())opt.font=std::string(SDL_GetBasePath())+"resources/fonts/NotoSansCJKsc-Regular.otf";
-        if(!opt.dataDir.empty()) {std::filesystem::create_directories(std::filesystem::u8path(opt.dataDir));std::filesystem::current_path(std::filesystem::u8path(opt.dataDir));}
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,3);SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_CONTEXT_PROFILE_CORE);SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER,1);
-        const SDL_WindowFlags flags=SDL_WINDOW_OPENGL|SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY|(opt.hidden?SDL_WINDOW_HIDDEN:0);
-        window=SDL_CreateWindow("TerMino / OpenGL",1200,800,flags);
+        const SDL_WindowFlags flags=SDL_WINDOW_OPENGL|SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY|(opt.hidden?SDL_WINDOW_HIDDEN:0)|(!opt.hidden && windowConfig.maximized?SDL_WINDOW_MAXIMIZED:0);
+        window=SDL_CreateWindow("TerMino / OpenGL",windowConfig.width,windowConfig.height,flags);
         if(!window)throw std::runtime_error(SDL_GetError());SDL_SetWindowMinimumSize(window,840,560);
         gl=SDL_GL_CreateContext(window);if(!gl)throw std::runtime_error(SDL_GetError());
         if(!gladLoadGL(reinterpret_cast<GLADloadfunc>(SDL_GL_GetProcAddress)) || !GLAD_GL_VERSION_3_3)throw std::runtime_error("OpenGL 3.3 Core is required");
         std::cerr<<"TerMino GL: "<<glGetString(GL_VERSION)<<" / "<<glGetString(GL_RENDERER)<<" / video="<<SDL_GetCurrentVideoDriver()<<" / hidden="<<opt.hidden<<'\n';
-        SDL_GL_SetSwapInterval(opt.vsync?1:0);
+        SDL_GL_SetSwapInterval(windowConfig.vsync?1:0);
         {
             Renderer renderer(opt.font);EventClock eventClock;
             UserConfig::Settings first,second;
@@ -326,7 +348,7 @@ int main(int argc,char** argv) {
             if(opt.profile.empty() && !std::getenv("TETR_USER_CONFIG")) {int owner=0;std::ifstream(".tetr/active_player")>>owner;launch.playerTwoActive=owner==1;}
             Session session(std::move(first),std::move(second),launch);
             bool running=true,textActive=false;int frame=0,smokeStep=0;
-            std::string composition;const auto smokeStart=std::chrono::steady_clock::now();
+            TextEvents textEvents;auto& composition=textEvents.composition;const auto smokeStart=std::chrono::steady_clock::now();
             while(running) {
                 const auto frameStart=std::chrono::steady_clock::now();
                 const bool requested=session.text_input_active();
@@ -348,29 +370,13 @@ int main(int argc,char** argv) {
                 SDL_Event event;
                 while(SDL_PollEvent(&event)) {
                     if(event.type==SDL_EVENT_QUIT)running=false;
-                    if(event.type==SDL_EVENT_WINDOW_FOCUS_LOST)session.input().set_focused(false);
+                    if(event.type==SDL_EVENT_WINDOW_FOCUS_LOST){session.input().set_focused(false);textEvents.reset();}
                     if(event.type==SDL_EVENT_WINDOW_FOCUS_GAINED)regain_focus(session.input());
-                    if(textActive && event.type==SDL_EVENT_TEXT_INPUT) {session.text_event({Frontend::TextEditKind::Insert,event.text.text});composition.clear();}
-                    if(textActive && event.type==SDL_EVENT_TEXT_EDITING)composition=event.edit.text;
-                    if(event.type!=SDL_EVENT_KEY_DOWN && event.type!=SDL_EVENT_KEY_UP)continue;
-                    deliver_key(session.input(),event.key,eventClock);
-                    if(!textActive || event.type!=SDL_EVENT_KEY_DOWN)continue;
-                    using K=Frontend::TextEditKind;
-                    std::optional<K> edit;
-                    switch(event.key.scancode) {
-                    case SDL_SCANCODE_LEFT:edit=K::Left;break;case SDL_SCANCODE_RIGHT:edit=K::Right;break;
-                    case SDL_SCANCODE_HOME:edit=K::Home;break;case SDL_SCANCODE_END:edit=K::End;break;
-                    case SDL_SCANCODE_BACKSPACE:if(composition.empty())edit=K::Backspace;break;
-                    case SDL_SCANCODE_DELETE:edit=K::Delete;break;
-                    case SDL_SCANCODE_RETURN:case SDL_SCANCODE_KP_ENTER:if(composition.empty())edit=K::Confirm;break;
-                    case SDL_SCANCODE_ESCAPE:if(composition.empty())edit=K::Cancel;break;
-                    case SDL_SCANCODE_A:if(event.key.mod&SDL_KMOD_CTRL)edit=K::SelectAll;break;
-                    case SDL_SCANCODE_V:if(event.key.mod&SDL_KMOD_CTRL) {
-                        char* clipboard=SDL_GetClipboardText();if(clipboard){session.text_event({K::Insert,clipboard});SDL_free(clipboard);}
-                    }break;
-                    default:break;
-                    }
-                    if(edit)session.text_event({*edit,{}});
+                    if(textActive && session.input().accepting_input())textEvents.consume(event,
+                        [&](Frontend::TextEditEvent edit){session.text_event(std::move(edit));},[] {
+                            char* text=SDL_GetClipboardText();std::string value=text?text:"";SDL_free(text);return value;
+                        });
+                    if(event.type==SDL_EVENT_KEY_DOWN || event.type==SDL_EVENT_KEY_UP)deliver_key(session.input(),event.key,eventClock);
                 }
                 const auto view=session.view();
                 if(view.status==SessionStatus::Closed)running=false;
@@ -388,8 +394,8 @@ int main(int argc,char** argv) {
                         const float x=32+view.ui->caret->second*cw,y=92+(view.ui->caret->first+1)*ch;
                         if(!composition.empty()) {renderer.rect(x,y,500,30,panelColor);renderer.text(x,y,composition,20,cyan);}
                         int logicalW=0,logicalH=0;SDL_GetWindowSize(window,&logicalW,&logicalH);
-                        const float scale=std::min(logicalW/1200.f,logicalH/800.f);
-                        SDL_Rect area{int((logicalW-1200*scale)/2+x*scale),int((logicalH-800*scale)/2+y*scale),std::max(1,int(400*scale)),std::max(1,int(24*scale))};
+                        const auto logical=Viewport::fit(logicalW,logicalH);
+                        SDL_Rect area{logical.screen_x(x),logical.screen_y(y),std::max(1,int(400*logical.scale)),std::max(1,int(24*logical.scale))};
                         SDL_SetTextInputArea(window,&area,0);
                     }
                     renderer.end();++frame;
@@ -401,10 +407,15 @@ int main(int argc,char** argv) {
                     if(view.board.pieces<1 || !view.board.hold.valid())throw std::runtime_error("SDL smoke failed: shared engine did not receive drop/Hold");
                     std::cerr<<"OPENGL_SMOKE_OK pieces="<<view.board.pieces<<" hold="<<view.board.hold.index()<<'\n';
                 }
-                std::this_thread::sleep_until(frameStart+std::chrono::microseconds(4167));
+                std::this_thread::sleep_until(frameStart+std::chrono::microseconds(1000000/windowConfig.frameLimit));
             }
             if(textActive)SDL_StopTextInput(window);
         }
+        if(!opt.hidden) {
+            windowConfig.maximized=(SDL_GetWindowFlags(window)&SDL_WINDOW_MAXIMIZED)!=0;
+            if(!windowConfig.maximized)SDL_GetWindowSize(window,&windowConfig.width,&windowConfig.height);
+        }
+        if(!save_window_config(".tetr/graphics.ini",windowConfig))std::cerr<<"Could not save graphical window settings.\n";
         SDL_GL_DestroyContext(gl);SDL_DestroyWindow(window);SDL_Quit();return 0;
     } catch(const std::exception& error) {
         std::cerr<<"TerMino OpenGL: "<<error.what()<<'\n';

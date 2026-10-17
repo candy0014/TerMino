@@ -1,6 +1,6 @@
-# OpenGL 第三阶段功能预览
+# OpenGL 双前端预览
 
-`tetr_gl` 已接入原应用的完整设置、地图与预设编辑器、挑战目录、Bot、本地双人、网络房间、观战和统计流程。棋盘使用 OpenGL 原生绘制，菜单和编辑器消费共享应用画布；规则、参数校验、保存和协议继续使用原实现。终端程序及全部工具保持独立构建。当前仍为迁移预览；第四阶段完成原生平台全功能与全键盘验收后统一发布。
+`tetr_gl` 已接入原应用的完整设置、地图与预设编辑器、挑战目录、Bot、本地双人、网络房间、观战和统计流程。棋盘使用 OpenGL 原生绘制，菜单和编辑器消费共享应用画布；规则、参数校验、保存和协议继续使用原实现。终端程序及全部工具保持独立构建。当前仍为迁移预览；四组合本地打包和自动检查已接入，原生平台全功能与全键盘实机验收待完成，本轮不发行。
 
 ## 分别构建
 
@@ -86,8 +86,18 @@ SDL_VIDEO_DRIVER=offscreen ./build-opengl-linux/tetr_gl \
 
 仍保留过渡性终端呈现适配库以运行原共享应用；图形会话关闭 ANSI 输出，以值画布承载复杂界面，没有解析终端转义序列或复制游戏规则。应用控制器仍有阻塞循环；后续可逐项改为可推进调度器，不能以重构为由缩减内容。原生 Windows 输入法、DPI、真实显卡和 Linux 桌面设备体验的完整验收属于第四阶段，Wine 不代表原生 Windows 验收通过。
 
-`cmake --install <build-dir> --prefix <empty-dir> --component OpenGLPreview` 安装图形程序、字体、说明和许可证，不复制个人 `.tetr`。正式四组合打包、CI 实际执行和统一发布在第四阶段完成。
+`cmake --install <build-dir> --prefix <empty-dir> --component OpenGLPreview` 安装图形程序、字体、说明和许可证，不复制个人 `.tetr`。四组合独立候选包改用 `tools/package_frontends.py` 和 `ClientTerminal` / `ClientOpenGL` 组件；说明见 [验收与打包](FRONTEND_ACCEPTANCE.md)。远程 CI 本轮未触发，正式发行等待实机验收与明确发行指令。
 
 ## 鸣谢
 
 SDL3 提供窗口与事件，glad2 2.0.8 提供 OpenGL 加载代码，FreeType 提供字体引擎，Noto Sans CJK SC 提供默认中文字形。Portions of this software are copyright © The FreeType Project (https://freetype.org). All rights reserved. 原许可证随 `resources/licenses/`、`resources/fonts/` 安装；glad 生成参数见 `third_party/glad/README.md`。
+
+## 窗口配置与运行目录
+
+`.tetr/graphics.ini` 保存窗口尺寸、最大化、垂直同步和显示帧率上限。可用
+`--window-size 1280x800 --frame-limit 240 --no-vsync` 覆盖，默认显示上限为 240 Hz，
+不改变规则时钟。输入法组合期间，方向、删除、确认和取消按键交由输入法处理。
+
+两端客户端共用 `.tetr/client.lock` 的操作系统排他锁；同目录已有客户端时拒绝启动，
+进程结束（包含异常退出）后自动释放。需要多开时让各端使用独立运行目录；
+图形端可用 `--data-dir DIR`。无需删除锁文件，旧配置与回放保留。

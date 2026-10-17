@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "viewport.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <filesystem>
@@ -80,9 +81,8 @@ void Renderer::begin(int width,int height) {
         glTexImage2D(GL_TEXTURE_2D,0,GL_R8,atlasSize,atlasSize,0,GL_RED,GL_UNSIGNED_BYTE,empty.data());
         glyph(U'?');
     }
-    const float scale=std::min(width/1200.f,height/800.f);
-    const int w=static_cast<int>(1200*scale),h=static_cast<int>(800*scale);
-    glViewport((width-w)/2,(height-h)/2,w,h);
+    const auto view=Viewport::fit(width,height);
+    glViewport(view.x,view.y,view.width,view.height);
     glClearColor(.018f,.03f,.055f,1);glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(program_);glUniform2f(glGetUniformLocation(program_,"viewport"),1200,800);
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,atlas_);

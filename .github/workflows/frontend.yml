@@ -19,11 +19,19 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            preset: both-linux
+            preset: terminal-linux
+            frontend: terminal
+          - os: ubuntu-24.04
+            preset: opengl-linux
+            frontend: opengl
+          - os: windows-2022
+            preset: terminal-windows
+            frontend: terminal
           - os: windows-2022
             preset: opengl-windows
+            frontend: opengl
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -46,14 +54,16 @@ jobs:
       - name: Shared session and frontend regressions
         run: ctest --preset ${{ matrix.preset }} --output-on-failure -j 2
       - name: Linux real SDL and OpenGL smoke
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.frontend == 'opengl'
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
           SDL_VIDEO_DRIVER: x11
         run: |
-          xvfb-run -a ./build-both-linux/tetr_gl --data-dir "$RUNNER_TEMP/termino-gl-smoke" --smoke-test --screenshot "$RUNNER_TEMP/termino-gl-smoke.bmp"
-      - name: Install clean preview resources
-        run: cmake --install build-${{ matrix.preset }} --config Release --prefix build-preview-install --component OpenGLPreview
+          xvfb-run -a ./build-${{ matrix.preset }}/tetr_gl --data-dir "$RUNNER_TEMP/termino-gl-smoke" --smoke-test --screenshot "$RUNNER_TEMP/termino-gl-smoke.bmp"
+      - name: Validate clean client installation
+        run: python tools/package_frontends.py --build-dir build-${{ matrix.preset }} --frontend ${{ matrix.frontend }} --no-build --output-dir dist
+      - name: Inspect candidate files and manifests
+        run: python tools/check_frontend_distribution.py dist --structure-only
 
   headless:
     strategy:

@@ -74,3 +74,22 @@ git worktree add --detach ../termino-phase2 migration/opengl-preview-20261017
 完成后的完整历史备份为 `build-migration-backups/phase3-20261017/frontend-parity.bundle`。
 用 `git bundle verify` 校验后可在其他目录恢复。本地迁移标签和提交不表示 GitHub
 已同步或已发布；正式四组合发行仍按第四阶段验收。
+
+
+## 第四阶段检查点
+
+第四阶段开始时 `main` 为 `cd5b9f47b554de9ba495c7238ae6f01fd5c9afda`，第三阶段
+标签为 `migration/frontend-parity-20261017`。执行前 Git 信息和 195 个本地数据文件的
+大小及 SHA256 已记录到 `build-migration-backups/phase4-20261017/`。
+
+第四阶段以独立提交保存，完成标签为 `migration/frontend-validation-20261017`。
+仅撤销本阶段使用 `git revert migration/frontend-validation-20261017`；只读对照第三阶段：
+
+```sh
+git worktree add --detach ../termino-phase3 migration/frontend-parity-20261017
+```
+
+完整历史备份位于 `build-migration-backups/phase4-20261017/frontend-validation.bundle`，
+可用 `git bundle verify` 检查。候选包与校验报告位于 `dist/phase4-local/`；完整日志与
+个人数据核对记录位于本阶段备份目录。以上内容及提交、标签均只保存在本地，
+未推送 GitHub，也未创建发行版。还原源码不需要删除或替换个人 `.tetr`。

@@ -1,4 +1,4 @@
-name: Test and release
+name: Validate and package frontend candidates
 
 on:
   push:
@@ -7,9 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to build and publish
+        description: Existing version tag to validate and package
         required: true
         type: string
+      publish:
+        description: Explicitly publish after native acceptance (default is packaging only)
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -42,27 +47,35 @@ jobs:
         run: |
           python -m unittest discover -s tests -p '*test.py' -v
           node tests/moch_pressure_test.cjs
+      - name: Linux graphics build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev libwayland-dev libxkbcommon-dev libegl1-mesa-dev libgl1-mesa-dev xvfb
       - name: Configure Linux
         if: runner.os == 'Linux'
-        run: cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DTETR_PORTABLE_BUILD=ON -DTETR_PORTABLE_RESET_SETTINGS=ON
+        run: cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DTETR_PORTABLE_BUILD=ON -DTETR_PORTABLE_RESET_SETTINGS=ON -DTETR_BUILD_OPENGL=ON -DTETR_PORTABLE_FULL_STATIC=OFF -DTETR_GRAPHICS_BUNDLED_DEPS=ON
       - name: Configure Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           'C:\Program Files\Git\usr\bin' | Out-File -FilePath $env:GITHUB_PATH -Append
-          cmake -S . -B build-release -A x64 -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DTETR_PORTABLE_BUILD=ON -DTETR_PORTABLE_RESET_SETTINGS=ON
+          cmake -S . -B build-release -A x64 -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DTETR_PORTABLE_BUILD=ON -DTETR_PORTABLE_RESET_SETTINGS=ON -DTETR_BUILD_OPENGL=ON -DTETR_PORTABLE_FULL_STATIC=OFF -DTETR_GRAPHICS_BUNDLED_DEPS=ON
       - name: Build all targets
         run: cmake --build build-release --config Release --parallel 2
       - name: Full native CTest suite
         run: ctest --test-dir build-release -C Release --output-on-failure --parallel 2 --output-junit test-results.xml
-      - name: Package Linux
+      - name: Package both clients from the tested build
+        run: python tools/package_frontends.py --build-dir build-release --frontend both --no-build --output-dir dist
+      - name: Linux hidden packaged client checks
         if: runner.os == 'Linux'
-        run: bash package.sh --build-dir build-release --parallel 2
-      - name: Package Windows
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          SDL_VIDEO_DRIVER: x11
+        run: xvfb-run -a python tools/check_frontend_distribution.py dist --report build-release/package-tests.json
+      - name: Windows packaged CLI checks
         if: runner.os == 'Windows'
-        run: .\package.ps1 -BuildDirectory build-release -Parallel 2
-      - name: Check archive and native game/replay/server
-        run: python tools/check_public_distribution.py dist
+        run: python tools/check_frontend_distribution.py dist --skip-graphics --report build-release/package-tests.json
       - name: Upload release assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -85,7 +98,7 @@ jobs:
           retention-days: 14
 
   publish:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
     needs: build
     runs-on: ubuntu-24.04
     permissions:
@@ -102,6 +115,10 @@ jobs:
           pattern: release-*
           merge-multiple: true
           path: release-assets
+      - name: Verify all four candidates use the selected source
+        run: python tools/check_frontend_distribution.py release-assets --matrix --structure-only
+      - name: Require completed native acceptance
+        run: python tools/check_frontend_acceptance.py docs/acceptance/native.json --commit $(git rev-parse HEAD)
       - name: Publish latest release
         env:
           GH_TOKEN: ${{ github.token }}

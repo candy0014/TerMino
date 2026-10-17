@@ -21,3 +21,7 @@ gameplay work. The baseline and recovery instructions are in
   test windows on the user's desktop; smoke/frame-limited runs are hidden.
 - Keep migration changes reviewable and independently reversible. Do not claim a
   graphical build or feature exists while it is still planned.
+- Package clients with `tools/package_frontends.py` and audit unpacked archives
+  with `tools/check_frontend_distribution.py`; preserve terminal FT7/server tools.
+  Native evidence in `docs/acceptance/native.json` must remain pending until
+  actually checked. No GitHub publication was authorized for phase four.

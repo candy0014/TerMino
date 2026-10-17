@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "platform": "@CMAKE_SYSTEM_NAME@",
+  "architecture": "@TETR_CLIENT_ARCH@",
+  "frontend": "@TETR_CLIENT_FRONTEND@",
+  "source_commit": "@TETR_CLIENT_COMMIT@",
+  "source_dirty": @TETR_CLIENT_DIRTY@,
+  "compiler": "@CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@",
+  "linux_full_static": @TETR_CLIENT_STATIC@,
+  "initial_data": "built-in defaults; no personal files",
+  "graphics_minimum": "OpenGL 3.3 Core for opengl frontend"
+}

@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "source_commit": null,
+  "note": "Pending native physical keyboard, IME, DPI and GPU acceptance. Wine and injected events do not establish these results.",
+  "cases": [
+    {"platform": "Linux", "frontend": "terminal", "environment": "native", "status": "pending", "checks": {}, "evidence": []},
+    {"platform": "Linux", "frontend": "opengl", "environment": "native", "status": "pending", "checks": {}, "evidence": []},
+    {"platform": "Windows", "frontend": "terminal", "environment": "native", "status": "pending", "checks": {}, "evidence": []},
+    {"platform": "Windows", "frontend": "opengl", "environment": "native", "status": "pending", "checks": {}, "evidence": []}
+  ]
+}

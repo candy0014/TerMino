@@ -70,11 +70,22 @@ ctest --preset terminal-linux
 
 无窗口、无终端输入依赖的核心与视图检查使用 `frontend-headless-linux` / `frontend-headless-windows`。
 单独构建服务端可配置 `-DTETR_BUILD_TERMINAL=OFF -DTETR_BUILD_SERVER=ON`。
-OpenGL 第三阶段预览 `tetr_gl` 已接入完整共享设置、地图/预设编辑器、挑战、Bot、双人、房间/观战和统计流程。
+OpenGL 预览 `tetr_gl` 已接入完整共享设置、地图/预设编辑器、挑战、Bot、双人、房间/观战和统计流程。
 使用 `./compile.sh --frontend opengl` / `--frontend both`，Windows 使用
 `./compile.ps1 -Frontend opengl` / `-Frontend both`；不带参数仍构建完整终端版。
-终端全部内容与工具持续保留；图形版全键盘操作，默认随包提供中文字体，原生平台完整验收和统一发行在第四阶段完成。
+终端全部内容与工具持续保留；图形版全键盘操作，默认随包提供中文字体。第四阶段已补齐四组合 CI、本地独立打包、窗口配置及数据目录锁；原生设备与人工体验验收仍待完成。
 依赖、预设、键盘操作、数据隔离和运行说明见 [图形预览说明](docs/OPENGL_PREVIEW.md)。
+
+使用 CMake 3.21+ 和 Python 3.12+ 可分别制作默认初始数据的本地候选包：
+
+```sh
+python tools/package_frontends.py --preset terminal-linux
+python tools/package_frontends.py --preset opengl-linux
+# Windows 使用 terminal-windows / opengl-windows；MinGW 使用 *-windows-mingw
+```
+
+`both-linux` / `both-windows` 一次构建并输出两个独立包。当前不向 GitHub 发行，
+包清单、完整性检查和实机待验项见 [双前端验收](docs/FRONTEND_ACCEPTANCE.md)。
 
 ## 默认操作
 

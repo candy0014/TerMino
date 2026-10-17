@@ -71,6 +71,7 @@ target_include_directories(tetr_headers INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/in
 
 
 add_library(tetr_util STATIC
+    src/util/runtime_directory_lock.cpp
     src/util/numeric.cpp
     src/util/text_codec.cpp
     src/util/terminal_text.cpp
@@ -140,6 +141,15 @@ if(BUILD_TESTING)
         target_compile_options(frontend_ui_test PRIVATE -UNDEBUG)
     endif()
     set_tests_properties(frontend_ui PROPERTIES TIMEOUT 10)
+    add_executable(runtime_directory_lock_test tests/runtime_directory_lock_test.cpp)
+    target_link_libraries(runtime_directory_lock_test PRIVATE tetr_util)
+    add_test(NAME runtime_directory_lock COMMAND runtime_directory_lock_test)
+    if(MSVC)
+        target_compile_options(runtime_directory_lock_test PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(runtime_directory_lock_test PRIVATE -UNDEBUG)
+    endif()
+    set_tests_properties(runtime_directory_lock PROPERTIES TIMEOUT 15)
 endif()
 
 if(TETR_BUILD_TERMINAL OR TETR_BUILD_OPENGL OR TETR_BUILD_SERVER)
@@ -656,6 +666,7 @@ endif()
 if(TETR_BUILD_OPENGL)
     include(cmake/OpenGLFrontend.cmake)
 endif()
+include(cmake/ClientDistribution.cmake)
 
 if(TETR_PORTABLE_BUILD)
     if(TETR_BUILD_TERMINAL)

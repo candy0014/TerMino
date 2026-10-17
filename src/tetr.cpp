@@ -15,6 +15,7 @@
 #include "tetr/replay/session_state.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/config/user_config.h"
+#include "tetr/util/runtime_directory_lock.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -57,6 +58,8 @@ int main(int argc, char* argv[]) {
             playerTwoBindings = argv[i];
         }
     }
+    Util::RuntimeDirectoryLock directoryLock(".tetr/client.lock");
+    if(!directoryLock.acquired()) {std::fprintf(stderr,"TerMino: %s\n",directoryLock.error().c_str());return 3;}
     Runtime::SessionState session;
     Runtime::RuntimeServices runtimeServices;
     Runtime::GameContext context(session, runtimeServices);

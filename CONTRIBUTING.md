@@ -23,3 +23,15 @@ Runtime/Rules 保持纯语义边界。`tetr_presentation` 和 `tetr/frontend` �
 图形测试使用隐藏窗口或离屏环境，不在用户桌面显示测试界面。`--smoke-test`、`--frames N` 已默认隐藏，其他自动化运行必须显式使用 `--hidden` 或隔离显示服务。
 
 正式版本使用同一标签和提交构建 Linux/Windows 的终端与 OpenGL 包；全部验证通过后统一发布。图形版未覆盖终端全部内容前只能作为预览版分发。
+
+
+候选包统一使用 `tools/package_frontends.py`（CMake 3.21+、Python 3.12+），由固定
+`ClientTerminal` / `ClientOpenGL` 安装组件生成。保持终端包中的 `tetr_ft7` 和可选服务端；
+不复制本地 `.tetr` 或 `TETR_PORTABLE_DATA_DIR`。修改共享构建或打包清单后，运行
+Python 分发回归与解压包检查；四包应对应同一干净提交。不要复用另一提交的构建信息。
+
+原生体验记录保存在 `docs/acceptance/native.json`，检查器为
+`tools/check_frontend_acceptance.py`；输入法、DPI、实际设备或全键盘人工项未完成时保留
+`pending`。CI 配置不能替代实际执行。发行 workflow 默认只生成候选包，显式发行仍需
+通过原生记录门槛。第四阶段本轮只做本地工作，不推送、上传或向 GitHub 发行。
+完整清单及命令见 [验收文档](docs/FRONTEND_ACCEPTANCE.md)。
