@@ -1,0 +1,103 @@
+name: Publish validated preview artifacts
+
+on:
+  push:
+    branches: ['release-publish/**']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tested preview tag
+        required: true
+        type: string
+      run_id:
+        description: Release workflow run with all three successful build jobs
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select already validated source and artifacts
+        id: selection
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_RUN: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          tag="$INPUT_TAG"
+          run="$INPUT_RUN"
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            [[ "$GITHUB_REF_NAME" =~ ^release-publish/(v[0-9][A-Za-z0-9._-]*-preview\.[0-9]+)/([0-9]+)$ ]] || exit 2
+            tag="${BASH_REMATCH[1]}"
+            run="${BASH_REMATCH[2]}"
+          fi
+          [[ "$tag" =~ ^v[0-9][A-Za-z0-9._-]*-preview\.[0-9]+$ && "$run" =~ ^[0-9]+$ ]] || exit 2
+          source=$(git rev-parse --verify "refs/tags/$tag^{commit}")
+          gh api "repos/$GH_REPO/actions/runs/$run" > "$RUNNER_TEMP/source-run.json"
+          gh api "repos/$GH_REPO/actions/runs/$run/jobs?per_page=100" > "$RUNNER_TEMP/source-jobs.json"
+          python - "$source" "$RUNNER_TEMP/source-run.json" "$RUNNER_TEMP/source-jobs.json" <<'PY'
+          import json
+          import sys
+          source, run_file, jobs_file = sys.argv[1:]
+          with open(run_file) as file:
+              run = json.load(file)
+          with open(jobs_file) as file:
+              jobs = json.load(file)['jobs']
+          assert run['head_sha'] == source and run['path'] == '.github/workflows/release.yml'
+          for name in ('android', 'build (ubuntu-24.04)', 'build (windows-2022)'):
+              matching = [job for job in jobs if job['name'] == name]
+              assert len(matching) == 1 and matching[0]['conclusion'] == 'success', name
+          print('Both native desktop suites, package checks and Android audit passed for', source)
+          PY
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.selection.outputs.run }}
+          pattern: release-*
+          merge-multiple: true
+          path: build-publish/download
+      - name: Canonicalize approved default libraries without rebuilding binaries
+        env:
+          SOURCE_COMMIT: ${{ steps.selection.outputs.source }}
+        run: python tools/normalize_frontend_defaults.py --input build-publish/download --output build-publish/assets --source-commit "$SOURCE_COMMIT"
+      - name: Verify all archive files, source revisions and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/check_frontend_distribution.py build-publish/assets --matrix --structure-only
+          (cd build-publish/assets && sha256sum --check *.sha256)
+      - name: Publish tested preview
+        shell: bash
+        env:
+          TAG: ${{ steps.selection.outputs.tag }}
+          SOURCE_RUN: ${{ steps.selection.outputs.run }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/preview-notes.txt"
+          cp "docs/releases/$TAG.txt" "$notes"
+          printf '\nWindows 默认地图/预设统一使用仓库 LF 换行；二进制与已通过原生 CI 的验证件一致。\n构建与测试：https://github.com/%s/actions/runs/%s\n' "$GH_REPO" "$SOURCE_RUN" >> "$notes"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" build-publish/assets/* --clobber
+            gh release edit "$TAG" --prerelease --latest=false --notes-file "$notes"
+          else
+            gh release create "$TAG" build-publish/assets/* --verify-tag --prerelease --latest=false \
+              --title "TerMino $TAG" --notes-file "$notes"
+          fi
