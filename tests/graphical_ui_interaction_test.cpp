@@ -8,17 +8,22 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <thread>
 namespace TetrTests::graphical_ui_interaction_test {
 namespace {
 using namespace std::chrono_literals;
+unsigned waitSequence=0;
 template<class P> Graphical::SessionView wait(Graphical::Session& s,P predicate) {
+    const auto sequence=++waitSequence;
     const auto end=std::chrono::steady_clock::now()+5s;
     while(std::chrono::steady_clock::now()<end) {
         const auto v=s.view();if(predicate(v))return v;
         assert(v.status!=Graphical::SessionStatus::Error);std::this_thread::sleep_for(2ms);
     }
-    throw std::runtime_error("UI interaction timed out");
+    const auto view=s.view();
+    throw std::runtime_error("UI interaction wait "+std::to_string(sequence)+" timed out: status="+
+        std::to_string(int(view.status))+" ui="+(view.ui?view.ui->metadata.id:"none"));
 }
 Graphical::SessionView page(Graphical::Session& s,const std::string& id) {
     return wait(s,[&](const auto& v){return v.ui && v.ui->metadata.id==id;});

@@ -257,6 +257,7 @@ void RelayServer::flush_mini_boards(Room& room,Clock::time_point now) {
         if(now-room.lastMiniBatch[peer]<interval)continue;
         if(room.lastMiniBatch[peer]==Clock::time_point{} || now-room.lastMiniBatch[peer]>=interval*2)room.lastMiniBatch[peer]=now;
         else room.lastMiniBatch[peer]+=interval;
+        const auto batchTime=room.lastMiniBatch[peer];
         const std::size_t start=room.miniBatchCursor[peer]%mini.size(),count=std::min<std::size_t>(3,mini.size()-start);
         room.miniBatchCursor[peer]=(start+count)%mini.size();
         std::vector<std::string> events;events.reserve(count);
@@ -264,9 +265,15 @@ void RelayServer::flush_mini_boards(Room& room,Clock::time_point now) {
             const auto& view=*mini[(start+i)%mini.size()];const auto& cached=room.miniBoards[view.slot];if(!cached)continue;
             const auto last=room.lastMiniForward[view.slot][peer];
             const auto frameInterval=std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1./view.fps));
-            if(now-last<frameInterval)continue;
+            // A maximum-rate view already gets one slot per batch cycle.
+            // Gating it again on the current wall clock can skip a whole
+            // cycle when this poll is slightly earlier than the prior one.
+            // Slower views share the batch's scheduled clock so poll jitter
+            // cannot change their independent frame-rate phase either.
+            if(view.fps<fps && batchTime-last<frameInterval)continue;
             if(room.miniForwardSequence[view.slot][peer]==cached->sequence && now-last<std::chrono::seconds(1))continue;
-            room.lastMiniForward[view.slot][peer]=last==Clock::time_point{} || now-last>=frameInterval*2?now:last+frameInterval;
+            room.lastMiniForward[view.slot][peer]=view.fps==fps || last==Clock::time_point{} || batchTime-last>=frameInterval*2?
+                batchTime:last+frameInterval;
             room.miniForwardSequence[view.slot][peer]=cached->sequence;
             auto& projections=room.miniProjections[view.slot];
             const auto dimensions=std::make_pair(view.columns,view.rows);

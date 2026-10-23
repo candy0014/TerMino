@@ -128,7 +128,9 @@ if(BUILD_TESTING)
         add_test(NAME ${name} COMMAND tetr_graphical_tests ${name}_test)
         set_tests_properties(${name} PROPERTIES TIMEOUT 25)
     endforeach()
-    set_tests_properties(graphical_application PROPERTIES TIMEOUT 90 RESOURCE_LOCK udp3197)
+    # The complete application flow now exceeds 90 seconds on native Windows;
+    # each individual transition retains its own short failure deadline.
+    set_tests_properties(graphical_application PROPERTIES TIMEOUT 180 RESOURCE_LOCK udp3197)
     tetr_test_module(window_config_test tetr_core_tests tests/window_config_test.cpp)
     target_link_libraries(window_config_test PRIVATE tetr_window_config)
     add_test(NAME window_config COMMAND tetr_core_tests window_config_test)

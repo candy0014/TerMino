@@ -19,11 +19,16 @@
 namespace TetrTests::room_replay_graphical_test {
 namespace {
 using namespace std::chrono_literals;
+unsigned waitSequence=0;
 template<class Predicate> Graphical::SessionView wait(Graphical::Session& s,Predicate ready) {
+    const auto sequence=++waitSequence;
     const auto deadline=std::chrono::steady_clock::now()+6s;
     for(;;) {
         const auto view=s.view();if(ready(view))return view;
         if(view.status==Graphical::SessionStatus::Error)std::cerr<<view.message<<'\n';
+        if(std::chrono::steady_clock::now()>=deadline)
+            std::cerr<<"Room replay wait "<<sequence<<": status="<<int(view.status)
+                <<" position="<<view.replayPosition<<" ui="<<(view.ui?view.ui->metadata.id:"none")<<'\n';
         assert(view.status!=Graphical::SessionStatus::Error && std::chrono::steady_clock::now()<deadline);
         std::this_thread::sleep_for(5ms);
     }
