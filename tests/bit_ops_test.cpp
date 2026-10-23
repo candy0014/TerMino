@@ -3,7 +3,8 @@
 #include <cassert>
 #include <cstdint>
 
-int main() {
+namespace TetrTests::bit_ops_test {
+int run(int argc,char** argv) {
     for (std::uint32_t value = 0; value <= 0xffffu; ++value) {
         int bits = 0;
         int zeros = 32;
@@ -24,4 +25,6 @@ int main() {
     assert(Util::popcount32(0xffffffffu) == 32);
     assert(Util::popcount64(0xffffffffffffffffull) == 64);
     assert(Util::popcount64(0) == 0);
+    return 0;
 }
+} // namespace TetrTests::bit_ops_test

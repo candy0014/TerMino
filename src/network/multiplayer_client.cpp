@@ -65,7 +65,8 @@ void reset_multiplayer_state(NetworkServices& n) {
     n.countdownBestRtt=std::chrono::seconds(15);n.lastCountdownProbe={};
     n.deliveredAttack=n.receivedAttack=0;n.playerSetups.clear();n.playerInbox.clear();n.peerTimelines.clear();
     n.incomingAttacks.clear();n.outgoingAttacks.clear();n.actualAttackTargets.clear();n.localPlayerSetup.clear();n.lastAttackSend={};n.peerSnapshots.clear();n.peerTurns.clear();
-    n.peerMiniBoards.clear();n.boardBudget.reset();n.boardViews={};n.lastBoardViews.clear();n.lastBoardViewSend={};n.lastMiniSend={};n.lastMiniSample={};n.lastMiniFrame.reset();
+    n.peerMiniBoards.clear();n.peerFieldVisibility.clear();n.lastFieldVisibility.clear();n.lastFieldVisibilitySend={};
+    n.boardBudget.reset();n.boardViews={};n.lastBoardViews.clear();n.lastBoardViewSend={};n.lastMiniSend={};n.lastMiniSample={};n.lastMiniFrame.reset();
     n.forceFullCheckpoint=false;n.boardViewsV2Confirmed=false;n.miniUpdateBudget=240;
     n.visualRtts={};n.visualRttSamples=0;
     n.lastVisualRateChange={};n.visualGoodSince={};n.miniSequence=n.miniFramesSent=n.miniBytesSent=0;
@@ -188,6 +189,9 @@ bool handle_multiplayer_message(NetworkServices& n,std::string_view wire) {
             return true;
         }
         if(routed->epoch!=n.matchEpoch || routed->slot==n.roomPlayerIndex) return true;
+        if(const auto visibility=decode_field_visibility(routed->data)) {
+            n.peerFieldVisibility[routed->slot]=*visibility;return true;
+        }
         if(routed->data.rfind("!mini-v1;",0)==0) {
             // A resize/focus change can leave old visual packets in flight.
             // Drop those before decoding once the viewer has unsubscribed.
@@ -212,7 +216,7 @@ bool handle_multiplayer_message(NetworkServices& n,std::string_view wire) {
             const auto view=std::string_view(routed->data);
             const auto width=Util::Text::parse_integer<int>(view.substr(10,a-10)),height=Util::Text::parse_integer<int>(view.substr(a+1,b-a-1));
             const auto next=Util::Text::parse_integer<int>(view.substr(b+1,d-b-1));
-            if(!width || *width<1 || *width>100 || !height || *height<1 || *height>100 || !next || *next<0 || *next>100) return true;
+            if(!width || *width<1 || *width>100 || !height || *height<0 || *height>100 || !next || *next<0 || *next>100) return true;
             auto& setup=n.playerSetups[routed->slot];setup.width=*width;setup.visibleHeight=*height;setup.nextCount=*next;
             routed->data=routed->data.substr(d+1);
         }

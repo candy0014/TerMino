@@ -21,6 +21,7 @@
 #include <iostream>
 #include <sstream>
 
+namespace TetrTests::replay_garbage_timing_test {
 namespace {
 struct Capture {
     std::ostringstream output;
@@ -135,7 +136,7 @@ Result audit(const std::string& data,bool backlog) {
     return {locks,b.field,p.garbage.random};
 }
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     Capture output;
     rule_clock_follows_applied_events();
     if (argc>1) {
@@ -147,4 +148,6 @@ int main(int argc,char** argv) {
             for (int x=0;x<ordinary.field.width();++x) assert(ordinary.field.cell(y,x)==backlog.field.cell(y,x));
         std::cerr<<"Recorded replay: "<<ordinary.locks<<" legal locks; exact/backlogged geometry and ANSI rendering agree\n";
     }
+    return 0;
 }
+} // namespace TetrTests::replay_garbage_timing_test

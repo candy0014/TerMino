@@ -7,7 +7,7 @@ param(
     [ValidateRange(1, 256)]
     [int]$Parallel = 2,
     [ValidateSet("terminal", "opengl", "both")]
-    [string]$Frontend = "terminal",
+    [string]$Frontend = "both",
     [switch]$Test
 )
 
@@ -20,11 +20,7 @@ try {
         }
     }
     if (-not $BuildDirectory) {
-        $BuildDirectory = if ($Generator -eq "MinGW Makefiles" -or
-            (-not $Generator -and $env:CMAKE_GENERATOR -eq "MinGW Makefiles")) {
-            "build-windows-mingw"
-        } else { "build-windows" }
-        if ($Frontend -ne "terminal") { $BuildDirectory += "-$Frontend" }
+        $BuildDirectory = "build"
     }
     $configureArguments = @("-S", $PSScriptRoot, "-B", $BuildDirectory,
         "-DCMAKE_BUILD_TYPE=$Configuration", "-DBUILD_TESTING=$(if ($Test) { 'ON' } else { 'OFF' })",

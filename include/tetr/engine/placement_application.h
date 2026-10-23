@@ -59,6 +59,8 @@ struct PlacementApplicationConfig {
     int pieceFamily = 0;
     int pieceColumn = 0;
     bool stackedEdgeI = false;
+    // Forecasts use the lower bound; the host supplies an independent QP roll.
+    double qpBlightedRoundingRoll = 1.0;
 };
 
 struct PlacementPreOffsetEffects {

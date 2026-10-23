@@ -8,6 +8,7 @@
 #include <sstream>
 #include <tuple>
 
+namespace TetrTests::bot_chatgpt_moch_multi_step_test {
 namespace B = Bot_chatgpt;
 static void set_row(m_tetris::TetrisMap& map,int y,unsigned row) {
     map.row[y]=row;
@@ -30,7 +31,7 @@ static void near(double actual,double expected) {
     assert(std::abs(actual-expected)<=std::max(1e-7,16*std::numeric_limits<double>::epsilon()*scale));
 }
 
-int main(int argc,char**argv) {
+int run(int argc,char** argv) {
     using Engine=m_tetris::TetrisEngine<rule_tetr_srs_plus::TetrisRule,B::Evaluation,B::Search>;
     Engine geometry;assert(geometry.prepare(10,40));const auto*context=geometry.context().get();
     B::Evaluation baseline;B::MochMultiStepEvaluation candidate;baseline.init(context);candidate.init(context);
@@ -95,4 +96,6 @@ int main(int argc,char**argv) {
     assert(checks>1000&&pcs>0&&spins>0&&rises>0&&deaths>0&&absorbed>0&&releases>0&&holds>0);
     std::cout<<"moch multi-step transitions="<<checks<<" pc="<<pcs<<" spin="<<spins<<" rise="<<rises<<" death="<<deaths
         <<" absorbed="<<absorbed<<" b2b_release="<<releases<<" hold="<<holds<<" max_formula_rounding="<<max_formula_error<<'\n';
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_moch_multi_step_test

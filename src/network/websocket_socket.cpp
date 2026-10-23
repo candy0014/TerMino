@@ -96,7 +96,9 @@ struct WebSocketSocket::Impl {
             curl_easy_setopt(curl.get(),CURLOPT_HEADERDATA,this);
             // System trust store on Windows (Schannel); standard CA files on
             // Linux also work with the statically linked portable TLS backend.
-#ifdef __linux__
+#ifdef __ANDROID__
+            curl_easy_setopt(curl.get(),CURLOPT_CAINFO,"ca-bundle.pem");
+#elif defined(__linux__)
             for (const auto* path : {"/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/cert.pem"}) {
                 if (std::filesystem::exists(path)) {
                     curl_easy_setopt(curl.get(), CURLOPT_CAINFO, path);

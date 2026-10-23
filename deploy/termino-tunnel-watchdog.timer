@@ -1,0 +1,11 @@
+[Unit]
+Description=Monitor TerMino tunnel connections every 15 seconds
+
+[Timer]
+OnStartupSec=30s
+OnUnitInactiveSec=15s
+AccuracySec=1s
+Unit=termino-tunnel-watchdog.service
+
+[Install]
+WantedBy=timers.target

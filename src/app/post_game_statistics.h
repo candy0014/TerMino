@@ -24,6 +24,8 @@ struct PostGameStatistics {
 };
 PostGameStatistics make_post_game_statistics(const Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player);
+Frontend::UiMetadata replay_save_metadata(const std::string& defaultName,
+    const std::string& value,std::size_t caret);
 
 enum class PostGamePage { Board, Summary, Clears, Challenges };
 class PostGameStatisticsView {

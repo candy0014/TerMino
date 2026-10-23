@@ -19,6 +19,10 @@ struct PieceLoopState {
 // Unwind the active piece/animation before replacing its referenced state.
 struct UndoRequested {};
 
+// Both frontends retain this many completed placements, plus the boundary
+// snapshot needed to restore the oldest retained placement.
+inline constexpr std::size_t kUndoPieceLimit = 256;
+
 bool undo_enabled(const Runtime::GameContext& context) noexcept;
 void begin_undo_history(Runtime::GameContext& context, PieceLoopState* loopState=nullptr);
 void capture_undo_snapshot(Runtime::GameContext& context);

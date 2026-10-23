@@ -14,7 +14,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
 #include <csignal>
 #include <termios.h>
 #include <sys/ioctl.h>
@@ -36,7 +36,7 @@ std::optional<TerminalSize> terminal_size() noexcept {
         if (columns>0 && rows>0) return TerminalSize{columns,rows};
     }
 #endif
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     winsize size{};
     if (::ioctl(STDOUT_FILENO,TIOCGWINSZ,&size)==0 && size.ws_col>0 && size.ws_row>0)
         return TerminalSize{size.ws_col,size.ws_row};
@@ -47,7 +47,7 @@ std::optional<TerminalSize> terminal_size() noexcept {
 struct TerminalSessionState {
     Input::Services* input=nullptr;
     bool focusTracking=false;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     termios originalTermios{};
     bool originalTermiosCaptured = false;
     bool alternateScreenActive = false;
@@ -86,7 +86,7 @@ std::streambuf* savedOutputBuffer = nullptr;
 std::mutex outputSuppressionMutex;
 thread_local TerminalViewportState* currentViewport=nullptr;
 
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
 constexpr char kEnterAlternateScreen[]="\x1b[?1049h";
 constexpr char kLeaveAlternateScreen[]="\x1b[?1049l";
 constexpr char kHideCursor[]="\x1b[?25l";
@@ -183,7 +183,7 @@ TerminalSession::TerminalSession(Input::Services* input):state_(std::make_unique
     if(terminalSessionActive) throw std::logic_error("only one TerminalSession may be active");
     terminalSessionActive=true;
     state_->input=input;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     if(::isatty(STDIN_FILENO) && ::tcgetattr(STDIN_FILENO,&state_->originalTermios)==0) {
         state_->originalTermiosCaptured=true;
         emergencyState.originalTermios=state_->originalTermios;
@@ -216,7 +216,7 @@ TerminalSession::TerminalSession(Input::Services* input):state_(std::make_unique
     apply_windows_game_mode(*state_);
 #endif
     if (input) {
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
         state_->focusTracking=state_->originalTermiosCaptured && ::isatty(STDOUT_FILENO);
         if (state_->focusTracking) input->start_terminal_input();
 #endif
@@ -238,7 +238,7 @@ TerminalSession::~TerminalSession(){
         std::cout.flush();
         state_->input->stop_terminal_input();
     }
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     apply_original_input_mode(*state_);
     std::cout<<kResetStyle<<kShowCursor;
     if(state_->alternateScreenActive) std::cout<<kLeaveAlternateScreen;
@@ -258,7 +258,7 @@ TerminalSession::~TerminalSession(){
     if(state_->originalInputCodePage) SetConsoleCP(state_->originalInputCodePage);
     if(state_->originalOutputCodePage) SetConsoleOutputCP(state_->originalOutputCodePage);
 #endif
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     emergencyState.originalTermiosCaptured=0;
 #endif
     terminalSessionActive=false;
@@ -266,7 +266,7 @@ TerminalSession::~TerminalSession(){
 
 void TerminalSession::begin_text_input(){
     if(!state_) return;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     if (state_->focusTracking) state_->input->set_terminal_text_input(true);
     else apply_original_input_mode(*state_);
     std::cout<<kShowCursor;
@@ -281,7 +281,7 @@ void TerminalSession::begin_text_input(){
 
 void TerminalSession::end_text_input(){
     if(!state_) return;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     if (state_->focusTracking) state_->input->set_terminal_text_input(false);
     else apply_game_input_mode(*state_);
     std::cout<<kHideCursor;
@@ -300,7 +300,7 @@ void clear_screen(){
     std::cout<<"\x1b[2J\x1b[H";
     std::fflush(stdout);
 #endif
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     std::cout<<kClearAndHome;
     std::fflush(stdout);
 #endif
@@ -314,7 +314,7 @@ void move_cursor(int row,int col){
 #ifdef _WIN32
     std::cout<<"\033["<<row+1<<";"<<col+1<<"H";
 #endif
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     std::cout<<"\x1b["<<row+1<<";"<<col+1<<"H";
 #endif
 }
@@ -324,7 +324,7 @@ void set_rgb(int wr,int wg,int wb,int br,int bg,int bb){
     std::cout<<"\033[38;2;"+std::to_string(wr)+";"+std::to_string(wg)+";"+std::to_string(wb)+"m";
     std::cout<<"\033[48;2;"+std::to_string(br)+";"+std::to_string(bg)+";"+std::to_string(bb)+"m";
 #endif
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     std::cout<<"\x1b[38;2;"+std::to_string(wr)+";"+std::to_string(wg)+";"+std::to_string(wb)+"m";
     std::cout<<"\x1b[48;2;"+std::to_string(br)+";"+std::to_string(bg)+";"+std::to_string(bb)+"m";
 #endif

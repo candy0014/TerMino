@@ -50,7 +50,7 @@ Playfield& Playfield::operator=(const Playfield& other) {
 }
 
 void Playfield::initialize(int width, int height) {
-    if (width <= 0 || width > kStorageColumns || height <= 0 || height > kStorageRows) {
+    if (width <= 0 || width > kStorageColumns || height < 0 || height > kStorageRows) {
         throw std::out_of_range("playfield dimensions exceed storage capacity");
     }
     width_ = width;

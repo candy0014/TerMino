@@ -5,6 +5,7 @@
 #include "tetr/engine/placement_board_adapter.h"
 #include "tetr/engine/placement_coordinator.h"
 #include "tetr/engine/frame_coordinator.h"
+#include "tetr/engine/frame_board_adapter.h"
 #include "tetr/engine/locked_line_clear_phase.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/replay/session_state.h"
@@ -22,11 +23,35 @@
 #include "../src/engine/garbage_rendering.h"
 
 #include <cassert>
+#include <algorithm>
 #include <cmath>
+#include <memory>
 #include <iostream>
 #include <sstream>
 
+namespace TetrTests::garbage_context_test {
 namespace {
+void danger_band_on_short_fields() {
+    auto state=std::make_unique<Runtime::SessionState>();Runtime::RuntimeServices services;
+    Runtime::GameContext context(*state,services);auto& field=state->player.gameplay.playfield;
+    for(bool legacy:{false,true})for(int height:{0,1,2,3,4,5,20}) {
+        context.config.quickPlay.legacyRules=legacy;
+        const int band=legacy?4:5;
+        field.width=10;field.visibleHeight=field.activeHeight=height;field.field.initialize(10,height);
+        assert(!Engine::make_frame_rule_config(context,{}).inDanger);
+        field.field.set_cell(-1,2,Runtime::BoardCell::garbage());
+        assert(Engine::make_frame_rule_config(context,{}).inDanger);
+        field.field.clear();
+        if(height>0) {
+            field.field.set_cell(std::min(band-1,height-1),2,Runtime::BoardCell::piece(3));
+            assert(Engine::make_frame_rule_config(context,{}).inDanger);
+        }
+        if(height>band) {
+            field.field.clear();field.field.set_cell(band,2,Runtime::BoardCell::garbage());
+            assert(!Engine::make_frame_rule_config(context,{}).inDanger);
+        }
+    }
+}
 struct Capture {
     std::ostringstream stream;
     std::streambuf* old=std::cout.rdbuf(stream.rdbuf());
@@ -739,7 +764,8 @@ void zero_duration_buffer_display() {
 }
 }
 
-int main() {
+int run(int argc,char** argv) {
+    danger_band_on_short_fields();
     replay_visibility_changes_update_existing_cells();
     reverse_invisible_clear_repaints_equal_garbage();
     multipliers_preserve_fractions_and_replay();
@@ -835,4 +861,6 @@ int main() {
     assert(timerPlayfield.field.cell(19, 3) != lockedCell);
     assert(timerPlayer.timing.timedGarbage > originalGarbageTime);
     std::cout << "garbage_context_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::garbage_context_test

@@ -6,10 +6,11 @@
 #include <cmath>
 #include <iostream>
 #include <thread>
+namespace TetrTests::room_config_burst_test {
 using namespace Network;
 using namespace std::chrono_literals;
 
-int main() {
+int run(int argc,char** argv) {
     RelayServer server(843);server.bind(3038);
     struct Peer {
         UdpSocket socket;
@@ -76,4 +77,6 @@ int main() {
     const int pacedBursts=2+static_cast<int>(std::ceil(elapsed/.025));
     std::cout<<"200 duplicate config acknowledgements: "<<after-before<<" forwarded parts in "<<elapsed<<" seconds"<<std::endl;
     assert(after-before<=4*4*pacedBursts);
+    return 0;
 }
+} // namespace TetrTests::room_config_burst_test

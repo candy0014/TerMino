@@ -10,11 +10,13 @@
 #include "tetr/rules/chain.h"
 #include "tetr/rules/opener_phase.h"
 #include "tetr/rules/garbage_queue.h"
+#include "tetr/rules/qp_post_lock.h"
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cmath>
 #include <string>
+#include <optional>
 
 namespace Bot_chatgpt {
 
@@ -49,6 +51,11 @@ public:
         Runtime::GarbageCancellationState cancellation;
         Runtime::SpinBonuses spinBonuses = Runtime::SpinBonuses::AllMiniPlus;
         Runtime::AttackRules attackRules;
+        Runtime::AllSpinMode qpAllSpin = Runtime::AllSpinMode::Disabled;
+        Rules::QPAttackModifiers qpModifiers;
+        std::optional<Runtime::QuickPlayClearOperation> qpLastOperation;
+        std::array<Piece::Type,7> pieceTypes{};
+        int projectedSolid = 0;
         std::array<std::uint16_t,40> pieceRows{};
         double elapsedSeconds = 0;
         double entryDelaySeconds = 0;
@@ -70,7 +77,9 @@ public:
 
     // Freeze weights for all alternatives in one search. Recompute only from
     // the next real root, so a leaf cannot improve its score by switching style.
+    void set_fast_terrain(bool enabled) { fastTerrain_=enabled; }
     void set_policy(const PolicyWeights& policy) { policy_ = policy; }
+    void set_terrain_capabilities(const TerrainCapabilities& capabilities) { capabilities_=capabilities;useCapabilities_=true; }
     void set_garbage_forecast(const std::vector<VisiblePacket>& packets, double secondsPerPiece) {
         forecast_.reset(packets, secondsPerPiece);
     }
@@ -85,7 +94,9 @@ public:
         result.before = &before;
         // The upstream revision needs a local empty-board guard for row[-1].
         // Handle it here as well, so this BOT is safe with a clean checkout.
-        result.shape = map.roof == 0
+        result.shape = fastTerrain_
+            ? ai_zzz::Botris::Result{fast_native_terrain(map),static_cast<int>(clear),map.count,&map}
+            : map.roof == 0
             ? ai_zzz::Botris::Result{-16000.0, static_cast<int>(clear), 0, &map}
             : terrain_.eval(ai_zzz::Botris::TetrisNodeEx(landing.node), map, before, clear);
         for (int y = 0; y < landing->height; ++y) {
@@ -137,8 +148,10 @@ public:
                 std::none_of(result.pieceRows.begin(),result.pieceRows.end(),[](auto row){return row!=0;});
         }
         const bool perfectClear = emptyField && previous.attackRules.perfectClearEnabled;
+        const bool repeatRules=result.qpAllSpin==Runtime::AllSpinMode::Enabled || result.qpAllSpin==Runtime::AllSpinMode::Reverse;
         const auto chain = Rules::update_chain({lines, landing.spin, perfectClear,
-            Runtime::AllSpinMode::Disabled, previous.b2b, previous.combo, Runtime::GarbageMode::None, previous.attackRules, halfClear});
+            repeatRules?result.qpAllSpin:Runtime::AllSpinMode::Disabled, previous.b2b, previous.combo,
+            repeatRules?Runtime::GarbageMode::QuickPlay:Runtime::GarbageMode::None, previous.attackRules, halfClear});
         Rules::AttackInput input;
         input.linesCleared = lines;
         input.spin = landing.spin;
@@ -157,6 +170,7 @@ public:
         input.spinBonuses = result.spinBonuses;
         input.attackRules = result.attackRules;
         input.halfClear = halfClear;
+        if(repeatRules) {input.garbageMode=Runtime::GarbageMode::QuickPlay;input.qp=result.qpModifiers;}
         const auto attackResult = Rules::calculate_attack(input);
         const int attack = attackResult.attack;
         result.b2b = chain.b2b;
@@ -190,15 +204,19 @@ public:
         }
 
         const double discount = std::pow(0.96, static_cast<double>(depth));
-        result.reward -= discount * 120.0 * (result.pieceTime ? 0.0 : delays);
-        result.reward += discount * (policy_.attack * attack +
-            policy_.garbageClear * garbageCleared - 40.0 * lines);
-        if (landing->status.t == 'T' && !landing.spin && !perfectClear)
-            result.reward -= 140.0 * discount;
-        if (landing->status.t == 'I' && lines > 0 && lines < 4 && !perfectClear)
-            result.reward -= 70.0 * discount;
+        result.reward += discount * placement_reward(policy_,attack,garbageCleared,lines,
+            piece_index(landing->status.t),landing.spin,perfectClear,result.pieceTime ? 0.0 : delays);
+        bool repeatDeath=false;
+        if(repeatRules) {
+            const auto repeat=Rules::evaluate_all_spin_repeat(result.qpAllSpin,result.qpLastOperation,
+                {result.pieceTypes[piece_index(landing->status.t)],lines,landing.spin,attackResult.effectiveMini});
+            result.qpLastOperation=repeat.operation;
+            result.projectedSolid+=repeat.solidGarbage;
+            result.reward-=discount*600*repeat.solidGarbage;
+            repeatDeath=repeat.solidGarbage>=20;
+        }
 
-        const double danger = std::max(0, map.roof + result.risen + std::min(8, result.incoming) - 12);
+        const double danger = std::max(0, map.roof + result.risen + result.projectedSolid + std::min(8, result.incoming) - 12);
         // A low final board must not hide dangerous intermediate positions.
         // Charge each step of the plan for exposed height, even when a later
         // attack/clear could remove that pressure. Only visible state is used.
@@ -206,6 +224,12 @@ public:
         result.value = evaluation.shape.value + result.reward +
             policy_.b2b * result.b2b + (result.b2b ? 300.0 : 0.0) -
             95.0 * danger * danger - result.pathRisk;
+        if(useCapabilities_) {
+            auto capabilities=capabilities_;
+            capabilities.narrowPieceAvailable=env.hold=='I' ||
+                (env.length && std::find(env.next,env.next+std::min<std::size_t>(3,env.length),'I')!=env.next+std::min<std::size_t>(3,env.length));
+            result.value+=capability_terrain(map.row,map.height,map.width,result.garbageHeight,capabilities);
+        }
         if (coveredEmptyWeight_ != 0)
             result.value -= coveredEmptyWeight_ * covered_empty_cells(map);
         // A live combo offers cheaper continued output/cancellation. Keep a
@@ -213,11 +237,11 @@ public:
         // low-attack setup clears. It disappears on a non-clear/empty board;
         // it never changes real attack, and is not accumulated every step.
         result.value += discount * combo_reserve(policy_, result.combo, map.count);
-        if (env.hold == 'T' || env.hold == 'I') result.value += 80;
+        if (env.hold == 'T' || env.hold == 'I') result.value += policy_.holdReserve;
         // The host has spawn-out, not an unconditional above-visible lock-out.
         // Clearing can unlock Clutch for the next spawn; HOLD uses the previous
         // piece's clear state, not the clear this candidate is about to make.
-        result.dead = previous.dead;
+        result.dead = previous.dead || repeatDeath;
         if (env.is_hold && evaluation.before &&
             !spawn_node(context_, *evaluation.before, landing->status.t,
                         previous.previousCleared, previous.risen)) result.dead = true;
@@ -226,7 +250,8 @@ public:
         } else if (map.roof + result.risen >= 40) {
             result.dead = true;
         }
-        if (result.dead) result.value -= 1e9;
+        if(repeatDeath)result.value=-1e15+std::clamp(result.reward,-1e6,1e6);
+        else if(result.dead)result.value-=1e9;
         if (depth==0) {
             const auto rotation = landing.kick ? Runtime::RotationRecord::from_kick(
                 Piece::KickIndex::from_index(landing.kick-1)) : Runtime::RotationRecord::none();
@@ -239,12 +264,15 @@ public:
 private:
     mutable std::vector<Candidate> candidates_;
     PolicyWeights policy_;
+    TerrainCapabilities capabilities_;
+    bool useCapabilities_ = false;
     GarbageForecast forecast_;
     const m_tetris::TetrisContext* context_ = nullptr;
     ai_zzz::Botris terrain_;
     // Stage 8's 80/cell candidate failed the development score gate. Keep the
     // original policy; the offline root probe explicitly tests both values.
     double coveredEmptyWeight_ = 0;
+    bool fastTerrain_ = false;
 };
 }
 

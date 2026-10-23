@@ -15,6 +15,7 @@
 #include <memory>
 #include <thread>
 
+namespace TetrTests::room_kick_test {
 struct Member {
     std::unique_ptr<Runtime::SessionState> session=std::make_unique<Runtime::SessionState>();
     Runtime::RuntimeServices services;Runtime::GameContext context{*session,services};
@@ -22,7 +23,7 @@ struct Member {
     Member(){context.attach_network(network);context.attach_user_settings(user);context.attach_input(input);}
     ~Member(){Network::disconnect_online(network);}
 };
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     using namespace Network;using namespace std::chrono_literals;
     std::unique_ptr<RelayServer> server;
     if(argc<2){server=std::make_unique<RelayServer>(1703);server->bind(3007);}
@@ -189,4 +190,6 @@ int main(int argc,char** argv) {
     interrupted=false;try{receive_lobby_signal_for(d.context,0ms);}catch(const LobbyInterrupted&){interrupted=true;}
     assert(interrupted);request(c,RoomOperation::Leave);
     std::cout<<"room_kick_test: automatic offline, own/host status restoration, battle capacity, permissions, rejoin, duplicate requests, active round and legacy clients passed; notification loss injection "<<(server?"passed locally":"skipped on public endpoint")<<"\n";
+    return 0;
 }
+} // namespace TetrTests::room_kick_test

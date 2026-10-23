@@ -1,4 +1,5 @@
 #include "input.h"
+#include <algorithm>
 #include <utility>
 #ifdef _WIN32
 #include <windows.h>
@@ -102,5 +103,35 @@ void regain_focus(Input::FocusState& input) {
     for(int scan=1;scan<SDL_SCANCODE_COUNT;++scan) if(const int key=native_key(static_cast<SDL_Scancode>(scan));key>0)
         {SDL_KeyboardEvent event{};event.scancode=static_cast<SDL_Scancode>(scan);event.down=physical[scan];event.timestamp=SDL_GetTicksNS();deliver_key(input,event,EventClock{});}
     input.set_focused(true);
+}
+void complete_input_sample(Input::FocusState& input,const EventClock& clock,std::uint64_t timestamp) {
+    input.events().complete_sample(clock.at(timestamp));
+}
+void InputSample::deliver(Input::FocusState& input,const SDL_KeyboardEvent& event,const EventClock& clock) {
+    deliver_key(input,event,clock);
+    if (!event.repeat) through_=std::max(through_,event.timestamp);
+}
+void InputSample::complete(Input::FocusState& input,const EventClock& clock) const {
+    complete_input_sample(input,clock,through_);
+}
+std::vector<PolledEvent> poll_input_events(Input::FocusState& input,const EventClock& clock,
+    const std::function<void()>& cancelPointer,bool completeSample,bool deliverKeyboard) {
+    InputSample sample;
+    std::vector<PolledEvent> events;
+    SDL_Event event;
+    while(SDL_PollEvent(&event)) {
+        const bool key=event.type==SDL_EVENT_KEY_DOWN || event.type==SDL_EVENT_KEY_UP;
+        if(cancelPointer && (key || event.type==SDL_EVENT_WINDOW_FOCUS_LOST))cancelPointer();
+        if(event.type==SDL_EVENT_WINDOW_FOCUS_LOST)input.set_focused(false);
+        if(event.type==SDL_EVENT_WINDOW_FOCUS_GAINED) {
+            if(deliverKeyboard)regain_focus(input);else input.set_focused(true);
+        }
+        // Frontend-local editors consume presses themselves. Keep releases so
+        // keys held before opening the editor cannot remain suppressed forever.
+        if(key && (deliverKeyboard || !event.key.down))sample.deliver(input,event.key,clock);
+        events.push_back({event,input.accepting_input()});
+    }
+    if(completeSample)sample.complete(input,clock);
+    return events;
 }
 }

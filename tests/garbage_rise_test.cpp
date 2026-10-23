@@ -24,6 +24,7 @@
 #include <iostream>
 #include <sstream>
 
+namespace TetrTests::garbage_rise_test {
 namespace {
 using Runtime::Duration;
 struct Capture {
@@ -166,10 +167,12 @@ void autoplay_search_keeps_visible_pose_during_rise() {
         { Capture c; paint(r,piece,movement,painted); screen.feed(c.str()); }
         Engine::AutoplayCarryState carry;
         if (continuation) {
-            carry.selectedPieceType=piece.type(); carry.pose={{0,1},Runtime::Rotation{}};
+            carry.selectedPieceType=piece.type();carry.fieldShift=r.player.gameplay.playfield.garbageHeight;
+            carry.pose={{0,1},Runtime::Rotation{}};
             while (piece.can_place(carry.pose.translated(1,0),r.field)) ++carry.pose.position.row;
             r.at(.1);
         }
+        r.player.timing.autoplay=r.context.real_now()-Duration::from_seconds(1);
         { Capture c;
           const auto result=Engine::run_autoplay_step(r.context,r.field,piece,r.player,movement,carry,
               continuation,pps,false,Runtime::FoolMode::Disabled,Runtime::GravityInterval::disabled(),
@@ -177,18 +180,19 @@ void autoplay_search_keeps_visible_pose_during_rise() {
               [&](Piece::Pose& pose,Runtime::Rotation rotation,Piece::KickIndex& kick) {
                   return piece.try_rotate(pose,rotation,r.field,kick);
               },[] { return Rules::PlayResult::ContinueFrame; });
-          if (result.signal!=Rules::PlayResult::ContinueFrame || result.hardDrop || result.locked)
-              std::cerr<<"Autoplay rise case: pps="<<pps<<" hold="<<continuation<<" landed="<<landed
-                       <<" now="<<r.context.now().seconds()<<" pending="<<r.pending()
-                       <<" signal="<<static_cast<int>(result.signal)<<" drop="<<result.hardDrop
-                       <<" row="<<movement.pose.position.row<<" col="<<movement.pose.position.col<<"\n";
-          assert(result.signal==Rules::PlayResult::ContinueFrame && !result.hardDrop && !result.locked);
+          assert(result.signal==Rules::PlayResult::ContinueFrame && result.hardDrop && !result.locked);
+          // Complete the pose transition that the live-piece owner performs
+          // after accepting the landing. The garbage before-image stays exact.
+          if(r.player.presentation.paintedActivePose)
+              Render::draw_piece_transition(r.context,piece,r.player,*r.player.presentation.paintedActivePose,movement.pose,r.field);
+          else Render::draw_piece(r.context,piece,r.player,movement.pose,r.field);
           screen.feed(c.str()); }
         Test::TerminalScreen expected;
         { Capture c; paint(r,piece,movement); expected.feed(c.str()); }
         equal_screen(screen,expected);
-        assert(movement.pose==visible.translated(landed ? -1 : 0,0));
-        assert(piece.can_place(movement.pose,r.field));
+        assert(piece.can_place(movement.pose,r.field) && !piece.can_place(movement.pose.translated(1,0),r.field));
+        assert(r.pending()==1); // Lock during the original wave, not after it.
+
         assert(!carry.selectedPieceType.valid());
         auto events=Replay::decode_operation_stream(r.replay.data,0);
         bool checkedErase=false;
@@ -485,7 +489,7 @@ void fixtures() {
     out<<"]}"; std::cout<<out.str()<<'\n';
 }
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     if (argc>1 && std::string(argv[1])=="--fixtures") { fixtures(); return 0; }
     deadlines_gating_and_cap();
     permanent_garbage_keeps_the_visible_piece_and_ghost();
@@ -497,4 +501,6 @@ int main(int argc,char** argv) {
     shape_clock_and_restore();
     continues_during_entry_and_clear();
     hidden_ceiling_and_pause();
+    return 0;
 }
+} // namespace TetrTests::garbage_rise_test

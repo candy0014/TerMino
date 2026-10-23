@@ -157,6 +157,10 @@ void TerminalSettingsView::line(int row, const std::string& text, int atColumn, 
     surface_->write(row,atColumn,text,atWidth,color_,background_);
 }
 void TerminalSettingsView::present(std::optional<std::pair<int,int>> cursor) const {
+    if(playRooms_) {
+        surface_->metadata.path="play-rooms";
+        surface_->metadata.ancestors.clear();
+    }
     surface_->present(cursor,context_.config.display.obscuredColors);
     surface_->terminalSize=terminalSize_;
 }
@@ -245,6 +249,31 @@ std::string TerminalSettingsView::row_text(const Model::SettingNode& node, bool 
         node.key=="room-users" || node.key=="room-view-host" || node.key.rfind("manage-player:",0)==0;
     if ((node.kind == Model::NodeKind::Group && !node.children.empty()) || roomDialog) text += "  >";
     return text;
+}
+Frontend::UiEntry TerminalSettingsView::graphical_entry(const Model::SettingNode& node) const {
+    using Control=Frontend::UiControl;
+    Frontend::UiEntry entry{node.key,node_title(node),node.enabled};
+    entry.description=(node.literalDescription?node.description:tr(node.description))+
+        (node.descriptionSuffix.empty()?"":" "+tr(node.descriptionSuffix));
+    entry.value=node.summary;
+    if(node.kind==Model::NodeKind::Group)entry.control=Control::Group;
+    if(node.kind==Model::NodeKind::Separator)entry.control=Control::Separator;
+    if(node.key=="player")entry.value=player_==2?tr("Both players"):tr("Player")+" "+std::to_string(player_+1);
+    if(node.kind==Model::NodeKind::Player && node.player==player_)entry.value=tr("current");
+    if(node.item) {
+        const auto& item=*node.item;
+        entry.value=value_text(item);
+        entry.filePath=item.filePath;
+        entry.description=preset_hint(item,item_hint(item));
+        entry.effective=item.effective && (!item.secondaryOwner || item.secondaryEffective);
+        entry.enabled=entry.enabled && !readOnly_ && !item.readOnly && !item.bothReadOnly;
+        entry.control=item.keyBinding?Control::Binding:item.choice.labels.empty()?Control::Value:Control::Choice;
+        if(item.choice.labels==std::vector<std::string>{"OFF","ON"} && !Model::mixed_value(item) &&
+            UserConfig::Presets::defined(*item.owner,Model::item_fields(item).front())) {
+            entry.control=Control::Toggle;entry.checked=Model::selected_choice(item)==1;
+        }
+    }
+    return entry;
 }
 int TerminalSettingsView::menu_width(const Model::SettingNode& menu) const {
     std::size_t columns = Util::TerminalText::width(tr(menu.title));
@@ -343,6 +372,7 @@ void TerminalSettingsView::print_row(const Model::SettingNode& node, std::size_t
     set_text_color();
 }
 void TerminalSettingsView::print_hint_text(const std::string& text) const {
+    surface_->metadata.hint=text;
     const auto rows = Util::TerminalText::wrap(text,frameWidth_);
     for (int i = 0; i < hintLines_; ++i)
         line(hintRow_ + i, i < static_cast<int>(rows.size()) ? rows[i] : "", column, frameWidth_);
@@ -358,11 +388,22 @@ void TerminalSettingsView::print_hint(const Model::SettingNode& node) const {
     }
     if(node.mapPreview) {
         const auto& map=*node.mapPreview;
+        Frontend::UiGridPreview preview;
+        preview.width=map.width;preview.height=map.height;
+        preview.squareStyle=context_.config.display.squareStyle;
+        preview.obscured=context_.config.display.obscuredColors;
+        for(const auto& row:map.rows)for(const auto symbol:row) {
+            const auto cell=Runtime::map_cell(symbol);
+            preview.colors.push_back(cell.occupied()?cell.color_id():-1);
+        }
+        surface_->metadata.gridPreview=std::move(preview);
         const auto goal=map.goal==Runtime::MapGoal::ClearInitial ? tr("Clear map") : map.goal==Runtime::MapGoal::AllClear ? tr("All clear field") : tr("OFF");
         const auto generator=map.generator==Runtime::MapGenerator::CustomSequence ? tr("Custom sequence")+" ("+std::to_string(map.sequence.size())+" "+tr("pieces")+")" :
             tr("Fixed rotation system")+" / "+tr(UserConfig::choice_options(UserConfig::ChoiceKind::RotationSystem).labels.at(static_cast<std::size_t>(map.rotationSystem)));
-        const auto rows=Util::TerminalText::wrap_words(tr("Field size")+": "+std::to_string(map.width)+" x "+std::to_string(map.height)+"\n"+
-            tr("Generator")+": "+generator+"\n"+tr("Final goal")+": "+goal,frameWidth_);
+        const auto description=tr("Field size")+": "+std::to_string(map.width)+" x "+std::to_string(map.height)+"\n"+
+            tr("Generator")+": "+generator+"\n"+tr("Final goal")+": "+goal;
+        surface_->metadata.hint=description;
+        const auto rows=Util::TerminalText::wrap_words(description,frameWidth_);
         for(int i=0;i<hintLines_;++i) line(hintRow_+i,i<static_cast<int>(rows.size()) ? rows[i] : "",column,frameWidth_);
     } else print_hint_text(node.item ? preset_hint(*node.item,item_hint(*node.item)) : (node.literalDescription?node.description:tr(node.description))+
         (node.descriptionSuffix.empty() ? "" : " "+tr(node.descriptionSuffix)));
@@ -408,6 +449,24 @@ void TerminalSettingsView::print_frame(const std::string& title, const std::stri
     const auto target=player_==2 ? tr("Both players")+" ("+tr("Player 1")+" | "+tr("Player 2")+")" :
         tr("Player")+" "+std::to_string(player_+1);
     const auto hostTitle=tr("Host configuration (read-only)");
+    auto& metadata=surface_->metadata;
+    metadata.chinese=UiText::language()!=UiText::Language::English;
+    metadata.path=UiText::breadcrumb(breadcrumb);
+    metadata.context=readOnly_?hostTitle:mapEditor_?tr("MAP EDITOR"):
+        context_.user_settings().presetDefined?tr("PRESET SETTINGS")+" / "+target:target;
+    metadata.ancestors.clear();
+    for(const auto& ancestor:ancestors_) {
+        Frontend::UiNavigationGroup group{tr(ancestor.menu->title),{},ancestor.selected};
+        for(const auto& node:ancestor.menu->children)group.entries.push_back(graphical_entry(node));
+        metadata.ancestors.push_back(std::move(group));
+    }
+    if(parent_ && (metadata.kind==Frontend::UiKind::Text ||
+        metadata.kind==Frontend::UiKind::KeyCapture || metadata.kind==Frontend::UiKind::Choices)) {
+        Frontend::UiNavigationGroup group{node_title(*parent_),{},parentSelected_};
+        group.id=parent_->key;
+        for(const auto& node:parent_->children)group.entries.push_back(graphical_entry(node));
+        metadata.parent=std::move(group);
+    }
     line(1,readOnly_ ? hostTitle+(title==hostTitle ? "" : " / "+title) :
         (mapEditor_ ? tr("MAP EDITOR") : context_.user_settings().presetDefined ? tr("PRESET SETTINGS")+(localVersus_ ? " / "+tr("Edit target: ")+target : "") : (localVersus_ ? tr("Edit target: ") : "")+target)+" / "+title, column, frameWidth_);
     set_text_color();
@@ -429,10 +488,26 @@ void TerminalSettingsView::print_frame(const std::string& title, const std::stri
     entryWidth_ = boxes_.back().width;
 }
 void TerminalSettingsView::print_shortcuts(bool editing) const {
+    using A=Frontend::UiKeyAction;
+    auto& keyActions=surface_->metadata.keyActions;keyActions.clear();
+    if(!readOnly_) {
+        if(mapEditor_)keyActions={A::SaveMap};
+        else if(context_.user_settings().presetDefined) {
+            keyActions={A::SavePreset,A::Exit};
+            const auto& m=surface_->metadata;
+            if(m.selected<m.entries.size() && m.entries[m.selected].control!=Frontend::UiControl::Group &&
+                m.entries[m.selected].control!=Frontend::UiControl::Action && m.entries[m.selected].control!=Frontend::UiControl::Separator)
+                keyActions.push_back(A::Undefined);
+        } else {
+            keyActions={A::Retry,A::Root,A::Exit};
+            if(localVersus_ && !editing)keyActions.push_back(A::SwitchTarget);
+        }
+    }
     set_hint_color();
     int row = hintRow_ + hintLines_ + 1;
     // Wrap long multi-key captions so every configured key remains visible.
     const auto write = [&](const std::string& text) {
+        surface_->metadata.shortcuts.push_back(text);
         std::string part;
         for (std::size_t i = 0; i < text.size();) {
             const unsigned char first = static_cast<unsigned char>(text[i]);
@@ -475,8 +550,10 @@ void TerminalSettingsView::print_shortcuts(bool editing) const {
 }
 void TerminalSettingsView::print_menu(const Model::SettingNode& menu, std::size_t selected,
                                     const std::string& breadcrumb,bool render) const {
-    surface_->metadata={Frontend::UiKind::Menu,menu.key,menu.title,breadcrumb,{},selected};
-    for(const auto& node:menu.children)surface_->metadata.entries.push_back({node.key,node.title,node.enabled});
+    surface_->metadata={Frontend::UiKind::Menu,menu.key,tr(menu.title),breadcrumb,{},selected};
+    for(const auto& node:menu.children)surface_->metadata.entries.push_back(graphical_entry(node));
+    if(selected<menu.children.size())
+        for(const auto& child:menu.children[selected].children)surface_->metadata.preview.push_back(graphical_entry(child));
     configure_layout(&menu, nullptr, false);
     if(terminalSize_ && !menu.children.empty() && menu.children[selected].mapPreview) {
         const auto& map=*menu.children[selected].mapPreview;
@@ -506,7 +583,7 @@ void TerminalSettingsView::print_menu(const Model::SettingNode& menu, std::size_
             footer=Util::TerminalText::clip(status,std::max(0,frameWidth_-static_cast<int>(Util::TerminalText::width(pager))-2))+"  "+pager;
         } else footer=Util::TerminalText::clip(status,frameWidth_);
     }
-    if(!footer.empty()) line(hintRow_+hintLines_,footer,column,frameWidth_);
+    if(!footer.empty()) {surface_->metadata.notice=footer;line(hintRow_+hintLines_,footer,column,frameWidth_);}
     if (!menu.children.empty()) print_hint(menu.children[selected]);
     print_shortcuts();
     if(render) present();
@@ -519,13 +596,15 @@ void TerminalSettingsView::print_selection(const Model::SettingNode& menu, std::
 void TerminalSettingsView::print_edit(const Model::SettingItem& item, const std::string& breadcrumb,
     const std::string& value, std::size_t caret) const {
     surface_->metadata={item.keyBinding?Frontend::UiKind::KeyCapture:Frontend::UiKind::Text,
-        std::to_string(static_cast<int>(item.id)),item.label,breadcrumb};
+        std::to_string(static_cast<int>(item.id)),item_label(item),breadcrumb};
+    surface_->metadata.currentValue=value_text(item);
     if (Model::uses_inline_input(item) && parent_) {
         print_scalar_input(item, breadcrumb, value, caret);
         return;
     }
     configure_layout(parent_, &item, true);
     print_frame(tr("Edit ") + item_label(item), breadcrumb + " > " + item.label, true);
+    if(Frontend::ui_surface_active())surface_->metadata.path=UiText::breadcrumb(breadcrumb);
     print_box(boxes_.size() - 1, item_label(item));
     set_text_color();
     line(firstRow_, tr("Current: ") + value_text(item), entryColumn_, entryWidth_);
@@ -534,16 +613,20 @@ void TerminalSettingsView::print_edit(const Model::SettingItem& item, const std:
     if (item.keyBinding) {
         const bool menuShortcut=item.id==Model::SettingId::ControlRetry || item.id==Model::SettingId::ControlOpenSettings;
         line(hintRow_ + hintLines_, tr("Press and release a key; existing bindings toggle."), column, frameWidth_);
-        if (menuShortcut) line(hintRow_ + hintLines_ + 1, tr(context_.user_settings().presetDefined ? "Esc Cancel" : "Esc Start screen"), column, frameWidth_);
+        surface_->metadata.shortcuts.push_back(tr("Press and release a key; existing bindings toggle."));
+        if (menuShortcut) {surface_->metadata.shortcuts.push_back(tr(context_.user_settings().presetDefined ? "Esc Cancel" : "Esc Start screen"));line(hintRow_ + hintLines_ + 1, surface_->metadata.shortcuts.back(), column, frameWidth_);}
     } else {
         line(hintRow_ + hintLines_, tr(context_.user_settings().presetDefined ? "Enter Confirm   Esc Cancel   Blank Keep value" : "Enter Save   Esc Save and start screen   Blank Keep value"), column, frameWidth_);
         line(hintRow_ + hintLines_ + 1, tr("Left/Right Cursor   Backspace/Delete Edit"), column, frameWidth_);
+        surface_->metadata.shortcuts={tr(context_.user_settings().presetDefined ? "Enter Confirm   Esc Cancel   Blank Keep value" : "Enter Save   Esc Save and start screen   Blank Keep value"),tr("Left/Right Cursor   Backspace/Delete Edit")};
     }
     const auto prompt = tr(item.keyBinding ? "Key: " : "New value: ");
     print_input(firstRow_ + 4,prompt,value,caret);
 }
 void TerminalSettingsView::print_input(int row, const std::string& prompt,
     const std::string& value, std::size_t caret) const {
+    surface_->metadata.input=value;
+    surface_->metadata.inputCaret=std::min(caret,value.size());
     set_selection_color();
     const int caretColumns=static_cast<int>(Util::TerminalText::width(
         prompt + value.substr(0,std::min(caret,value.size()))));
@@ -555,7 +638,8 @@ void TerminalSettingsView::print_scalar_input(const Model::SettingItem& item, co
                                               const std::string& value, std::size_t caret) const {
     configure_layout(parent_, nullptr, false);
     const auto prompt = "> " + item_label(item) + " = ";
-    surface_->metadata={Frontend::UiKind::Text,std::to_string(static_cast<int>(item.id)),item.label,breadcrumb};
+    surface_->metadata={Frontend::UiKind::Text,std::to_string(static_cast<int>(item.id)),item_label(item),breadcrumb};
+    surface_->metadata.currentValue=value_text(item);
     auto& box = boxes_.back();
     // Expand the right border with the draft, preserving the column's left
     // edge. Scroll only after the box reaches the terminal's usable right edge.
@@ -567,6 +651,7 @@ void TerminalSettingsView::print_scalar_input(const Model::SettingItem& item, co
         frameWidth_ = std::max(width, box.column + box.width + 4 - column);
     }
     print_frame(tr("Edit ") + item_label(item), breadcrumb + " > " + item.label, false);
+    if(Frontend::ui_surface_active())surface_->metadata.path=UiText::breadcrumb(breadcrumb);
     if (parent_) print_column(*parent_, parentSelected_, boxes_.size() - 1);
     else print_box(boxes_.size() - 1, item_label(item));
     entryColumn_ = box.column + 2;
@@ -576,13 +661,21 @@ void TerminalSettingsView::print_scalar_input(const Model::SettingItem& item, co
     print_hint_text(server_address(item) ? tr("Type to replace; arrows edit the full address.") : preset_hint(item,item_hint(item)));
     line(hintRow_ + hintLines_, tr(item.allowEmptyText ? "Enter Confirm   Blank Auto name" : mapEditor_ || context_.user_settings().presetDefined ? "Enter Confirm   Esc Cancel   Blank Keep value" : "Enter Save   Esc Save and start screen   Blank Keep value"), column, frameWidth_);
     line(hintRow_ + hintLines_ + 1, tr("Left/Right Cursor   Backspace/Delete Edit"), column, frameWidth_);
+    surface_->metadata.shortcuts={tr(item.allowEmptyText ? "Enter Confirm   Blank Auto name" : mapEditor_ || context_.user_settings().presetDefined ? "Enter Confirm   Esc Cancel   Blank Keep value" : "Enter Save   Esc Save and start screen   Blank Keep value"),tr("Left/Right Cursor   Backspace/Delete Edit")};
+    if(item.filePath && Frontend::ui_surface_active())surface_->metadata.shortcuts.push_back(
+        UiText::language()==UiText::Language::English?"F4  Open replay file":"F4  打开回放文件");
     print_input(row,prompt,value,caret);
 }
 void TerminalSettingsView::print_choices(const Model::SettingItem& item, std::size_t selected,
                                        const std::string& breadcrumb) const {
-    surface_->metadata={Frontend::UiKind::Choices,std::to_string(static_cast<int>(item.id)),item.label,breadcrumb,{},selected};
-    for(std::size_t i=0;i<item.choice.labels.size();++i)
-        surface_->metadata.entries.push_back({std::to_string(item.choice.values[i]),item.choice.labels[i],true});
+    surface_->metadata={Frontend::UiKind::Choices,std::to_string(static_cast<int>(item.id)),item_label(item),breadcrumb,{},selected};
+    surface_->metadata.currentValue=value_text(item);
+    for(std::size_t i=0;i<item.choice.labels.size();++i) {
+        surface_->metadata.entries.push_back({std::to_string(item.choice.values[i]),tr(item.choice.labels[i]),
+            static_cast<bool>(bot_availability(item,item.choice.values[i]))});
+        surface_->metadata.entries.back().checked=!Model::mixed_value(item) &&
+            UserConfig::Presets::defined(*item.owner,Model::item_fields(item).front()) && i==Model::selected_choice(item);
+    }
     configure_layout(parent_, &item, true);
     print_frame(tr("Select ") + item_label(item), breadcrumb + " > " + item.label, true);
     print_box(boxes_.size() - 1, item_label(item));
@@ -624,13 +717,14 @@ void TerminalSettingsView::print_choices(const Model::SettingItem& item, std::si
 void TerminalSettingsView::print_reset_confirmation(bool pending) const {
     if (pending) print_message(player_==2 ? "Press Enter again to reset both players. Arrow keys cancel." :
         "Press Enter again to confirm RESET. Arrow keys cancel.");
-    else { hintRow_=surface_->hintRow.value_or(hintRow_);surface_->begin_update(); print_hint_text(""); present(); }
+    else { hintRow_=surface_->hintRow.value_or(hintRow_);surface_->begin_update();surface_->metadata.notice.clear(); print_hint_text(""); present(); }
 }
 void TerminalSettingsView::print_message(const std::string& message) const {
     hintRow_=surface_->hintRow.value_or(hintRow_);
     surface_->begin_update();
     set_hint_color(true);
     print_hint_text(tr(message));
+    surface_->metadata.notice=tr(message);
     set_text_color();
     present();
 }

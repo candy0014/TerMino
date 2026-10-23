@@ -8,6 +8,8 @@ enum class MenuResult { StartGame, StartScreen };
 MenuResult run_menu(Runtime::GameContext& context, bool fromStart = false);
 // Recover a missing/corrupt map selection in the affected player's Maps menu.
 MenuResult run_network_menu(Runtime::GameContext& context);
+// Start multiplayer through room selection, without opening preferences.
+MenuResult run_play_room_menu(Runtime::GameContext& context);
 MenuResult run_map_menu(Runtime::GameContext& context);
 // Appearance fields are shared; gameplay settings and profile paths remain
 // per-player. The displayed profile supplies the shared values.

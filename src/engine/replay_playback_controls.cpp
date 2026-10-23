@@ -34,52 +34,60 @@
 namespace Engine {
 namespace {
 
-bool pause_key_down(Runtime::GameContext& context) {
-    if (context.config.disablePause) return false;
-    bool down=false;
+std::vector<int> pause_keys(const Runtime::GameContext& context) {
+    std::vector<int> keys;
     for (const auto& [key, action] : context.input_services().bindings.entries())
-        if (action == Input::Action::Pause) down|=context.input_services().control_key_pressed(key);
+        if (action == Input::Action::Pause) keys.push_back(key);
+    return keys;
+}
+
+bool pause_key_down(Input::Services& input, const std::vector<int>& keys, bool disabled) {
+    if (disabled) return false;
+    bool down=false;
+    for (int key:keys) down|=input.control_key_pressed(key);
 #ifdef _WIN32
-    return down || context.input_services().key_down(VK_SPACE);
+    return down || input.key_down(VK_SPACE);
 #else
-    return down || context.input_services().key_down(KEY_SPACE);
+    return down || input.key_down(KEY_SPACE);
 #endif
 }
 
-bool slower_key_down(Runtime::GameContext& context) {
+bool slower_key_down(Input::Services& input) {
 #ifdef _WIN32
-    return context.input_services().key_down(VK_OEM_MINUS) ||
-        context.input_services().key_down(VK_SUBTRACT);
+    return input.key_down(VK_OEM_MINUS) || input.key_down(VK_SUBTRACT);
 #else
-    return context.input_services().key_down(KEY_MINUS) ||
-        context.input_services().key_down(KEY_KPMINUS);
+    return input.key_down(KEY_MINUS) || input.key_down(KEY_KPMINUS);
 #endif
 }
 
-bool faster_key_down(Runtime::GameContext& context) {
+bool faster_key_down(Input::Services& input) {
 #ifdef _WIN32
-    return context.input_services().key_down(VK_OEM_PLUS) ||
-        context.input_services().key_down(VK_ADD);
+    return input.key_down(VK_OEM_PLUS) || input.key_down(VK_ADD);
 #else
-    return context.input_services().key_down(KEY_EQUAL) ||
-        context.input_services().key_down(KEY_KPPLUS);
+    return input.key_down(KEY_EQUAL) || input.key_down(KEY_KPPLUS);
 #endif
 }
 
-bool backward_key_down(Runtime::GameContext& context) {
+bool backward_key_down(Input::Services& input) {
 #ifdef _WIN32
-    return context.input_services().key_down(VK_LEFT);
+    return input.key_down(VK_LEFT);
 #else
-    return context.input_services().key_down(KEY_LEFT);
+    return input.key_down(KEY_LEFT);
 #endif
 }
 
-bool forward_key_down(Runtime::GameContext& context) {
+bool forward_key_down(Input::Services& input) {
 #ifdef _WIN32
-    return context.input_services().key_down(VK_RIGHT);
+    return input.key_down(VK_RIGHT);
 #else
-    return context.input_services().key_down(KEY_RIGHT);
+    return input.key_down(KEY_RIGHT);
 #endif
+}
+
+std::array<bool,5> read_controls(Input::Services& input,
+    const std::vector<int>& pauseKeys, bool disablePause) {
+    return {pause_key_down(input,pauseKeys,disablePause),slower_key_down(input),
+        faster_key_down(input),backward_key_down(input),forward_key_down(input)};
 }
 
 bool rising_edge(bool down, bool& wasDown) {
@@ -323,6 +331,21 @@ void render_progress(
 
 } // namespace
 
+void share_replay_playback_controls(Runtime::GameContext& first, Runtime::GameContext& second) {
+    auto shared=Replay::session(first).playback.shared;
+    if (!shared || shared!=Replay::session(second).playback.shared) return;
+    auto input=std::make_shared<Input::Services>();
+    Input::share_key_state(*input,first.input_services());
+    auto keys=pause_keys(first);
+    for (int key:pause_keys(second))
+        if (std::find(keys.begin(),keys.end(),key)==keys.end()) keys.push_back(key);
+    input->begin_gameplay_input();input->discard_control_events();
+    shared->readControls=[input,keys=std::move(keys),disabled=first.config.disablePause || second.config.disablePause] {
+        return read_controls(*input,keys,disabled);
+    };
+    shared->controlsDown=shared->readControls();
+}
+
 Render::TerminalSize replay_playback_terminal_size(Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player, bool compact, bool maximum) {
     if (!context.config.mode.replayMode || !context.replay_component() ||
@@ -361,48 +384,43 @@ void update_replay_playback_controls(
         !complete_rebuild_if_ready(context)) return;
     auto& playback=Replay::session(context).playback;
     const Runtime::TimePoint now=context.now();
-    const bool pauseDown=pause_key_down(context);
-    const bool slowerDown=slower_key_down(context);
-    const bool fasterDown=faster_key_down(context);
-    const bool backwardDown=backward_key_down(context);
-    const bool forwardDown=forward_key_down(context);
-
+    std::array<bool,5> pressed{};
+    if (playback.shared) {
+        // The dedicated reader has no navigation callback and is only polled
+        // under this lock. Neither worker touches the other's input cursor.
+        auto& shared=*playback.shared;
+        std::lock_guard<std::recursive_mutex> lock(shared.mutex);
+        const auto down=shared.readControls();
+        for (std::size_t i=0;i<pressed.size();++i)
+            pressed[i]=rising_edge(down[i],shared.controlsDown[i]);
+        const auto at=context.now();
+        if (pressed[0]) Replay::toggle_playback_pause(context,at);
+        if (pressed[1]) Replay::set_playback_speed(context,at,shared.speed/2.0);
+        if (pressed[2]) Replay::set_playback_speed(context,at,shared.speed*2.0);
+        context.config.timeMultiplier=shared.speed;
+    } else {
+        const auto down=read_controls(context.input_services(),pause_keys(context),context.config.disablePause);
+        std::array<bool*,5> held{&playback.pauseKeyDown,&playback.slowerKeyDown,&playback.fasterKeyDown,
+            &playback.backwardKeyDown,&playback.forwardKeyDown};
+        for (std::size_t i=0;i<pressed.size();++i) {
+            if (playback.controlsInitialized) pressed[i]=rising_edge(down[i],*held[i]);
+            else *held[i]=down[i];
+        }
+        if (pressed[0]) Replay::toggle_playback_pause(context,now);
+        if (pressed[1]) Replay::set_playback_speed(context,now,Replay::playback_speed(context)/2.0);
+        if (pressed[2]) Replay::set_playback_speed(context,now,Replay::playback_speed(context)*2.0);
+    }
     if (!playback.controlsInitialized) {
-        playback.pauseKeyDown=pauseDown;
-        playback.slowerKeyDown=slowerDown;
-        playback.fasterKeyDown=fasterDown;
-        playback.backwardKeyDown=backwardDown;
-        playback.forwardKeyDown=forwardDown;
         playback.controlsInitialized=true;
         forceRender=true;
-    } else {
-        if (rising_edge(pauseDown,playback.pauseKeyDown)) {
-            Replay::toggle_playback_pause(context,now);
-            forceRender=true;
-        }
-        if (rising_edge(slowerDown,playback.slowerKeyDown)) {
-            Replay::set_playback_speed(
-                context,now,Replay::playback_speed(context)/2.0);
-            forceRender=true;
-        }
-        if (rising_edge(fasterDown,playback.fasterKeyDown)) {
-            Replay::set_playback_speed(
-                context,now,Replay::playback_speed(context)*2.0);
-            forceRender=true;
-        }
-        if (rising_edge(backwardDown,playback.backwardKeyDown) &&
-            request_replay_seek(context,-10.0)) {
-            throw ReplaySeekRequested{};
-        }
-        if (rising_edge(forwardDown,playback.forwardKeyDown) &&
-            request_replay_seek(context,10.0)) {
-            throw ReplaySeekRequested{};
-        }
     }
+    forceRender=forceRender || pressed[0] || pressed[1] || pressed[2];
+    if (pressed[3] && request_replay_seek(context,-10.0)) throw ReplaySeekRequested{};
+    if (pressed[4] && request_replay_seek(context,10.0)) throw ReplaySeekRequested{};
 
     if (!playback.progressVisible) return;
     const bool renderDue=!playback.progressRendered || forceRender ||
-        (!playback.paused &&
+        (!Replay::playback_paused(context) &&
          now-playback.lastProgressRender>=Runtime::Duration::from_seconds(0.05));
     if (!renderDue) return;
     render_progress(context,player,now);

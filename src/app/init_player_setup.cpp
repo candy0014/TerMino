@@ -26,7 +26,7 @@ void reset_player_board(Runtime::PlayerSessionState& player, const Runtime::Runt
     player.clutch = {};
     player.presentation.spike = {};
     player.pieces.allowedPieces = Piece::types_for_rotation_system(config.rotationSystem,config.legacyRotationRules,
-        config.legacyFoolPieceSet ? 10 : config.quickPlay.defaultFloor);
+        config.legacyFoolPieceSet ? 10 : config.quickPlay.defaultFloor,config.legacyEventGeometry);
     if(config.challengeRules!=Runtime::ChallengeRules::ConstructMap && config.initialMap && config.initialMap->generator==Runtime::MapGenerator::CustomSequence && !config.initialMap->sequence.empty()) {
         player.pieces.allowedPieces=config.initialMap->sequence;
         std::sort(player.pieces.allowedPieces.begin(),player.pieces.allowedPieces.end());

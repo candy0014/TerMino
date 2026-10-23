@@ -2,6 +2,7 @@
 """Verify clean public packages and smoke-test native executables."""
 from pathlib import Path
 import hashlib
+import json
 import os
 import socket
 import subprocess
@@ -36,7 +37,15 @@ def smoke(folder, windows):
     replay = folder / '.tetr/replay/public-smoke.txt'
     contents = replay.read_bytes()
     assert b'{end_all,' in contents and b'{end_place_data,' in contents
-    config.write_text('[MODEL]\nModel = 5\nReplay = .tetr/replay/public-smoke.txt\nTime Multiplier = 100\n')
+    consolidated = folder / '.tetr/config.json'
+    if consolidated.exists():
+        profile = json.loads(consolidated.read_text(encoding='utf-8'))
+        platform = 'windows' if windows else 'linux'
+        profile['players']['player1'][platform] = {'settings': {'MODEL': {
+            'Model': 5, 'Replay': '.tetr/replay/public-smoke.txt', 'Time Multiplier': 100}}}
+        consolidated.write_text(json.dumps(profile), encoding='utf-8')
+    else:
+        config.write_text('[MODEL]\nModel = 5\nReplay = .tetr/replay/public-smoke.txt\nTime Multiplier = 100\n')
     env.pop('TETR_TEST_MAX_PIECES'); env.pop('TETR_TEST_REPLAY')
     run(command('--play'), base, env)
     assert replay.read_bytes() == contents

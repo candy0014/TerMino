@@ -14,6 +14,7 @@ void poll_multiplayer_scene(Runtime::GameContext& context,bool receiveAttacks=tr
 void draw_multiplayer_scene(Runtime::GameContext& context,bool force=false,std::optional<Render::TerminalSize> sizeOverride={});
 void position_multiplayer_scene(Runtime::GameContext& context,Render::TerminalSize size);
 void cycle_multiplayer_focus(Runtime::GameContext& context);
+void finish_multiplayer_scene(Runtime::GameContext& context,bool aborted=false);
 std::vector<int> full_multiplayer_slots(Runtime::GameContext& context,std::optional<Render::TerminalSize> sizeOverride={});
 std::string compact_player_name(std::string_view name,int columns);
 }

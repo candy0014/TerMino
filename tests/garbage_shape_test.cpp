@@ -12,6 +12,7 @@
 #include <memory>
 #include <sstream>
 
+namespace TetrTests::garbage_shape_test {
 namespace {
 using Runtime::GameMode;
 using Runtime::GarbageMode;
@@ -48,7 +49,13 @@ struct Fixture {
         auto& field=player.gameplay.playfield.field;
         if(buffered) {
             Engine::GarbageService::add_buffer(context,player,field,height,true,height,true);
-            assert(Engine::GarbageService::raise_ready_buffer(context,player,field,false)==height);
+            int raised=0;
+            while(raised<height) {
+                const int batch=Engine::GarbageService::raise_ready_buffer(context,player,field,false);
+                assert(batch>0 && batch<=context.config.garbage.cap);
+                raised+=batch;
+            }
+            assert(raised==height);
         } else Engine::GarbageService::add_garbage(context,player,field,height,false,BoardCell::garbage(),false);
     }
 };
@@ -182,9 +189,11 @@ void menus() {
     assert(refill!=mode.children.end() && refill->item->effective);
 }
 }
-int main() {
+int run(int argc,char** argv) {
     std::ostringstream output;
     auto* original=std::cout.rdbuf(output.rdbuf());
     ordinary_sources(); special_mechanisms(); legacy_and_expansion(); menus();
     std::cout.rdbuf(original);
+    return 0;
 }
+} // namespace TetrTests::garbage_shape_test

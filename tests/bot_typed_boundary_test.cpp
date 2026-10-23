@@ -9,6 +9,7 @@
 #include <vector>
 #include <limits>
 
+namespace TetrTests::bot_typed_boundary_test {
 namespace {
 void capability_matrix() {
     using Mode=Runtime::AutoplayMode;
@@ -177,7 +178,7 @@ void instant_bot_paths(Runtime::GameContext& context, Runtime::PlayerSessionStat
 }
 }
 
-int main() {
+int run(int argc,char** argv) {
     Runtime::SessionState session;
     Runtime::RuntimeServices services;
     Runtime::GameContext context(session, services);
@@ -261,3 +262,4 @@ int main() {
     assert(!bufferedPiece.can_place(answer.translated(1,0),player.gameplay.playfield.field));
     return 0;
 }
+} // namespace TetrTests::bot_typed_boundary_test

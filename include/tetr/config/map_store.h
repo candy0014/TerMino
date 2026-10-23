@@ -18,6 +18,7 @@ std::optional<Runtime::MapDefinition> find(int id,const std::filesystem::path& p
 bool save(Runtime::MapDefinition& map,SaveUndo& undo,const std::filesystem::path& path=default_path());
 bool undo_save(const SaveUndo& undo,const std::filesystem::path& path=default_path());
 using IdChanges=std::vector<std::pair<int,int>>;
+bool remap_saved_profiles(const std::filesystem::path& file,const IdChanges& changes);
 int renumbered_id(int id,const IdChanges& changes);
 // Selecting a map adopts its default goal once; later goal edits remain local.
 void select(Settings& settings,const Runtime::MapDefinition* map);

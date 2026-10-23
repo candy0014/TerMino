@@ -1,4 +1,5 @@
 #include "tetr/util/file_path.h"
+#include "tetr/util/runtime_directory_lock.h"
 #include "single_player_challenges.h"
 #include "ui_text.h"
 #include "tetr/app/application_state.h"
@@ -196,7 +197,8 @@ void finish_single_player_challenges(Runtime::GameContext& context,Runtime::Play
     round.prefixes.finish(result);
     round.replayPrefixes=round.prefixes.boundaries();
     Challenges::History history;const auto path=Challenges::history_path(round.settings);
-    round.historyWritable=Challenges::load(history,path);
+    Util::FileWriteLock transaction(std::filesystem::path(path).concat(".transaction"));
+    round.historyWritable=transaction.acquired() && Challenges::load(history,path);
     round.outcomes=history.add(round.settings,result,round.playedAt,round.runId,&round.prefixes);
     if(!round.historyWritable) {
         for(auto& outcome:round.outcomes)outcome.personalBest=false;
@@ -235,6 +237,8 @@ bool attach_challenge_replay(Runtime::GameContext& context,const std::filesystem
         bool updated=false;
         for(const auto& [name,runs]:stores) {
             Challenges::History history;const auto store=std::filesystem::u8path(name);
+            Util::FileWriteLock transaction(std::filesystem::path(store).concat(".transaction"));
+            if(!transaction.acquired())continue;
             if(!Challenges::load(history,store))continue;
             bool changed=false;for(const auto run:runs)changed=history.attach_replay(run,path) || changed;
             if(changed && Challenges::save(history,store))updated=true;
@@ -244,6 +248,8 @@ bool attach_challenge_replay(Runtime::GameContext& context,const std::filesystem
     if(!app->challenge_round(&context))return false;
     auto& round=*app->challenge_round(&context);if(!round.evaluated || !round.runId || !round.historyWritable)return false;
     Challenges::History history;const auto store=Challenges::history_path(round.settings);
+    Util::FileWriteLock transaction(std::filesystem::path(store).concat(".transaction"));
+    if(!transaction.acquired())return false;
     return Challenges::load(history,store) && history.attach_replay(round.runId,path) && Challenges::save(history,store);
 }
 void restore_challenge_replay(Runtime::GameContext& context) {

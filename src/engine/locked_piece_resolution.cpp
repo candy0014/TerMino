@@ -40,6 +40,7 @@ Rules::PlacementResult resolve_locked_piece(
 
     const Piece::Metadata pieceMetadata = Piece::metadata(piece.type());
     Rules::PlacementInput input;
+    input.legacyQuickPlayRules=context.config.quickPlay.legacyRules;
     input.clearBatch=context.config.challengeRules==Runtime::ChallengeRules::Stack?4:0;
     input.retainFullRows=context.config.challengeRules==Runtime::ChallengeRules::ConstructMap;
     input.attackRules = context.config.attackRules;

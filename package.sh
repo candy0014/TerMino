@@ -6,19 +6,18 @@ build_dir=build-portable-linux
 output_dir=dist
 data_dir=$project_dir
 parallel=${CMAKE_BUILD_PARALLEL_LEVEL:-2}
-full_static=ON
 generator=
 
 usage() {
     printf '%s\n' 'Usage: bash package.sh [--parallel N] [--build-dir DIR] [--output-dir DIR]' \
         '                       [--data-dir DIR] [--generator NAME] [--dynamic]' \
-        'Defaults: Release, fully static runtimes, game + server only, output in dist/.' \
-        'Each new package uses built-in player settings and key bindings.'
+        'Defaults: Release, terminal + OpenGL + FT7 + server in one clean package.' \
+        'No personal data is imported. --data-dir / --dynamic remain compatibility options.'
 }
 while (( $# )); do
     case "$1" in
         --help|-h) usage; exit 0 ;;
-        --dynamic) full_static=OFF; shift ;;
+        --dynamic) shift ;;
         --parallel|--build-dir|--output-dir|--data-dir|--generator)
             if (( $# < 2 )) || [[ -z "$2" ]]; then usage >&2; exit 2; fi
             case "$1" in
@@ -40,10 +39,12 @@ if [[ ! "$parallel" =~ ^[1-9][0-9]*$ ]]; then
     printf 'Parallel jobs must be a positive integer.\n' >&2
     exit 2
 fi
-for tool in cmake tar sha256sum; do
+for tool in cmake python3; do
     command -v "$tool" >/dev/null || { printf 'Required tool missing: %s\n' "$tool" >&2; exit 1; }
 done
-data_dir=$(cd -- "$data_dir" && pwd -P)
+if [[ "$data_dir" != "$project_dir" ]]; then
+    printf '%s\n' '--data-dir is ignored: packages always use built-in defaults and empty data.'
+fi
 # CMake and bundled dependencies retain absolute paths after a directory move.
 # Preserve their generated state before configuring at the new location.
 if [[ -f "$build_dir/CMakeCache.txt" ]]; then
@@ -67,21 +68,7 @@ if [[ -f "$build_dir/CMakeCache.txt" ]]; then
         printf 'Project paths changed; old CMake state backed up to %s\n' "$cache_backup_dir"
     fi
 fi
-configure_args=(-S "$project_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE=Release
-    -DBUILD_TESTING=OFF -DTETR_PORTABLE_BUILD=ON -DTETR_PORTABLE_RESET_SETTINGS=ON
-    "-DTETR_PORTABLE_FULL_STATIC=$full_static" "-DTETR_PORTABLE_DATA_DIR=$data_dir")
-if [[ -n "$generator" ]]; then configure_args+=(-G "$generator"); fi
-cmake "${configure_args[@]}"
-cmake --build "$build_dir" --config Release --target tetr tetr_server --parallel "$parallel"
-
-platform=$(<"$build_dir/portable-platform.txt")
-package_name="TerMino-$platform-$(date +%Y%m%d-%H%M%S)-$$"
-mkdir -p -- "$output_dir"
-output_dir=$(cd -- "$output_dir" && pwd -P)
-package_dir="$output_dir/$package_name"
-# Each package starts fresh; preserve edited settings in existing distributions.
-mkdir -- "$package_dir"
-cmake --install "$build_dir" --config Release --component Portable --prefix "$package_dir"
-tar -czf "$package_dir.tar.gz" -C "$output_dir" -- "$package_name"
-(cd -- "$output_dir" && sha256sum -- "$package_name.tar.gz" > "$package_name.tar.gz.sha256")
-printf 'Portable package: %s\nArchive:          %s.tar.gz\nStart with ./Play.sh\n' "$package_dir" "$package_dir"
+package_args=(--build-dir "$build_dir" --configure --frontend bundle
+    --parallel "$parallel" --output-dir "$output_dir" --allow-dirty)
+if [[ -n "$generator" ]]; then package_args+=(--generator "$generator"); fi
+python3 tools/package_frontends.py "${package_args[@]}"

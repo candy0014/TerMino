@@ -6,6 +6,7 @@
 #include <iostream>
 #include <stdexcept>
 
+namespace TetrTests::settings_targets_test {
 namespace {
 namespace Model=App::Settings::Model;
 using Node=Model::SettingNode;
@@ -45,7 +46,7 @@ void hidden_row(const Path& path,Id selected,Part selectedPart,Id control,Part c
 }
 }
 
-int main() {
+int run(int argc,char** argv) {
     using namespace Model;
     for(const auto& entry:UserConfig::forced_handling_settings())
         hidden_row({"GAME","forced-handling"},entry.value,Part::Raw,entry.enabled,Part::Raw,
@@ -164,4 +165,6 @@ int main() {
     assert(assign_scalar(width,"?"));
     assert(!UserConfig::Presets::defined(one,Id::FieldWidth) && !UserConfig::Presets::defined(two,Id::FieldWidth));
     std::cerr<<"settings_targets_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::settings_targets_test

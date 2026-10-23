@@ -115,29 +115,12 @@ void add_garbage(
                 Runtime::elapsed_game_time(context.session,context.now())).seconds()));
         generationConfig.continuousMessiness = 2.5 * generationConfig.singleMessiness;
         generationConfig.favor = Rules::qp_garbage_favor(context.config.quickPlay,qp.floor);
-        generationConfig.concentrate = Runtime::reverse(context.config.quickPlay.volatileMode) ||
-            (qp.floor <= 5 && generationConfig.continuousMessiness <= 0.15);
-        int top = playfield.activeHeight;
-        std::vector<int> shallowHoles;
-        for (int row = -Runtime::kHiddenRowCapacity; row < playfield.activeHeight; ++row) {
-            bool garbage = false;
-            for (int col = 0; col < playfield.width; ++col) {
-                if (field.cell(row,col).occupied()) top = std::min(top,row);
-                garbage = garbage || field.cell(row,col).is_normal_garbage();
-            }
-            if (garbage && shallowHoles.empty()) for (int col = 0; col < playfield.width; ++col)
-                if (field.cell(row,col).empty_cell()) shallowHoles.push_back(col);
-        }
-        for (int col = 0; col < playfield.width; ++col) {
-            int lowest = top;
-            bool empty = false;
-            for (int row = playfield.activeHeight - 1; row >= top; --row)
-                if (field.cell(row,col).empty_cell()) { lowest = row; empty = true; break; }
-            int distance = playfield.width;
-            for (int hole : shallowHoles) distance = std::min(distance,std::abs(hole - col));
-            if (shallowHoles.empty()) distance = 0;
-            generationConfig.digScores.push_back(empty ? lowest - top + 5 * distance : 0);
-        }
+        generationConfig.legacyQuickPlayRules=context.config.quickPlay.legacyRules;
+        generationConfig.concentrate=Rules::qp_garbage_concentrates(context.config.quickPlay,qp.floor,qp.progress,
+            qpElapsedSeconds.value_or((context.config.mode.replayMode ? Replay::playback_game_elapsed(context,context.now()) :
+                Runtime::elapsed_game_time(context.session,context.now())).seconds()));
+        generationConfig.digScores=Rules::qp_garbage_dig_scores(playfield.width,-Runtime::kHiddenRowCapacity,
+            playfield.activeHeight,[&](int row,int column){return field.cell(row,column);},context.config.quickPlay.legacyRules);
     }
     playfield.garbageHeight += height;
 

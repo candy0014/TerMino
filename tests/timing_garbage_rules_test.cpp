@@ -25,6 +25,7 @@
 #include <random>
 #include <string>
 
+namespace TetrTests::timing_garbage_rules_test {
 namespace {
 using Runtime::Duration;
 using Runtime::TimePoint;
@@ -306,8 +307,10 @@ void fixtures() {
     std::cout<<"]}\n";
 }
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     if(argc==2 && std::string(argv[1])=="--fixtures") {fixtures(); return 0;}
     settings_and_replay(); fractional_cancellation(); infinite_movement(); entry_delay(); placement_delays(); queue_and_multiplier(); holes();
     std::cout<<"Timing, garbage rules and settings tests passed\n";
+    return 0;
 }
+} // namespace TetrTests::timing_garbage_rules_test

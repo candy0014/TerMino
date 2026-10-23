@@ -18,6 +18,7 @@
 #include <iostream>
 #include <sstream>
 
+namespace TetrTests::attack_rules_test {
 namespace {
 using Id=UserConfig::SettingId;
 using Node=App::Settings::Model::SettingNode;
@@ -276,4 +277,6 @@ void clears_and_display() {
     std::cout.rdbuf(original);
 }
 }
-int main() { settings_and_replays(); chains_and_damage(); clears_and_display(); }
+int run(int argc,char** argv) { settings_and_replays(); chains_and_damage(); clears_and_display();     return 0;
+}
+} // namespace TetrTests::attack_rules_test

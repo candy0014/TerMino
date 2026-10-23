@@ -2,6 +2,7 @@
 #include "tetr/network/frame_packet.h"
 #include "tetr/network/network_services.h"
 #include "tetr/network/event_stream.h"
+#include "tetr/network/room_replay.h"
 #include "tetr/util/timer_resolution.h"
 #include <algorithm>
 #include <iostream>
@@ -14,6 +15,7 @@ RelayServer::RelayServer(std::uint32_t randomSeed,const std::string& roomCodeHis
     nextRoomInstance_(static_cast<std::uint64_t>(randomSeed)<<32),nextConfigEpoch_(static_cast<std::uint64_t>(randomSeed)<<32),
     nextMatchEpoch_(static_cast<std::uint64_t>(randomSeed)<<32) {
     Util::enable_precise_waits();
+    prepare_room_replay_storage();
     if(!roomCodeHistory_.empty()) {
         const auto path=std::filesystem::u8path(roomCodeHistory_);
         if(!path.parent_path().empty())std::filesystem::create_directories(path.parent_path());
@@ -81,6 +83,7 @@ void RelayServer::send_mini_batch(const Room& room,int index,const std::vector<s
     flush();
 }
 void RelayServer::reset_round(Room& room, int except) {
+    finish_room_replay(room,Replay::RoundEndReason::Abandoned);
     if (room.phase != Phase::Waiting)
         for (int i = 0; i < room.capacity; ++i) if (i != except)
             send_wire(room, i, room.multiplayer?"!match-canceled;"+std::to_string(room.matchEpoch):"!round-reset");
@@ -455,6 +458,7 @@ void RelayServer::handle(const Datagram& datagram) {
     }
     if (found == clients_.end()) return;
     auto& client = found->second;
+    if (handle_room_replay(client,wire)) return;
     if (handle_config(client,key,wire)) {client.lastSeen=Clock::now(); return;}
     if (wire == "!leave;" + client.token) {
         std::clog<<"Client disconnected: explicit leave; room="<<client.room<<" endpoint="<<key<<'\n';

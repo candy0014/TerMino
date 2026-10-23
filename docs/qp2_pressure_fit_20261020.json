@@ -1,0 +1,306 @@
+{
+  "downloaded_records": 9349,
+  "unmodded_fit_records": 8776,
+  "unique_players": 8107,
+  "first_ts": "2026-10-05T00:00:35.539Z",
+  "last_ts": "2026-10-18T23:59:52.231Z",
+  "train_n": 7030,
+  "holdout_n": 1746,
+  "mean_coefficients": [
+    2.0843148709964323,
+    3.657281523249494,
+    0.5492664962205321,
+    1.3932250959717627,
+    -4.706876036487392,
+    -0.3107438265361438
+  ],
+  "cv2_coefficients": [
+    -12.986280970001868,
+    11.988765108494647,
+    5.71835644738461,
+    -5.057042130752374,
+    -4.178153015198679,
+    0.9670166442983178
+  ],
+  "shot_factor": 0.9375553655037346,
+  "mean_model": "integral fatigue(t) * exp([1,hlog,alog,hlog*alog,hlog^2,alog^2] beta) dt_minutes; alog=log1p(APM/40), hlog=min(log1p(h/500),max(0,-(beta1+beta3*alog)/(2*beta4)))",
+  "variance_model": "shot_factor*expected_count + Var_Z(sum_i exposure_i * mean_i * exp(sigma_i*Z - sigma_i^2/2))); sigma_i^2=log1p(exp(clamp(features_i gamma,-9,0))); 12-node Gauss-Hermite quadrature",
+  "mean_quadrature": "linear interpolation between reported floor splits; four midpoint samples per interval; fixed normal fatigue offset 1/1.25/1.5 at 0/540/660 seconds; APM is whole-run own APM",
+  "sampling": "4 pages of up to 100 PBs below 13 altitude anchors per completed week, 2026w41/w42; deduplicated; no Mods; >=15 seconds",
+  "holdout": "20% of players by stable SHA256 split; no player shared with training",
+  "constraints": "nondecreasing altitude response at fixed own APM; log-quadratic altitude saturates at fitted peak; mean clamped 1..180 rows/minute",
+  "inputs_sha256": "e33e6f380ded45c55ae23135e1e75441f6981c4b90cea0856422d5f5220877e5",
+  "checks": {
+    "train": {
+      "observed_mean_received_per_minute": 26.917314050899527,
+      "predicted_mean_received_per_minute": 26.921230984879767,
+      "rmse_per_minute": 4.575339561438991,
+      "standardized_residual_mean_square": 0.9957908951988884,
+      "observed_rate_variance": 153.47393180396006,
+      "predicted_rate_variance": 150.54311939375958
+    },
+    "holdout": {
+      "observed_mean_received_per_minute": 26.93118621037759,
+      "predicted_mean_received_per_minute": 26.908558206278084,
+      "rmse_per_minute": 4.542467917025005,
+      "standardized_residual_mean_square": 1.0777540859725916,
+      "observed_rate_variance": 161.6694730949578,
+      "predicted_rate_variance": 161.21309799924833
+    }
+  },
+  "grid": [
+    {
+      "altitude": 0,
+      "own_apm": 0,
+      "mean_received_per_minute": 8.039081786393274,
+      "cv2": 0.00012340980408667956,
+      "variance_one_minute": 7.545059847721954
+    },
+    {
+      "altitude": 0,
+      "own_apm": 20,
+      "mean_received_per_minute": 9.544226130849646,
+      "cv2": 0.00012340980408667956,
+      "variance_one_minute": 8.959482095586074
+    },
+    {
+      "altitude": 0,
+      "own_apm": 40,
+      "mean_received_per_minute": 10.132413941918527,
+      "cv2": 0.00019200056181936485,
+      "variance_one_minute": 9.519410950389956
+    },
+    {
+      "altitude": 0,
+      "own_apm": 80,
+      "mean_received_per_minute": 10.101600281217712,
+      "cv2": 0.003938778725000808,
+      "variance_one_minute": 9.87273169535686
+    },
+    {
+      "altitude": 0,
+      "own_apm": 160,
+      "mean_received_per_minute": 8.700743181545747,
+      "cv2": 0.2785695884058211,
+      "variance_one_minute": 29.245963037349256
+    },
+    {
+      "altitude": 100,
+      "own_apm": 0,
+      "mean_received_per_minute": 13.39195507666258,
+      "cv2": 0.00012340980408667956,
+      "variance_one_minute": 12.577832201478296
+    },
+    {
+      "altitude": 100,
+      "own_apm": 20,
+      "mean_received_per_minute": 17.62414563523743,
+      "cv2": 0.00014545761614407875,
+      "variance_one_minute": 16.568792966978634
+    },
+    {
+      "altitude": 100,
+      "own_apm": 40,
+      "mean_received_per_minute": 20.128739781156685,
+      "cv2": 0.0007847262277397397,
+      "variance_one_minute": 19.189752499059452
+    },
+    {
+      "altitude": 100,
+      "own_apm": 80,
+      "mean_received_per_minute": 22.24455165288932,
+      "cv2": 0.011076938355283648,
+      "variance_one_minute": 26.336590258990984
+    },
+    {
+      "altitude": 100,
+      "own_apm": 160,
+      "mean_received_per_minute": 21.814372771610323,
+      "cv2": 0.4891539688643664,
+      "variance_one_minute": 253.22434517283656
+    },
+    {
+      "altitude": 500,
+      "own_apm": 0,
+      "mean_received_per_minute": 16.358528010214872,
+      "cv2": 0.0012511296129165239,
+      "variance_one_minute": 15.671829792087909
+    },
+    {
+      "altitude": 500,
+      "own_apm": 20,
+      "mean_received_per_minute": 24.60102120200589,
+      "cv2": 0.0035979123427113675,
+      "variance_one_minute": 25.24231283228789
+    },
+    {
+      "altitude": 500,
+      "own_apm": 40,
+      "mean_received_per_minute": 31.52844338301798,
+      "cv2": 0.009231711050046587,
+      "variance_one_minute": 38.73637662671095
+    },
+    {
+      "altitude": 500,
+      "own_apm": 80,
+      "mean_received_per_minute": 42.191221495402736,
+      "cv2": 0.045718617328679385,
+      "variance_one_minute": 120.94027890875276
+    },
+    {
+      "altitude": 500,
+      "own_apm": 160,
+      "mean_received_per_minute": 55.25964203542951,
+      "cv2": 0.5395409879427684,
+      "variance_one_minute": 1699.3664622556996
+    },
+    {
+      "altitude": 1000,
+      "own_apm": 0,
+      "mean_received_per_minute": 16.358528010214872,
+      "cv2": 0.0077652724531395495,
+      "variance_one_minute": 17.415023787774743
+    },
+    {
+      "altitude": 1000,
+      "own_apm": 20,
+      "mean_received_per_minute": 24.60102120200589,
+      "cv2": 0.009723842652688082,
+      "variance_one_minute": 28.949788611028016
+    },
+    {
+      "altitude": 1000,
+      "own_apm": 40,
+      "mean_received_per_minute": 31.52844338301798,
+      "cv2": 0.013832108856667883,
+      "variance_one_minute": 43.309368677414014
+    },
+    {
+      "altitude": 1000,
+      "own_apm": 80,
+      "mean_received_per_minute": 42.191221495402736,
+      "cv2": 0.02982855621222549,
+      "variance_one_minute": 92.65439428385785
+    },
+    {
+      "altitude": 1000,
+      "own_apm": 160,
+      "mean_received_per_minute": 55.25964203542951,
+      "cv2": 0.12350169048783664,
+      "variance_one_minute": 428.9371986858386
+    },
+    {
+      "altitude": 2000,
+      "own_apm": 0,
+      "mean_received_per_minute": 16.358528010214872,
+      "cv2": 0.010957430142863668,
+      "variance_one_minute": 18.26924977797764
+    },
+    {
+      "altitude": 2000,
+      "own_apm": 20,
+      "mean_received_per_minute": 24.60102120200589,
+      "cv2": 0.004813924219497474,
+      "variance_one_minute": 25.978255677165265
+    },
+    {
+      "altitude": 2000,
+      "own_apm": 40,
+      "mean_received_per_minute": 31.52844338301798,
+      "cv2": 0.003256864173988599,
+      "variance_one_minute": 32.79712345407104
+    },
+    {
+      "altitude": 2000,
+      "own_apm": 80,
+      "mean_received_per_minute": 42.191221495402736,
+      "cv2": 0.002464068607052316,
+      "variance_one_minute": 43.94289257554777
+    },
+    {
+      "altitude": 2000,
+      "own_apm": 160,
+      "mean_received_per_minute": 55.25964203542951,
+      "cv2": 0.00272645904054119,
+      "variance_one_minute": 60.13456565647101
+    },
+    {
+      "altitude": 4000,
+      "own_apm": 0,
+      "mean_received_per_minute": 16.358528010214872,
+      "cv2": 0.0010965993574450239,
+      "variance_one_minute": 15.630477273407084
+    },
+    {
+      "altitude": 4000,
+      "own_apm": 20,
+      "mean_received_per_minute": 24.60102120200589,
+      "cv2": 0.00014434906076625512,
+      "variance_one_minute": 23.152180955125477
+    },
+    {
+      "altitude": 4000,
+      "own_apm": 40,
+      "mean_received_per_minute": 31.52844338301798,
+      "cv2": 0.00012340980408667956,
+      "variance_one_minute": 29.682335879792504
+    },
+    {
+      "altitude": 4000,
+      "own_apm": 80,
+      "mean_received_per_minute": 42.191221495402736,
+      "cv2": 0.00012340980408667956,
+      "variance_one_minute": 39.77628778015314
+    },
+    {
+      "altitude": 4000,
+      "own_apm": 160,
+      "mean_received_per_minute": 55.25964203542951,
+      "cv2": 0.00012340980408667956,
+      "variance_one_minute": 52.18582152404148
+    },
+    {
+      "altitude": 6000,
+      "own_apm": 0,
+      "mean_received_per_minute": 16.358528010214872,
+      "cv2": 0.00012340980408667956,
+      "variance_one_minute": 15.370050348838552
+    },
+    {
+      "altitude": 6000,
+      "own_apm": 20,
+      "mean_received_per_minute": 24.60102120200589,
+      "cv2": 0.00012340980408667956,
+      "variance_one_minute": 23.139508302477452
+    },
+    {
+      "altitude": 6000,
+      "own_apm": 40,
+      "mean_received_per_minute": 31.52844338301798,
+      "cv2": 0.00012340980408667956,
+      "variance_one_minute": 29.682335879792504
+    },
+    {
+      "altitude": 6000,
+      "own_apm": 80,
+      "mean_received_per_minute": 42.191221495402736,
+      "cv2": 0.00012340980408667956,
+      "variance_one_minute": 39.77628778015314
+    },
+    {
+      "altitude": 6000,
+      "own_apm": 160,
+      "mean_received_per_minute": 55.25964203542951,
+      "cv2": 0.00012340980408667956,
+      "variance_one_minute": 52.18582152404148
+    }
+  ],
+  "source": "https://tetr.io/about/api/#recordsleaderboard",
+  "retrieved_date": "2026-10-20",
+  "client_sha256": "b310aaf13ac0d7ee73c87c58abcdec87e1267217e182c10f4c9cb40dc5d73c92",
+  "limitations": [
+    "Public weekly personal best stubs, not randomly sampled plays or per-event replays.",
+    "Piecewise-linear altitude and whole-run own APM proxy; instantaneous pressure is not directly observed.",
+    "Packet shapes and transient Mod/danger adjustments remain simulation assumptions; mean/variance fit applies to unmodded whole-run counts."
+  ]
+}

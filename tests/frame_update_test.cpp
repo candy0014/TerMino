@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+namespace TetrTests::frame_update_test {
 namespace {
 
 struct LegacyPreResult {
@@ -344,9 +345,11 @@ void test_network_pump_order() {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     test_frame_rules_random();
     test_network_random();
     test_network_pump_order();
     std::cout << "frame update tests passed\n";
+    return 0;
 }
+} // namespace TetrTests::frame_update_test

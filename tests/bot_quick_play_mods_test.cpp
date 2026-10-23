@@ -16,18 +16,24 @@
 #include "tetr/replay/session_state.h"
 #include "tetr/input/services.h"
 #include "tetr/render/terminal_renderer.h"
+#include "../src/bot/chatgpt/policy.h"
 #include <cassert>
 #include <chrono>
 #include <iostream>
 #include <memory>
 #include <numeric>
 #include <sstream>
+#include <set>
 
+namespace TetrTests::bot_quick_play_mods_test {
 namespace {
 using Runtime::AutoplayMode;
 using Runtime::Duration;
 using Runtime::ModifierMode;
 using Runtime::AllSpinMode;
+constexpr AutoplayMode allBots[]{AutoplayMode::While1,AutoplayMode::Candy0014,AutoplayMode::Mech,
+    AutoplayMode::ZzztojBotris,AutoplayMode::ZzztojToj,AutoplayMode::ZzztojDig,
+    AutoplayMode::ZzztojQq,AutoplayMode::ZzztojC2,AutoplayMode::ChatGPT,AutoplayMode::ColdClear};
 constexpr AutoplayMode bots[]{AutoplayMode::While1,AutoplayMode::ZzztojBotris,AutoplayMode::ChatGPT};
 struct Fixture {
     Runtime::SessionState session;
@@ -115,7 +121,7 @@ void check_route(Fixture& f,const std::vector<Piece::Type>& next,Piece::Pose sta
 
 void all_mods_and_combinations_have_legal_paths() {
     int cases=0;
-    for(auto bot:bots)for(const auto& u:variants()) {
+    for(auto bot:allBots)for(const auto& u:variants()) {
         auto f=std::make_unique<Fixture>(u,bot);
         assert(Autoplay::availability(f->context.config,bot));
         assert(Bot::init(f->context));
@@ -131,7 +137,7 @@ void all_mods_and_combinations_have_legal_paths() {
 
 void special_pieces_growth_zero_das_and_gravity() {
     int cases=0;
-    for(auto bot:bots)for(int fool:{1,2,3,4}) {
+    for(auto bot:allBots)for(int fool:{1,2,3,4}) {
         UserConfig::Settings u;u.qpFool=fool;u.qpDefaultFloor=10;
         auto f=std::make_unique<Fixture>(u,bot);assert(Bot::init(f->context));
         auto types=Piece::types_for_rotation_system(f->context.config.rotationSystem,false,10);
@@ -145,7 +151,7 @@ void special_pieces_growth_zero_das_and_gravity() {
             check_route(*f,{type},start,{false,Piece::Type::none()});++cases;
         }
     }
-    for(auto bot:bots)for(int sb:{1,2})for(int size:{4,5,10,20})for(bool instant:{false,true}) {
+    for(auto bot:allBots)for(int sb:{1,2})for(int size:{4,5,10,20})for(bool instant:{false,true}) {
         UserConfig::Settings u;u.qpSnowball=sb;u.qpGravity=instant?2:0;
         auto f=std::make_unique<Fixture>(u,bot);
         f->context.config.field.width=f->context.config.field.height=size;
@@ -169,6 +175,43 @@ Quad quad(Fixture& f,bool garbage=false) {
         if(x!=column)b.field.set_cell(y,x,garbage?Runtime::BoardCell::garbage():Runtime::BoardCell::piece(1));
     while(piece.can_place(pose.translated(1,0),b.field))++pose.position.row;
     assert(piece.can_place(pose,b.field));return {type,pose};
+}
+void mixed_geometries_keep_distinct_piece_ids() {
+    int checked=0;
+    for(auto bot:allBots)for(int fool:{3,4}) {
+        UserConfig::Settings user;user.qpFool=fool;user.qpNoHold=1;
+        Fixture f(user,bot);assert(Bot::init(f.context));
+        const auto target=quad(f);
+        const auto event=Piece::april_fools_piece(0);
+        assert(Piece::metadata(event).familyIndex==Piece::metadata(target.type).familyIndex);
+        const std::vector<Piece::Type> next{target.type,event};
+        auto answer=spawn(f,target.type);Runtime::RotationRecord rotation;
+        const auto selected=Bot::getpos(f.context,f.p,f.p.gameplay.playfield.field,next,{},answer,
+            {false,Piece::Type::none()},answer,rotation);
+        assert(selected==target.type);
+        const auto forecast=Bot::QuickPlaySearch::forecast_placement(f.env(),f.p,
+            f.p.gameplay.playfield.field,selected,answer,rotation);
+        assert(forecast.placement.clear.clearedLines==4 && forecast.placement.clear.perfectClear);
+        if(bot==AutoplayMode::ChatGPT) {
+            const auto diagnostics=Bot_chatgpt::last_diagnostics();
+            assert(diagnostics.rootNext==std::vector<int>({target.type.index(),event.index()}));
+            assert(diagnostics.fallbackReason==0);
+        }
+        ++checked;
+    }
+    // A cancelled search on a small field must use the shared geometry-aware
+    // host fallback; the native fallback assumes a 10x20 tetromino field.
+    for(auto bot:{AutoplayMode::ChatGPT,AutoplayMode::ZzztojBotris}) {
+        UserConfig::Settings user;user.qpSnowball=1;Fixture f(user,bot);
+        assert(Bot::init(f.context));f.context.autoplaySearchCancelled=std::make_shared<std::atomic<bool>>(true);
+        const auto type=f.p.pieces.allowedPieces.front();auto answer=spawn(f,type);Runtime::RotationRecord rotation;
+        const auto selected=Bot::getpos(f.context,f.p,f.p.gameplay.playfield.field,{type},{},answer,
+            {false,Piece::Type::none()},answer,rotation);
+        assert(selected==type && Piece::get_definition(type).can_place(answer,f.p.gameplay.playfield.field));
+        assert(!Piece::get_definition(type).can_place(answer.translated(1,0),f.p.gameplay.playfield.field));
+        ++checked;
+    }
+    std::cerr<<"QP mixed-family geometry/cancelled small-field regressions: "<<checked<<'\n';
 }
 void projections_match_real_mod_settlement() {
     for(int mode=0;mode<7;++mode) {
@@ -341,7 +384,7 @@ void windup_fatigue_and_piece_time_match_the_host() {
 
 void continuous_games_use_live_placement_and_frame_rules() {
     int placements=0,ended=0;
-    for(auto bot:bots)for(const auto& user:variants()) {
+    for(auto bot:allBots)for(const auto& user:variants()) {
         auto f=std::make_unique<Fixture>(user,bot);
         f->context.config.simulationPps=2.5;Engine::initialize_board_timers(f->context,f->p);
         assert(Bot::init(f->context));
@@ -376,6 +419,11 @@ void continuous_games_use_live_placement_and_frame_rules() {
             }
             const auto path=Engine::search_autoplay_path(b.field,piece,movement,answer,record,
                 f->context.config.handling,f->context.config.movement,gravity,false,{},Engine::autoplay_spin_rules(f->context.config));
+            if(!path)std::cerr<<"trajectory path failure bot="<<int(bot)<<" turn="<<turn
+                <<" expert="<<user.qpExpert<<" nh="<<user.qpNoHold<<" messy="<<user.qpMessy
+                <<" gravity="<<user.qpGravity<<" volatile="<<user.qpVolatile<<" dh="<<user.qpDoubleHole
+                <<" invisible="<<user.qpInvisible<<" as="<<user.qpAllSpin<<" bf="<<user.qpBackfire
+                <<" se="<<user.qpSnakeEyes<<" sb="<<user.qpSnowball<<" fool="<<user.qpFool<<'\n';
             assert(path);movement=path->finalMovement;
             const auto outcome=Engine::finalize_locked_piece(f->context,b.field,piece,f->p,movement,0,
                 [&]{return Engine::run_frame(f->context,b.field,f->p);});
@@ -403,10 +451,11 @@ void native_baseline_preserves_search_and_fatigue_floor() {
         const auto profile=bot==AutoplayMode::While1?Bot::QuickPlaySearch::Profile::While1:
             bot==AutoplayMode::ZzztojBotris?Bot::QuickPlaySearch::Profile::Botris:Bot::QuickPlaySearch::Profile::ChatGPT;
         const auto view=Bot::QuickPlaySearch::native_baseline(profile,env,f.p,b.field);
-        assert(view && Bot::QuickPlaySearch::plain(env));
+        assert(view && Bot::QuickPlaySearch::native_policy_compatible(env));
         assert(!Bot::QuickPlaySearch::enabled(view->environment));
         assert(view->environment.autoplaySearchWidth==env.autoplaySearchWidth);
         assert(view->environment.pieceTypes==env.pieceTypes && view->rowOffset==solid);
+        assert(view->player->gameplay.playfield.width==10);
         for(int y=-5;y<b.activeHeight;++y)for(int x=0;x<10;++x)
             assert(view->field->cell(y+solid,x)==b.field.cell(y,x));
         assert(view->player->gameplay.playfield.solidGarbageHeight==0);
@@ -419,15 +468,375 @@ void native_baseline_preserves_search_and_fatigue_floor() {
         for(int y=b.activeHeight;y<20;++y)for(int x=0;x<10;++x)
             assert(b.field.cell(y,x)==Runtime::BoardCell::solid_garbage());
         f.context.config.quickPlay.allSpin=AllSpinMode::Enabled;
-        assert(!Bot::QuickPlaySearch::native_baseline(profile,f.env(),f.p,b.field));
+        assert(bool(Bot::QuickPlaySearch::native_baseline(profile,f.env(),f.p,b.field))==
+            (bot==AutoplayMode::ChatGPT));
     }
     std::cerr<<"QP native policy/pressure/fatigue-floor bridge cases: 9\n";
 }
 
-void attack_trajectories(int target,unsigned seed,double hit,int searchWidth,bool freePlay=false,int onlyBot=0) {
+void non_structural_mods_preserve_native_policy() {
+    // These modifiers change visibility, pressure, holes or HOLD availability,
+    // not placement settlement. They must not select a different AI policy.
+    int UserConfig::Settings::* mods[]{&UserConfig::Settings::qpInvisible,
+        &UserConfig::Settings::qpExpert,&UserConfig::Settings::qpMessy,
+        &UserConfig::Settings::qpNoHold,&UserConfig::Settings::qpVolatile,
+        &UserConfig::Settings::qpDoubleHole,&UserConfig::Settings::qpGravity};
+    int cases=0;
+    for(auto bot:bots)for(auto mod:mods)for(int value:{1,2}) {
+        // Reverse NH changes spin scoring/randomization, rVL changes height,
+        // rDH replenishes the field, and rG is unsupported by native Botris.
+        if(value==2 && mod!=&UserConfig::Settings::qpInvisible &&
+            mod!=&UserConfig::Settings::qpExpert && mod!=&UserConfig::Settings::qpMessy)continue;
+        UserConfig::Settings user;user.*mod=value;
+        Fixture f(user,bot);
+        const auto profile=bot==AutoplayMode::While1?Bot::QuickPlaySearch::Profile::While1:
+            bot==AutoplayMode::ZzztojBotris?Bot::QuickPlaySearch::Profile::Botris:Bot::QuickPlaySearch::Profile::ChatGPT;
+        const auto baseline=Bot::QuickPlaySearch::native_baseline(profile,f.env(),f.p,f.p.gameplay.playfield.field);
+        assert(baseline && "A non-structural mod replaced the bot's native policy");
+        assert(Autoplay::availability(f.context.config,bot));
+        assert(Bot::init(f.context));
+        const auto target=quad(f);
+        check_route(f,{target.type},spawn(f,target.type),{false,Piece::Type::none()});
+        ++cases;
+    }
+    // ChatGPT's native spin evaluator also supports Extended AS. Its history
+    // only changes host XP; it does not add the repeat penalties of AS/rAS.
+    UserConfig::Settings extended;extended.qpAllSpin=3;
+    Fixture f(extended);
+    const auto baseline=Bot::QuickPlaySearch::native_baseline(Bot::QuickPlaySearch::Profile::ChatGPT,
+        f.env(),f.p,f.p.gameplay.playfield.field);
+    assert(baseline && Bot_chatgpt::availability(baseline->environment));
+    assert(Bot::init(f.context));
+    const auto target=quad(f);
+    check_route(f,{target.type},spawn(f,target.type),{false,Piece::Type::none()});
+    ++cases;
+    std::cerr<<"QP modifiers retaining native policy: "<<cases<<'\n';
+}
+
+void chatgpt_rule_search_preserves_native_candidate_valuation() {
+    // Compare the two actual search paths at one-ply roots, where equal rules
+    // must rank terrain, clears and T/I conservation identically. A different
+    // search horizon or QP XP must not mask an unrelated evaluation switch.
+    int checked=0,dominated=0;
+    for(int terrain=0;terrain<4;++terrain)for(int family:{0,5}) {
+        Fixture f;f.context.config.garbage.hitMultiplier=0;
+        auto& field=f.p.gameplay.playfield.field;
+        if(terrain==1)quad(f);
+        if(terrain==2)for(int x=0;x<10;++x)for(int y=20-x%4;y<20;++y)
+            field.set_cell(y,x,Runtime::BoardCell::piece(1));
+        if(terrain==3)for(int x=0;x<10;++x) {
+            if(x!=9)field.set_cell(16,x,Runtime::BoardCell::piece(1));
+            if(x%3)field.set_cell(19,x,Runtime::BoardCell::piece(1));
+        }
+        const auto type=f.p.pieces.allowedPieces[family];
+        const auto start=spawn(f,type);
+        assert(Bot::init(f.context));
+        check_route(f,{type},start,{false,Piece::Type::none()});
+        const auto native=Bot_chatgpt::last_candidates();
+        const auto simulated=Bot::QuickPlaySearch::search(Bot::QuickPlaySearch::Profile::ChatGPT,
+            f.env(),f.p,field,{family},{},start,-2);
+        assert(!native.empty() && !simulated.candidates.empty());
+        const auto cells=[&](const Autoplay::PlacementCandidate& candidate) {
+            auto result=Piece::get_definition(type).cells(candidate.pose.rotation);
+            for(auto& cell:result) {cell[0]+=candidate.pose.position.row;cell[1]+=candidate.pose.position.col;}
+            std::sort(result.begin(),result.end());return result;
+        };
+        for(const auto& candidate:simulated.candidates) {
+            bool matched=false,stronger=false;
+            const auto classification=[&](const auto& placement) {
+                const auto forecast=Bot::QuickPlaySearch::forecast_placement(f.env(),f.p,field,type,placement.pose,placement.rotation);
+                return forecast.placement.spin.spin?(forecast.placement.spin.mini?1:2):0;
+            };
+            const int category=classification(candidate);
+            for(const auto& original:native)if(cells(original)==cells(candidate)) {
+                if(classification(original)>category && original.value+16000>=candidate.value)stronger=true;
+                if(classification(original)==category && std::abs(original.value+16000-candidate.value)<1e-6)matched=true;
+            }
+            // Native search retains only the strongest spin for equivalent
+            // geometry. The rule search also exposes executable non-spin
+            // variants: these may be dominated, never differently scored.
+            if(!matched && stronger){++dominated;continue;}
+            if(!matched)std::cerr<<"valuation mismatch terrain="<<terrain<<" family="<<family<<" pose="
+                <<candidate.pose.position.row<<','<<candidate.pose.position.col<<','<<candidate.pose.rotation.index()
+                <<" category="<<category<<" simulated="<<candidate.value<<'\n';
+            assert(matched && "QP simulation changed ChatGPT's native placement valuation");
+            ++checked;
+        }
+    }
+    std::cerr<<"QP/native ChatGPT candidate valuations matched: "<<checked<<"; weaker spin variants="<<dominated<<'\n';
+}
+
+void inactive_floor_does_not_change_terrain_policy() {
+    UserConfig::Settings user;user.qpAllSpin=1;
+    Fixture fatigue(user),shortField(user);
+    auto prepare=[](Fixture& f,int visible) {
+        auto& b=f.p.gameplay.playfield;
+        f.context.config.field.height=visible;f.context.config.garbage.hitMultiplier=0;
+        b.visibleHeight=visible;b.activeHeight=17;b.solidGarbageHeight=visible-17;
+        b.field.initialize(10,visible);
+        for(int y=17;y<visible;++y)for(int x=0;x<10;++x)b.field.set_cell(y,x,Runtime::BoardCell::solid_garbage());
+        for(int x=0;x<10;++x)for(int y=17-x%3;y<17;++y)b.field.set_cell(y,x,Runtime::BoardCell::piece(1));
+    };
+    prepare(fatigue,20);prepare(shortField,17);
+    const auto type=fatigue.p.pieces.allowedPieces[5];
+    const auto a=Bot::QuickPlaySearch::search(Bot::QuickPlaySearch::Profile::ChatGPT,
+        fatigue.env(),fatigue.p,fatigue.p.gameplay.playfield.field,{5},{},spawn(fatigue,type),-2);
+    const auto b=Bot::QuickPlaySearch::search(Bot::QuickPlaySearch::Profile::ChatGPT,
+        shortField.env(),shortField.p,shortField.p.gameplay.playfield.field,{5},{},spawn(shortField,type),-2);
+    assert(!a.candidates.empty() && a.candidates.size()==b.candidates.size());
+    for(std::size_t i=0;i<a.candidates.size();++i) {
+        assert(a.candidates[i].pose==b.candidates[i].pose);
+        assert(std::abs(a.candidates[i].value-b.candidates[i].value)<1e-6);
+    }
+}
+
+void hold_validates_from_grounded_pose() {
+    UserConfig::Settings user;user.qpGravity=2;Fixture f(user);
+    auto& field=f.p.gameplay.playfield.field;
+    for(int y=12;y<20;++y)for(int x=6;x<10;++x)field.set_cell(y,x,Runtime::BoardCell::piece(1));
+    const auto type=f.p.pieces.allowedPieces[3];const auto piece=Piece::get_definition(type);
+    assert(Piece::metadata(type).familyIndex==3);
+    const auto origin=Piece::spawn_pose(10,type);
+    auto target=origin.translated(0,1);
+    while(piece.can_place(target.translated(1,0),field))++target.position.row;
+    Engine::MovementState airborne;airborne.pose=origin;
+    const auto gravity=Runtime::current_gravity_interval(f.context);
+    const auto route=[&](const auto& start) {
+        return Engine::search_autoplay_path(field,piece,start,target,{},f.context.config.handling,
+            f.context.config.movement,gravity,false,{},Engine::autoplay_spin_rules(f.context.config));
+    };
+    assert(route(airborne)); // The incorrect hold validator accepted this aerial shift.
+    auto grounded=airborne;Engine::apply_presentation_instant_gravity(grounded,
+        [&](Piece::Pose pose){return piece.can_place(pose,field);});
+    assert(!route(grounded)); // Eight rows cannot be climbed after instant gravity.
+    f.p.gameplay.hold.piece=type;
+    assert(!Bot::QuickPlaySearch::native_answer_valid(f.env(),f.p,field,{5},origin,3,3,target,{}));
+}
+
+void capability_scoring_and_geometry() {
+    using namespace Bot_chatgpt;
+    const auto ordinary=capability_policy({},20,true,false);
+    const auto noHold=capability_policy({},20,false,false);
+    const auto fullSpin=capability_policy({},20,true,true);
+    const auto digging=capability_policy({14,8,6,3},20,true,false);
+    assert(noHold.tWaste<ordinary.tWaste && noHold.holdReserve==0);
+    assert(fullSpin.tWaste<ordinary.tWaste && digging.garbageClear>ordinary.garbageClear);
+    const std::array<std::uint32_t,4> well{0x1ff,0x1ff,0x1ff,0x1ff};
+    assert(capability_terrain(well.data(),4,10,0,{false,false,false,4})<
+        capability_terrain(well.data(),4,10,0,{false,false,true,4}));
+    int cases=0;
+    // Compare the accelerated host entry and the complete general movement
+    // graph, including distinct spin classes at the same occupied cells.
+    for(int variant=0;variant<9;++variant)for(int family=0;family<7;++family) {
+        UserConfig::Settings user;user.qpAllSpin=variant%2?2:1;
+        Fixture f(user);f.context.config.garbage.hitMultiplier=0;
+        auto& b=f.p.gameplay.playfield;b.field.clear();b.garbageHeight=0;
+        if(variant==1)for(int y=12;y<20;++y)b.field.set_cell(y,0,Runtime::BoardCell::piece(1));
+        if(variant==2)for(int x=0;x<10;++x)for(int y=20-x%4;y<20;++y)
+            b.field.set_cell(y,x,Runtime::BoardCell::piece(1));
+        if(variant==3) {
+            b.activeHeight=12;b.solidGarbageHeight=8;
+            for(int y=12;y<20;++y)for(int x=0;x<10;++x)b.field.set_cell(y,x,Runtime::BoardCell::solid_garbage());
+            for(int x=1;x<9;++x)b.field.set_cell(11,x,Runtime::BoardCell::piece(1));
+        }
+        if(variant==4)f.context.config.handling.gravityInterval=Runtime::GravityInterval::instant();
+        if(variant==5) {f.context.config.handling.das={};f.context.config.handling.arr={};}
+        if(variant==6)f.context.config.movement.disableLeft=true;
+        if(variant==7) {
+            f.context.config.movement.disableClockwise=true;f.context.config.movement.disableCounterclockwise=true;
+            f.context.config.movement.disable180=true;
+        }
+        if(variant==8) {
+            f.context.config.legacyRotationRules=true;
+            f.p.pieces.allowedPieces=Piece::types_for_rotation_system(Runtime::RotationSystem::SrsPlus,true);
+        }
+        const auto type=f.p.pieces.allowedPieces[family];const auto start=spawn(f,type);
+        assert(Bot::init(f.context));check_route(f,{type},start,{false,Piece::Type::none()});
+        // Native tree search keeps its strongest representative per geometry.
+        // Test the rule-search accelerator itself, which must retain all
+        // ordinary/Mini/full variants required by the repeat rules.
+        auto geometry=Bot_chatgpt::enumerate_placements(f.env(),b.field,b.activeHeight,type,start,
+            f.context.config.handling.gravityInterval);
+        const auto accelerated=geometry?*geometry:Bot::QuickPlaySearch::search(
+            Bot::QuickPlaySearch::Profile::ChatGPT,f.env(),f.p,b.field,{family},{},start,-2).candidates;
+        const auto reference=Bot::QuickPlaySearch::search(Bot::QuickPlaySearch::Profile::Botris,
+            f.env(),f.p,b.field,{family},{},start,-2);
+        const auto keys=[&](const auto& candidates) {
+            std::set<std::vector<int>> result;
+            for(const auto& candidate:candidates) {
+                const auto p=Bot::QuickPlaySearch::forecast_placement(f.env(),f.p,b.field,type,candidate.pose,candidate.rotation);
+                std::vector<int> key{p.placement.spin.spin?(p.placement.spin.mini?1:2):0};
+                auto cells=Piece::get_definition(type).cells(candidate.pose.rotation);
+                for(auto& cell:cells){cell[0]+=candidate.pose.position.row;cell[1]+=candidate.pose.position.col;}
+                std::sort(cells.begin(),cells.end());
+                for(const auto& cell:cells){key.push_back(cell[0]);key.push_back(cell[1]);}
+                result.insert(std::move(key));
+            }
+            return result;
+        };
+        const auto a=keys(accelerated),r=keys(reference.candidates);
+        if(a!=r)std::cerr<<"Capability geometry mismatch variant="<<variant<<" family="<<family<<" fast="<<a.size()<<" reference="<<r.size()<<'\n';
+        assert(!a.empty() && a==r);++cases;
+    }
+    // Equivalent capabilities must score identically regardless of whether
+    // they came from a named modifier or direct runtime settings.
+    for(int mechanism=0;mechanism<3;++mechanism) {
+        UserConfig::Settings user;
+        if(mechanism==0)user.qpNoHold=1;
+        if(mechanism==1)user.qpGravity=2;
+        if(mechanism==2)user.qpAllSpin=3;
+        Fixture named(user),direct;
+        direct.context.config=named.context.config;
+        direct.context.config.quickPlay.noHold=Runtime::ModifierMode::Disabled;
+        direct.context.config.quickPlay.gravity=Runtime::ModifierMode::Disabled;
+        direct.context.config.quickPlay.allSpin=Runtime::AllSpinMode::Disabled;
+        named.p.gameplay.playfield.field.clear();direct.p.gameplay.playfield.field.clear();
+        const auto type=named.p.pieces.allowedPieces[5];
+        auto a=Bot::QuickPlaySearch::search(Bot::QuickPlaySearch::Profile::ChatGPT,named.env(),named.p,
+            named.p.gameplay.playfield.field,{5},{},spawn(named,type),-2);
+        auto b=Bot::QuickPlaySearch::search(Bot::QuickPlaySearch::Profile::ChatGPT,direct.env(),direct.p,
+            direct.p.gameplay.playfield.field,{5},{},spawn(direct,type),-2);
+        assert(!a.candidates.empty() && a.candidates.size()==b.candidates.size());
+        for(std::size_t i=0;i<a.candidates.size();++i) {
+            assert(a.candidates[i].pose==b.candidates[i].pose);
+            assert(std::abs(a.candidates[i].value-b.candidates[i].value)<1e-6);
+        }
+    }
+    std::cerr<<"Capability geometry parity: "<<cases<<"; named/direct scoring parity: 3\n";
+}
+
+void all_pair_capabilities() {
+    int UserConfig::Settings::* mods[]{&UserConfig::Settings::qpExpert,&UserConfig::Settings::qpNoHold,
+        &UserConfig::Settings::qpMessy,&UserConfig::Settings::qpGravity,&UserConfig::Settings::qpVolatile,
+        &UserConfig::Settings::qpDoubleHole,&UserConfig::Settings::qpInvisible,&UserConfig::Settings::qpAllSpin,
+        &UserConfig::Settings::qpBackfire,&UserConfig::Settings::qpSnakeEyes,&UserConfig::Settings::qpSnowball,
+        &UserConfig::Settings::qpFool};
+    const auto levels=[](int family){return family==7?3:family==11?4:2;};
+    int checked=0;
+    for(int i=0;i<12;++i)for(int j=i+1;j<12;++j)for(int a=1;a<=levels(i);++a)for(int b=1;b<=levels(j);++b) {
+        UserConfig::Settings user;user.*mods[i]=a;user.*mods[j]=b;Fixture f(user);
+        std::vector<Piece::Type> next;
+        for(auto type:f.p.pieces.allowedPieces) {
+            if(Piece::get_definition(type).can_place(spawn(f,type),f.p.gameplay.playfield.field))next.push_back(type);
+            if(next.size()==3)break;
+        }
+        assert(!next.empty());assert(Bot::init(f.context));
+        check_route(f,next,spawn(f,next.front()),{f.env().holdEnabled,Piece::Type::none()});++checked;
+    }
+    assert(checked==332);std::cerr<<"ChatGPT two-family modifier capability paths: "<<checked<<'\n';
+}
+
+void productive_spin_objective() {
+    using namespace Bot_chatgpt;
+    // Rotating without removing any cells must not farm the completion score.
+    const auto policy=capability_policy({},20,true,true);
+    assert(placement_reward(policy,0,0,0,1,true,false,0)==
+        placement_reward(policy,0,0,0,1,false,false,0));
+    int offered=0,chosen=0;
+    // A real, reachable uneven surface with several non-T Spin exits. Use
+    // a singleton queue so the complete first-ply comparison is independent
+    // of the machine's timed search depth. Include its mirrored terrain.
+    constexpr unsigned slots[][6]{
+        {1019,1019,993,1019,1019,1019}, {1017,1009,1017,1017,1017,1017},
+        {1019,1009,1009,1017,1017,1017}, {1019,1017,1009,1017,1017,1017},
+        {1021,1009,1017,1017,1017,1017}};
+    for(int mode:{1,2,3})for(bool mirror:{false,true})for(int family:{0,1,2,4,6}) {
+        UserConfig::Settings user;user.qpAllSpin=mode;Fixture f(user);
+        const auto& rows=slots[family==0?0:family==1?1:family==2?2:family==4?3:4];
+        auto& b=f.p.gameplay.playfield;b.field.clear();b.garbageHeight=std::size(rows);
+        for(int y=0;y<int(std::size(rows));++y)for(int x=0;x<10;++x)if(rows[y]&(1u<<x))
+            b.field.set_cell(19-y,mirror?9-x:x,Runtime::BoardCell::garbage());
+        f.context.config.garbage.hitMultiplier=0;
+        const auto type=f.p.pieces.allowedPieces[family];auto pose=spawn(f,type);Runtime::RotationRecord record;
+        assert(Bot::init(f.context));
+        const auto selected=Bot::getpos(f.context,f.p,b.field,{type},{},pose,{false,Piece::Type::none()},pose,record);
+        assert(selected==type);
+        bool available=false;
+        for(const auto& candidate:last_candidates()) {
+            const auto p=Bot::QuickPlaySearch::forecast_placement(f.env(),f.p,b.field,type,candidate.pose,candidate.rotation);
+            available|=!p.dead && p.placement.spin.spin && p.placement.clear.clearedLines>0;
+        }
+        if(!available)continue;
+        ++offered;
+        const auto p=Bot::QuickPlaySearch::forecast_placement(f.env(),f.p,b.field,type,pose,record);
+        chosen+=!p.dead && p.placement.spin.spin && p.placement.clear.clearedLines>0;
+        assert(!p.dead && p.placement.spin.spin && p.placement.clear.clearedLines>0);
+        Engine::MovementState start;start.pose=spawn(f,type);
+        assert(Engine::search_autoplay_path(b.field,Piece::get_definition(type),start,pose,record,
+            f.context.config.handling,f.context.config.movement,f.context.config.handling.gravityInterval,
+            false,{},Engine::autoplay_spin_rules(f.context.config)));
+        if(mode==2) {
+            f.p.gameplay.quickPlay.lastOperation=Runtime::QuickPlayClearOperation{
+                type,p.placement.clear.clearedLines,true,p.placement.spin.mini};
+            auto answer=start.pose;Runtime::RotationRecord rotation;
+            assert(Bot::getpos(f.context,f.p,b.field,{type},{},answer,{false,Piece::Type::none()},answer,rotation)==type);
+            assert(!Bot::QuickPlaySearch::forecast_placement(f.env(),f.p,b.field,type,answer,rotation).dead);
+        }
+    }
+    assert(offered>0 && chosen==offered);
+    // Instant gravity is a movement capability, shared by ordinary settings
+    // and QP modifiers. It must not silently replace the native search.
+    for(int mode:{0,1,2}) {
+        UserConfig::Settings user;user.qpAllSpin=mode;user.qpGravity=2;Fixture f(user);
+        f.context.config.autoplay.searchWidth=300;
+        assert(Bot_chatgpt::availability(Bot::QuickPlaySearch::native_environment(f.env())));
+        assert(Bot::init(f.context));
+        check_route(f,f.p.pieces.allowedPieces,spawn(f,f.p.pieces.allowedPieces.front()),{true,Piece::Type::none()});
+        assert(last_diagnostics().evaluated==0 && last_diagnostics().searchWidth==300);
+    }
+    for(int mode:{1,2}) {
+        UserConfig::Settings user;user.qpAllSpin=mode;Fixture f(user);
+        auto& b=f.p.gameplay.playfield;b.field.clear();b.activeHeight=1;b.solidGarbageHeight=19;
+        for(int y=1;y<20;++y)for(int x=0;x<10;++x)b.field.set_cell(y,x,Runtime::BoardCell::solid_garbage());
+        const auto type=f.p.pieces.allowedPieces[3];const auto piece=Piece::get_definition(type);
+        const auto start=spawn(f,type);auto target=start;
+        while(piece.can_place(target.translated(1,0),b.field))++target.position.row;
+        unsigned holes=0;for(const auto& cell:piece.cells(target.rotation))if(target.position.row+cell[0]==0)
+            holes|=1u<<(target.position.col+cell[1]);
+        assert(holes);
+        for(int x=0;x<10;++x)if(!(holes&(1u<<x)))b.field.set_cell(0,x,Runtime::BoardCell::garbage());
+        f.p.gameplay.quickPlay.lastOperation=Runtime::QuickPlayClearOperation{type,1,false,false};
+        assert(Bot::QuickPlaySearch::forecast_placement(f.env(),f.p,b.field,type,target,{}).dead);
+        assert(!Bot::QuickPlaySearch::native_answer_valid(f.env(),f.p,b.field,{3},start,-2,3,target,{}));
+    }
+    int referenceCases=0;
+    for(int mode:{0,1,2})for(int height:{17,20})for(int top:{-100,-99,-30,-1,0,10}) {
+        UserConfig::Settings user;user.qpAllSpin=mode;Fixture f(user);
+        f.context.config.field.height=height;f.context.config.garbage.hitMultiplier=0;
+        auto& b=f.p.gameplay.playfield;b.visibleHeight=b.activeHeight=height;b.field.initialize(10,height);
+        const auto target=quad(f);
+        b.field.set_cell(top,0,Runtime::BoardCell::piece(2));
+        const auto p=Bot::QuickPlaySearch::forecast_placement(f.env(),f.p,b.field,target.type,target.pose,{});
+        auto piece=Piece::get_definition(target.type);Engine::MovementState movement;movement.pose=target.pose;
+        Engine::finalize_locked_piece(f.context,b.field,piece,f.p,movement,0,[]{return Rules::PlayResult::ContinueFrame;});
+        assert(p.placement.clear.clearedLines==4 && p.activeHeight==b.activeHeight);
+        for(int y=-Runtime::kHiddenRowCapacity;y<height;++y)for(int x=0;x<10;++x)
+            assert(p.field->cell(y,x)==b.field.cell(y,x));
+        ++referenceCases;
+    }
+    // Default and larger user widths must survive the QP dispatch unchanged;
+    // a modifier must not impose the former 17/48-candidate ceiling.
+    for(int width:{300,600}) {
+        UserConfig::Settings user;user.qpAllSpin=1;Fixture f(user);
+        f.context.config.autoplay.searchWidth=width;f.context.config.garbage.hitMultiplier=0;
+        const auto next=f.p.pieces.allowedPieces;
+        assert(Bot::init(f.context));
+        std::vector<int> queue;for(auto type:next)queue.push_back(Piece::metadata(type).familyIndex);
+        const auto d=Bot::QuickPlaySearch::search(Bot::QuickPlaySearch::Profile::ChatGPT,f.env(),f.p,
+            f.p.gameplay.playfield.field,queue,{},spawn(f,next.front()),-1);
+        assert(d.searchWidth==width && d.peakFrontier>48 && d.peakFrontier<=width);
+        std::cerr<<"Spin search width="<<d.searchWidth<<" peak_frontier="<<d.peakFrontier
+            <<" depth="<<d.depth<<" evaluated="<<d.evaluated<<'\n';
+    }
+    std::cerr<<"Productive non-T Spin choices: "<<chosen<<'/'<<offered<<"; reverse repeats rejected; "
+        <<referenceCases<<" hidden-row/short-field settlement references\n";
+}
+
+void attack_trajectories(int target,unsigned seed,double hit,int searchWidth,bool freePlay=false,int onlyBot=0,
+    UserConfig::Settings user={}) {
     for(auto bot:bots) {
         if(onlyBot && int(bot)!=onlyBot)continue;
-        Fixture f({},bot);
+        Fixture f(user,bot);
         f.context.config.autoplay.searchWidth=searchWidth;
         f.context.config.garbage.hitMultiplier=hit;
         f.context.config.simulationPps=2.5;
@@ -439,7 +848,7 @@ void attack_trajectories(int target,unsigned seed,double hit,int searchWidth,boo
         Engine::initialize_quick_play(f.context,f.p);
         Engine::initialize_board_timers(f.context,f.p);
         assert(Bot::init(f.context));
-        int survived=0,multiple=0,quads=0,spins=0,depth=0;double milliseconds=0;
+        int survived=0,multiple=0,quads=0,spins=0,damagingSingles=0,depth=0;double milliseconds=0;
         for(int turn=0;turn<target;++turn) {
             auto& b=f.p.gameplay.playfield;
             while(f.p.pieces.bag.size()<=static_cast<std::size_t>(b.nextCount+1))Engine::add_bag(f.context,f.p);
@@ -456,7 +865,7 @@ void attack_trajectories(int target,unsigned seed,double hit,int searchWidth,boo
             const auto began=std::chrono::steady_clock::now();
             const auto selected=Bot::getpos(f.context,f.p,b.field,next,
                 Engine::unseen_pieces_in_preview_endpoint_bag(f.context,f.p),movement.pose,
-                {true,f.p.gameplay.hold.piece},answer,record);
+                {f.context.config.field.holdEnabled,f.p.gameplay.hold.piece},answer,record);
             milliseconds+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
             if(bot==AutoplayMode::ChatGPT)depth+=Bot_chatgpt::last_diagnostics().projectedDepth;
             assert(selected.valid());
@@ -474,17 +883,22 @@ void attack_trajectories(int target,unsigned seed,double hit,int searchWidth,boo
             const auto resolved=Bot::QuickPlaySearch::forecast_placement(f.env(),f.p,b.field,piece.type(),movement.pose,movement.lastRotation);
             multiple+=resolved.placement.clear.clearedLines>=2;quads+=resolved.placement.clear.clearedLines>=4;
             spins+=resolved.placement.spin.spin && resolved.placement.clear.clearedLines>0;
+            const int attackBefore=f.p.gameplay.scoring.totalAttack;
             const auto outcome=Engine::finalize_locked_piece(f.context,b.field,piece,f.p,movement,0,
                 [&]{return Engine::run_frame(f.context,b.field,f.p);});
+            damagingSingles+=resolved.placement.clear.clearedLines==1 && f.p.gameplay.scoring.totalAttack>attackBefore;
             Engine::consume_current_piece(f.p);++survived;
             if(outcome==Rules::PlayResult::Dead)break;
             assert(outcome==Rules::PlayResult::Locked);
         }
         const auto& s=f.p.gameplay.scoring;
-        std::cerr<<(freePlay?"Free-play":"QP")<<" attack trajectory bot="<<int(bot)<<" seed="<<seed<<" hit="<<hit<<" width="<<searchWidth<<" survived="<<survived<<" lines="<<s.totalLines
+        std::cerr<<(freePlay?"Free-play":"QP")<<" attack trajectory bot="<<int(bot)
+            <<" AS="<<user.qpAllSpin<<" BF="<<user.qpBackfire<<" SE="<<user.qpSnakeEyes
+            <<" seed="<<seed<<" hit="<<hit<<" width="<<searchWidth<<" survived="<<survived<<" lines="<<s.totalLines
             <<" attack="<<s.totalAttack<<" outgoing="<<s.totalOutgoingAttack<<" clears="<<s.clearMoves
             <<" zero_attack_clears="<<s.zeroAttackClears<<" difficult="<<s.difficultClears<<" max_attack="<<s.maxAttack
             <<" multiple="<<multiple<<" quads="<<quads<<" spins="<<spins<<" mean_ms="<<milliseconds/std::max(1,survived)
+            <<" damaging_singles="<<damagingSingles
             <<" mean_depth="<<double(depth)/std::max(1,survived)<<'\n';
         // A legal, surviving all-single trajectory is the reported regression.
         // Check real attack strength and multi-line clears, not only paths.
@@ -494,14 +908,60 @@ void attack_trajectories(int target,unsigned seed,double hit,int searchWidth,boo
         const bool bursts=s.maxAttack>=4 && s.attacksAtLeast4>0;
         const bool sustainedSpins=s.maxAttack>=3 && spins>=target/10 &&
             s.b2bExtensions>=target/10 && s.totalAttack>=target/3;
-        assert(bursts || sustainedSpins);
-        assert((multiple>=std::max(2,target/50) || sustainedSpins) && quads+spins>0);
-        assert(s.totalAttack>=target/5 && (freePlay || s.totalOutgoingAttack>0));
+        // BF may prefer smaller repeated spin attacks to limit self-garbage.
+        // SE explicitly removes attacks from non-singles, so quads cannot be
+        // its strength requirement. Both must still produce real attacks.
+        const bool backfireSpins=user.qpBackfire && s.maxAttack>=2 && spins>=target/20 &&
+            s.difficultClears>=target/20 && s.totalAttack>=target/5;
+        const bool snakeEyesSingles=user.qpSnakeEyes && s.maxAttack>=2 &&
+            damagingSingles>=std::max(1,target/10) && s.totalAttack>=damagingSingles;
+        assert(bursts || sustainedSpins || backfireSpins || snakeEyesSingles);
+        assert((multiple>=std::max(2,target/50) || sustainedSpins || snakeEyesSingles) && quads+spins>0);
+        // The lower total-attack threshold belongs to the actual single-only
+        // rule, including trajectories admitted by the burst alternative.
+        // It must not depend on whether the single-count witness also passed.
+        const bool singleOnly=Runtime::enabled(f.context.config.quickPlay.snakeEyes);
+        assert(s.totalAttack>=(singleOnly?target/10:target/5) && (freePlay || s.totalOutgoingAttack>0));
     }
 }
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     Render::begin_output_suppression();
+    if(argc>1 && std::string(argv[1])=="--spin-objective") {
+        productive_spin_objective();Render::end_output_suppression();return 0;
+    }
+    if(argc>1 && std::string(argv[1])=="--capability-regression") {
+        capability_scoring_and_geometry();Render::end_output_suppression();return 0;
+    }
+    if(argc>1 && std::string(argv[1])=="--capability-pairs") {
+        all_pair_capabilities();Render::end_output_suppression();return 0;
+    }
+    hold_validates_from_grounded_pose();
+    mixed_geometries_keep_distinct_piece_ids();
+    if(argc>1 && std::string(argv[1])=="--geometry-regression") {
+        Render::end_output_suppression();return 0;
+    }
+    if(argc>1 && std::string(argv[1])=="--live-trajectories") {
+        continuous_games_use_live_placement_and_frame_rules();
+        Render::end_output_suppression();return 0;
+    }
+    if(argc>1 && std::string(argv[1])=="--policy-regression") {
+        non_structural_mods_preserve_native_policy();
+        chatgpt_rule_search_preserves_native_candidate_valuation();
+        inactive_floor_does_not_change_terrain_policy();
+        Render::end_output_suppression();return 0;
+    }
+    if(argc>1 && std::string(argv[1])=="--mod-benchmark") {
+        for(int mod=0;mod<3;++mod) {
+            UserConfig::Settings user;
+            if(mod==0)user.qpAllSpin=3;
+            if(mod==1)user.qpBackfire=1;
+            if(mod==2)user.qpSnakeEyes=1;
+            attack_trajectories(argc>2?std::stoi(argv[2]):100,123,0,300,false,
+                argc>3?std::stoi(argv[3]):0,user);
+        }
+        Render::end_output_suppression();return 0;
+    }
     if(argc>1 && (std::string(argv[1])=="--attack-benchmark" || std::string(argv[1])=="--free-benchmark")) {
         attack_trajectories(argc>2?std::stoi(argv[2]):100,argc>3?std::stoul(argv[3]):123,
             argc>4?std::stod(argv[4]):0,argc>5?std::stoi(argv[5]):300,std::string(argv[1])=="--free-benchmark",
@@ -517,6 +977,11 @@ int main(int argc,char** argv) {
     windup_fatigue_and_piece_time_match_the_host();
     continuous_games_use_live_placement_and_frame_rules();
     native_baseline_preserves_search_and_fatigue_floor();
+    non_structural_mods_preserve_native_policy();
+    chatgpt_rule_search_preserves_native_candidate_valuation();
+    inactive_floor_does_not_change_terrain_policy();
     default_search_budget_has_legal_results();
     Render::end_output_suppression();
+    return 0;
 }
+} // namespace TetrTests::bot_quick_play_mods_test

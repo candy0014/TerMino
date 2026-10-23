@@ -26,8 +26,11 @@ public:
                         std::shared_ptr<TerminalSettingsSurface> surface = {}, TerminalSizeQuery terminalSizeQuery = {},bool mapEditor = false);
     bool terminal_size_changed() const;
     std::size_t page_rows() const { return visibleRows_; }
+    std::size_t navigation_depth() const {return ancestors_.size();}
     void invalidate() const;
     void set_read_only(bool enabled) {readOnly_=enabled;}
+    void set_play_rooms(bool enabled) {playRooms_=enabled;}
+    bool play_rooms() const {return playRooms_;}
     void prepare_layout(std::size_t entries, const std::string& breadcrumb) const;
     void set_menu_path(const Model::SettingNode& root, const std::vector<std::string>& path, std::size_t selected);
     void set_submenu_path(const TerminalSettingsView& parent, const Model::SettingNode& root,
@@ -46,6 +49,7 @@ public:
     void print_reset_confirmation(bool pending) const;
     void print_message(const std::string& message) const;
 private:
+    bool playRooms_=false;
     struct ColumnBox { int column; int width; };
     void line(int row, const std::string& text, int atColumn = 4, int atWidth = 52) const;
     void present(std::optional<std::pair<int,int>> cursor = {}) const;
@@ -66,6 +70,7 @@ private:
     std::string row_text(const Model::SettingNode& node, bool selected, int availableWidth = 0,bool showSummary=true) const;
     int menu_width(const Model::SettingNode& menu) const;
     std::string value_text(const Model::SettingItem& item) const;
+    Frontend::UiEntry graphical_entry(const Model::SettingNode& node) const;
     const Runtime::GameContext& context_;
     int player_;
     bool localVersus_;

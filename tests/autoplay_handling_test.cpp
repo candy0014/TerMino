@@ -22,6 +22,7 @@
 #include <sstream>
 #include <thread>
 #include <filesystem>
+namespace TetrTests::autoplay_handling_test {
 namespace {
 using namespace Engine;
 using D=Runtime::Duration;
@@ -280,10 +281,12 @@ void persisted_option() {
     assert(Replay::decode_config_prefix("{{Model,0}}",restored,prefix) && !restored.autoplay.handlingSimulation);
 }
 }
-int main() {
+int run(int argc,char** argv) {
     std::ostringstream output;auto* previous=std::cout.rdbuf(output.rdbuf());
     thinking_freezes_piece_and_lock();display_rates_and_instant_hard_drop();hold_keeps_first_target();
     cancelled_work_cannot_move_the_next_piece();bug_replay_tuck_uses_unified_search();equivalent_kicks_preserve_spin();
     disabled_drop_keys_use_natural_lock();native_targets_are_preserved();persisted_option();
     std::cout.rdbuf(previous);std::cerr<<"autoplay_handling: OK\n";
+    return 0;
 }
+} // namespace TetrTests::autoplay_handling_test

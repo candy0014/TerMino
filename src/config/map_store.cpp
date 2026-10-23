@@ -1,3 +1,4 @@
+#include "tetr/util/runtime_directory_lock.h"
 #include "tetr/config/map_store.h"
 #include "tetr/config/user_config.h"
 #include "tetr/config/settings_schema.h"
@@ -73,6 +74,7 @@ std::optional<Runtime::MapDefinition> find(int id,const std::filesystem::path& p
     for(const auto& map:collection.maps) if(map.id==id) return map;return {};
 }
 bool save(Runtime::MapDefinition& map,SaveUndo& undo,const std::filesystem::path& path) {
+    Util::FileWriteLock writeLock(path);if(!writeLock.acquired())return false;
     if(!Runtime::valid_map(map) || map.name.empty()) return false;
     Collection collection;if(!load(collection,path)) return false;
     auto found=std::find_if(collection.maps.begin(),collection.maps.end(),[&](const auto& existing){return existing.id==map.id;});
@@ -90,6 +92,7 @@ bool save(Runtime::MapDefinition& map,SaveUndo& undo,const std::filesystem::path
     map=std::move(saved);undo=std::move(next);return true;
 }
 bool undo_save(const SaveUndo& undo,const std::filesystem::path& path) {
+    Util::FileWriteLock writeLock(path);if(!writeLock.acquired())return false;
     Collection collection;if(!load(collection,path)) return false;
     const auto found=std::find_if(collection.maps.begin(),collection.maps.end(),[&](const auto& map){return map.id==undo.saved.id;});
     // Preserve other records and reject undo if someone changed this record.
@@ -138,6 +141,7 @@ void remap_selection(Settings& settings,const IdChanges& changes) {
     }
 }
 bool remove(int id,const std::filesystem::path& path,IdChanges* changes) {
+    Util::FileWriteLock writeLock(path);if(!writeLock.acquired())return false;
     Collection collection;if(!load(collection,path)) return false;
     const auto found=std::find_if(collection.maps.begin(),collection.maps.end(),[&](const auto& map){return map.id==id;});
     if(found==collection.maps.end()) return false;

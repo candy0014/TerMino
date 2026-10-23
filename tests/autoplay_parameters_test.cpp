@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+namespace TetrTests::autoplay_parameters_test {
 namespace {
 using D=Runtime::Duration;using T=Runtime::TimePoint;
 D seconds(double value) {return D::from_seconds(value);}
@@ -141,7 +142,7 @@ void physical_keys_do_not_steer_bot_birth() {
     assert(!Engine::apply_initial_movement(context,keys,movement,[](auto){return true;}));assert(movement.pose==before);
 }
 }
-int main() {
+int run(int argc,char** argv) {
     std::ostringstream output;auto* previous=std::cout.rdbuf(output.rdbuf());const auto settings=profiles();
     path_replay_matrix(settings);physical_keys_do_not_steer_bot_birth();int nativeCases=0;
     for(const auto& profile:settings) {
@@ -149,4 +150,6 @@ int main() {
         native_perfect_clear(profile,0,true);++nativeCases;
     }
     std::cout.rdbuf(previous);std::cerr<<"autoplay parameters: profiles="<<settings.size()<<" native_cases="<<nativeCases<<" OK\n";
+    return 0;
 }
+} // namespace TetrTests::autoplay_parameters_test

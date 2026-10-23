@@ -17,6 +17,7 @@
 #include "tetr/replay/turn_timeline.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/runtime/player_session_state.h"
+#include "tetr/util/worker_thread.h"
 
 #include <array>
 #include <cstdlib>
@@ -167,14 +168,16 @@ void run_local_versus(Runtime::GameContext& first, Runtime::GameContext& second)
     if (first.config.mode.replayMode) {
         Replay::start_playback(first, first.now());
         Replay::start_playback(second, second.now());
+        Replay::share_playback_clock(first,second);
+        Engine::share_replay_playback_controls(first,second);
     } else if (first.config.turnPieces > 0 && second.config.turnPieces > 0) {
         const auto origin = first.real_now();
         Replay::session(first).recordingStart = origin;
         Replay::session(second).recordingStart = origin;
     }
 
-    std::thread firstThread([&] { outcomes[0] = run_side(first,firstLoop); });
-    std::thread secondThread([&] { outcomes[1] = run_side(second,secondLoop); });
+    Util::WorkerThread firstThread([&] { outcomes[0] = run_side(first,firstLoop); });
+    Util::WorkerThread secondThread([&] { outcomes[1] = run_side(second,secondLoop); });
     firstThread.join();
     secondThread.join();
     firstInput.end(); secondInput.end();
@@ -213,6 +216,11 @@ void run_local_versus(Runtime::GameContext& first, Runtime::GameContext& second)
         return;
     }
 
+    for(int i=0;i<2;++i) {
+        auto& player=i?secondPlayer:firstPlayer;
+        if(outcomes[i]==Engine::GameLoopExit::Won)player.presentation.roundEndHeadline="WIN";
+        else if(outcomes[i]==Engine::GameLoopExit::Dead)player.presentation.roundEndHeadline="DEFEAT";
+    }
     print_batch_summary(first, second, outcomes);
     if(!first.config.mode.replayMode) {
         finish_single_player_challenges(first,firstPlayer,outcomes[0]==Engine::GameLoopExit::Won);

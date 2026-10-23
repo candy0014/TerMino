@@ -402,7 +402,7 @@ std::optional<LobbyPlayerSetup> decode_lobby_player_setup(std::string_view wire)
     const auto blockMaxWidth = Util::Text::parse_integer<int>(fields[7]);
     if (!visibleHeight || !width || !nextCount || !holdEnabled || !wins ||
         !blockMaxHeight || !blockMaxWidth) return std::nullopt;
-    if (*visibleHeight <= 0 || *visibleHeight > Runtime::Playfield::kStorageRows ||
+    if (*visibleHeight < 0 || *visibleHeight > Runtime::Playfield::kStorageRows ||
         *width <= 0 || *width > Runtime::Playfield::kStorageColumns ||
         *nextCount < 0 || *nextCount > 100 || (*holdEnabled != 0 && *holdEnabled != 1) ||
         !valid_nonnegative(*wins) || !valid_nonnegative(*blockMaxHeight) ||

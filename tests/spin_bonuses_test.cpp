@@ -13,6 +13,7 @@
 #include <set>
 #include <sstream>
 
+namespace TetrTests::spin_bonuses_test {
 namespace {
 using Mode = Runtime::SpinBonuses;
 using Cells = std::set<std::pair<int,int>>;
@@ -168,8 +169,10 @@ void fixtures() {
     std::cout << "]\n";
 }
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     if(argc==2 && std::string(argv[1])=="--fixtures") { fixtures(); return 0; }
     rules(); configs();
     std::cout << "Spin bonus rules, piece markers, attacks, scores and config round trips passed\n";
+    return 0;
 }
+} // namespace TetrTests::spin_bonuses_test

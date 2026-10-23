@@ -5,6 +5,7 @@
 #include <cassert>
 #include <iostream>
 
+namespace TetrTests::bot_chatgpt_rise_context_test {
 namespace B = Bot_chatgpt;
 namespace A = Bot_chatgpt::Analysis;
 
@@ -21,7 +22,7 @@ Runtime::Playfield raised(Runtime::Playfield field, int rise, int hole) {
     return field;
 }
 
-int main() {
+int run(int argc,char** argv) {
     A::PlainEngine geometry; assert(geometry.prepare(10, 40));
     auto* context = geometry.context().get();
     Runtime::Playfield field; field.initialize(10, 20); field.clear();
@@ -149,4 +150,6 @@ int main() {
     std::cout << "host_geometry_counterexamples=" << counterexamples
               << " old_model_accepts_unreachable_continuation=1 candidate_rejects=1"
               << " real_board_landings_preserved=" << realLandings << '\n';
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_rise_context_test

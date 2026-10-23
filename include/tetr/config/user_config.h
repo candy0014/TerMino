@@ -1,5 +1,6 @@
 #ifndef TETR_CONFIG_USER_CONFIG_H
 #define TETR_CONFIG_USER_CONFIG_H
+#include "tetr/config/client_config.h"
 
 #include <array>
 #include <cstddef>
@@ -11,17 +12,24 @@
 #include "tetr/config/preset_state.h"
 
 namespace UserConfig {
+inline constexpr const char* kDefaultUserConfigPath = kClientConfigPath;
+inline constexpr const char* kDefaultPlayerTwoUserConfigPath = kClientConfigPath;
 
 #ifdef _WIN32
 inline constexpr const char* kDefaultKeybindingPath = "keybinding_windows.txt";
 inline constexpr const char* kDefaultPlayerTwoKeybindingPath = "keybinding_player2_windows.txt";
-inline constexpr const char* kDefaultUserConfigPath = ".tetr/player1_windows.ini";
-inline constexpr const char* kDefaultPlayerTwoUserConfigPath = ".tetr/player2_windows.ini";
+inline constexpr const char* kLegacyUserConfigPath = ".tetr/player1_windows.ini";
+inline constexpr const char* kLegacyPlayerTwoUserConfigPath = ".tetr/player2_windows.ini";
+#elif defined(__ANDROID__)
+inline constexpr const char* kDefaultKeybindingPath = "keybinding_android.txt";
+inline constexpr const char* kDefaultPlayerTwoKeybindingPath = "keybinding_player2_android.txt";
+inline constexpr const char* kLegacyUserConfigPath = ".tetr/player1_android.ini";
+inline constexpr const char* kLegacyPlayerTwoUserConfigPath = ".tetr/player2_android.ini";
 #else
 inline constexpr const char* kDefaultKeybindingPath = "keybinding_linux.txt";
 inline constexpr const char* kDefaultPlayerTwoKeybindingPath = "keybinding_player2_linux.txt";
-inline constexpr const char* kDefaultUserConfigPath = ".tetr/player1_linux.ini";
-inline constexpr const char* kDefaultPlayerTwoUserConfigPath = ".tetr/player2_linux.ini";
+inline constexpr const char* kLegacyUserConfigPath = ".tetr/player1_linux.ini";
+inline constexpr const char* kLegacyPlayerTwoUserConfigPath = ".tetr/player2_linux.ini";
 #endif
 
 inline std::string make_guest_username() {
@@ -154,13 +162,25 @@ struct Settings {
     int uiLanguage=0; // 0: Chinese, 1: English.
     int showSpawnPosition=1;
     int continueInputUnfocused=0;
+    int effectsIntensity=100;
+    int fieldShake=35;
+    int particleIntensity=35;
+    int landingEffect=5;
+    int lineClearEffect=5;
+    int hardDropTrail=5;
+    int boardBounciness=100;
     static constexpr std::size_t kControlCount = 13;
     std::array<int,kControlCount> keyCodes{};
     // The first binding stays in the historical slot; -1 means unbound.
     std::array<std::vector<int>,kControlCount> additionalKeyCodes;
     std::string keybindingPath=kDefaultKeybindingPath;
-    // Empty for embedded/test settings; application players use separate files.
+    // Empty for embedded/test settings; application players share config.json.
     std::string persistencePath;
+    int persistencePlayer=0;
+    std::string persistencePlatform=kConfigPlatform;
+    // Process-local policy, never serialized. History/replay paths still use
+    // persistencePath when an additional graphical window edits settings.
+    bool persistenceEnabled=true;
     PresetState presets;
     // Transient authoring mask. Missing entries mean "undefined", regardless
     // of the concrete backing values used by the normal settings controls.
@@ -187,11 +207,19 @@ const std::array<int,Settings::kControlCount>& default_player_two_key_codes();
 
 // Load into an explicit settings object; no process-global configuration is
 // mutated as a side effect.
-void load(Settings& settings,const std::string& path=".tetr/player1.ini");
-// Import the legacy shared profile once, preserving native platform bindings
-// on Windows. Explicit imports retain their supplied controls.
+void load(Settings& settings,const std::string& path=kDefaultUserConfigPath);
+// Import old INI profiles once into the shared JSON document, preserving
+// platform bindings. Explicit legacy imports remain supported.
 void load_startup_settings(Settings& settings,bool playerTwo=false,std::string_view importPath={});
 bool save(const Settings& settings);
+bool migrate_client_config();
+// Stable identity survives consolidating player files; no file IO is involved.
+inline std::string profile_identity(const Settings& settings) {
+    const auto path=std::filesystem::u8path(settings.persistencePath);
+    if(path.extension()!=".json")return settings.persistencePath;
+    const auto prefix=path.filename()=="config.json"?std::string{}:path.stem().generic_u8string()+"-";
+    return (path.parent_path()/(prefix+(settings.persistencePlayer==1?std::string("player2"):std::string("player1"))+"_"+settings.persistencePlatform+".ini")).generic_u8string();
+}
 
 // Each platform uses its own files. The historical numeric format and custom
 // file paths remain supported by the centralized parser/writer.

@@ -19,6 +19,7 @@
 #include <fstream>
 
 // Fast transport fixture, not a BOT benchmark or an actual FT7 result.
+namespace TetrTests::tetrio_round_test {
 struct DropBot : Autoplay::Strategy {
     bool initialize(Runtime::GameContext&) override { return true; }
     Piece::Type choose_position(Runtime::GameContext&, Runtime::PlayerSessionState&,
@@ -98,7 +99,7 @@ static void check_garbage_packet_boundaries() {
     assert(p.garbage.tetrioRandom->column==expected.column);
     assert(!f.field.cell(19,lastHole).occupied());
 }
-int main(int argc, char** argv) {
+int run(int argc,char** argv) {
     assert(argc == 2);
     App::ApplicationState app;
     app.automaticLocalMatch = app.headlessLocalMatch = true;
@@ -127,4 +128,6 @@ int main(int argc, char** argv) {
     assert(!a.session.player.pieces.tetrioRandom && !a.session.player.garbage.tetrioRandom);
     assert(!b.session.player.pieces.tetrioRandom && !b.session.player.garbage.tetrioRandom);
     Render::end_output_suppression();
+    return 0;
 }
+} // namespace TetrTests::tetrio_round_test

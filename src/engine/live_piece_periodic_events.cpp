@@ -6,6 +6,7 @@
 #include "tetr/engine/movement_controller.h"
 #include "tetr/engine/periodic_events.h"
 #include "tetr/rules/game_completion.h"
+#include "tetr/rules/quick_play.h"
 #include "tetr/network/multiplayer_channel.h"
 #include "tetr/render/board_renderer.h"
 #include "tetr/render/piece_renderer.h"
@@ -65,6 +66,7 @@ std::optional<Rules::PlayResult> process_live_piece_periodic_events(
     if (fieldChanged && activeHeightBefore!=player.gameplay.playfield.activeHeight) *fieldChanged=true;
 
     if (!context.uses_piece_time() && context.config.garbage.mode == Runtime::GarbageMode::QuickPlay &&
+        Rules::qp_gravity_increases(context.config.quickPlay) &&
         periodic_event_due(now, player.timing.qpGravity, Runtime::Duration::from_seconds(1.0))) {
         Runtime::set_current_gravity_interval(
             context,

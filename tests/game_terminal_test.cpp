@@ -32,6 +32,7 @@
 #include <unistd.h>
 #endif
 
+namespace TetrTests::game_terminal_test {
 namespace {
 using App::InitDetail::TerminalCheckResult;
 using Render::TerminalSize;
@@ -76,7 +77,7 @@ void geometry() {
     Player a,b;
     auto& p=a.session->player;
     const auto ordinary=App::InitDetail::required_game_terminal_size(a.context);
-    for (int width:{4,10,32,100}) for (int height:{4,20,100})
+    for (int width:{4,10,32,100}) for (int height:{0,1,2,3,4,20,100})
         for (int next:{0,1,5,10}) for (bool hold:{false,true}) {
             p.gameplay.playfield.width=width;
             p.gameplay.playfield.visibleHeight=p.gameplay.playfield.activeHeight=height;
@@ -536,7 +537,7 @@ void positioned_output_batches_console_writes() {
     std::cerr<<"positioned output writes="<<counter.writes<<" bytes="<<counter.str().size()<<'\n';
 }
 
-int main() {
+int run(int argc,char** argv) {
     positioned_output_batches_console_writes();
     App::UiText::set_language(App::UiText::Language::Chinese);
     geometry();
@@ -551,4 +552,6 @@ int main() {
     restart_repaints_information();
     native_init_confirms_before_starting();
     native_room_checks_before_preparation();
+    return 0;
 }
+} // namespace TetrTests::game_terminal_test

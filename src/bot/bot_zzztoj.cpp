@@ -394,9 +394,9 @@ int native_strength(NativeBots::Kind kind, int configuredWidth) noexcept {
 
 bool init(const Bot::Environment& environment) {
     if (!supports(environment)) return false;
-    if (Bot::QuickPlaySearch::enabled(environment) && selected_kind(environment)==NativeBots::Kind::Botris) {
+    if (Bot::QuickPlaySearch::enabled(environment)) {
         const auto baseline=Bot::QuickPlaySearch::native_environment(environment);
-        if(Bot::QuickPlaySearch::plain(environment) && availability(baseline))return init(baseline);
+        if(Bot::QuickPlaySearch::native_policy_compatible(environment) && availability(baseline))return init(baseline);
         return true;
     }
     auto& state = engine_state();
@@ -417,31 +417,53 @@ int getpos(const Bot::Environment& environment, const Runtime::PlayerSessionStat
            const std::vector<int>& unseenBagPieces,
            int startRow, int startCol, int startRotation, int hold,
            int& answerRow, int& answerCol, int& answerRotation, int& answerKick) {
-    if(Bot::QuickPlaySearch::enabled(environment) && selected_kind(environment)==NativeBots::Kind::Botris) {
-        if(Bot::QuickPlaySearch::plain(environment) &&
-            availability(Bot::QuickPlaySearch::native_environment(environment))) {
-            if(auto baseline=Bot::QuickPlaySearch::native_baseline(Bot::QuickPlaySearch::Profile::Botris,
-                environment,player,field)) {
-                const int selected=getpos(baseline->environment,*baseline->player,*baseline->field,next,unseenBagPieces,
-                    startRow+baseline->rowOffset,startCol,startRotation,hold,answerRow,answerCol,answerRotation,answerKick);
-                answerRow-=baseline->rowOffset;
-                const auto record=answerKick>0?Runtime::RotationRecord::from_kick(
-                    Piece::KickIndex::from_index(answerKick-1)):Runtime::RotationRecord{};
-                if(Bot::QuickPlaySearch::native_answer_valid(environment,player,field,next,
-                    {{startRow,startCol},Runtime::Rotation::from_index(startRotation)},hold,selected,
-                    {{answerRow,answerCol},Runtime::Rotation::from_index(answerRotation)},record))return selected;
+    if(Bot::QuickPlaySearch::enabled(environment)) {
+        using namespace Bot::QuickPlaySearch;
+        const auto kind=selected_kind(environment);
+        const auto profile=kind==NativeBots::Kind::Toj?Profile::Toj:
+            kind==NativeBots::Kind::Dig?Profile::Dig:kind==NativeBots::Kind::Qq?Profile::Qq:
+            kind==NativeBots::Kind::C2?Profile::C2:Profile::Botris;
+        const NativePlanner native=[&](const NativeBaseline& baseline) {
+            Decision result;
+            if(!availability(baseline.environment))return result;
+            int row=0,col=0,rotation=0,kick=0;
+            result.selected=getpos(baseline.environment,*baseline.player,*baseline.field,next,unseenBagPieces,
+                startRow+baseline.rowOffset,startCol,startRotation,hold,row,col,rotation,kick);
+            result.pose={{row-baseline.rowOffset,col},Runtime::Rotation::from_index(rotation)};
+            if(kick>0)result.rotation=Runtime::RotationRecord::from_kick(Piece::KickIndex::from_index(kick-1));
+            return result;
+        };
+        const ShapeEvaluator terrain=[kind,profile](const std::vector<std::uint32_t>& rows,int width,int,int,int) {
+            // Cache separate native evaluators: no upstream fixed-piece search
+            // assumptions enter the shared variable-geometry rule simulator.
+            if(width!=10)return Bot::QuickPlaySearch::terrain(profile,rows,width);
+            struct Cache {int width=0;std::unique_ptr<NativeBots::Adapter> adapter;double empty=0;};
+            thread_local std::array<Cache,5> caches;
+            auto& cache=caches[kind_index(kind)];
+            if(cache.width!=width || !cache.adapter) {
+                cache.adapter=NativeBots::make_adapter(kind,width,kSearchHeight);
+                cache.width=width;
+                cache.empty=cache.adapter->terrain(m_tetris::TetrisMap(width,kSearchHeight));
             }
-        }
-        const auto result=Bot::QuickPlaySearch::search(Bot::QuickPlaySearch::Profile::Botris,
-            environment,player,field,next,unseenBagPieces,
-            {{startRow,startCol},Runtime::Rotation::from_index(startRotation)},hold);
+            m_tetris::TetrisMap map(width,kSearchHeight);
+            for(std::size_t y=0;y<rows.size();++y) {
+                if(y>=static_cast<std::size_t>(kSearchHeight)) {if(rows[y])return -1e12;continue;}
+                map.row[y]=rows[y];
+                if(rows[y])map.roof=static_cast<int>(y)+1;
+                for(int x=0;x<width;++x)if(rows[y]&(std::uint32_t{1}<<x)) {
+                    map.top[x]=static_cast<int>(y)+1;++map.count;
+                }
+            }
+            return cache.adapter->terrain(map)-cache.empty;
+        };
+        const auto result=adapt(profile,environment,player,field,next,unseenBagPieces,
+            {{startRow,startCol},Runtime::Rotation::from_index(startRotation)},hold,native,terrain);
         if(result.selected>=0) {
             answerRow=result.pose.position.row;answerCol=result.pose.position.col;answerRotation=result.pose.rotation.index();
             answerKick=result.rotation.rotated()?result.rotation.kick().index()+1:0;
             return result.selected;
         }
-        return BotNativeHost::fallback(field,next,startRow,startCol,startRotation,
-            answerRow,answerCol,answerRotation,answerKick);
+        return -1; // Shared host fallback uses the actual QP piece and field.
     }
     (void)unseenBagPieces;
     const bool trace = std::getenv("BOT_ZZZTOJ_ADAPTER_TRACE") != nullptr;

@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+namespace TetrTests::multiplayer_frame_boundary_test {
 namespace {
 
 static_assert(std::is_same_v<
@@ -148,10 +149,11 @@ void pump_consumes_only_typed_packets() {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     round_signal_wire_is_hidden_at_codec_boundary();
     attack_frame_is_strictly_decoded();
     board_state_becomes_snapshot_before_frame_pump();
     pump_consumes_only_typed_packets();
     return 0;
 }
+} // namespace TetrTests::multiplayer_frame_boundary_test

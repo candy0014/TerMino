@@ -11,8 +11,8 @@
 
 namespace Bot_chatgpt {
 
-// Keep a 25 ms margin below the 125 ms/piece (8 PPS) throughput ceiling.
-// Width 150 retains the original 50 ms fast profile; 300 uses 100 ms.
+// The default native search uses 100 ms, approximately 10 decisions/second.
+// Width 150 retains the established 50 ms fast profile.
 inline int search_budget_ms(int width) {
     return std::clamp(width, 3, 300) / 3;
 }
@@ -101,6 +101,11 @@ inline Landing classify_landing(const m_tetris::TetrisNode* node, int kick,
             input.bonuses = config->spinBonuses;
         }
         input.lastRotation = Runtime::RotationRecord::from_kick(Piece::KickIndex::from_index(kick - 1));
+        if(config) {
+            input.allSpinEnabled=config->allSpinEnabled;
+            input.noHoldReverse=config->noHoldReverse;
+            if(config->suppressNonTSpins && !Piece::t_spin_check(input.spinChecker))return landing;
+        }
         input.mapWidth = 10;
         input.mapHeight = 20;
         input.immobile = (!node->move_up || !node->move_up->check(snap)) &&
@@ -125,6 +130,9 @@ public:
         bool allowPartialDescent = true;
         bool instantGravity = false;
         bool wallOnlyHorizontal = false;
+        bool legacySourceDescent = false; // Offline controls for frozen experiments.
+        bool retainSpinVariants = false;
+        bool allSpinEnabled = false, noHoldReverse = false, suppressNonTSpins = false;
         Runtime::SpinBonuses spinBonuses = Runtime::SpinBonuses::AllMiniPlus;
         std::array<Piece::Type,7> pieceTypes{Piece::Type{0},Piece::Type{1},Piece::Type{2},Piece::Type{3},Piece::Type{4},Piece::Type{5},Piece::Type{6}};
     };
@@ -133,8 +141,8 @@ public:
         context_ = context;
         config_ = config;
         marks_.resize(context->node_max());
-        landingMarks_.resize(context->node_max());
-        landingIndices_.resize(context->node_max());
+        landingMarks_.resize(context->node_max()*3);
+        landingIndices_.resize(context->node_max()*3);
     }
 
     const std::vector<Landing>* search(const m_tetris::TetrisMap& map,
@@ -157,7 +165,9 @@ public:
         m_tetris::TetrisMapSnap snap;
         start->build_snap(map, context_, snap);
         // Above all obstacles every horizontal/rotation transition is open.
-        while ((!config_ || !config_->instantGravity) && (!config_ || config_->allowPartialDescent) && start->low >= map.roof && start->move_down && start->move_down->check(snap))
+        while ((!config_ || !config_->instantGravity) && (!config_ || config_->allowPartialDescent) &&
+            start->move_down && (config_ && config_->legacySourceDescent?start->low:start->move_down->low) >= map.roof &&
+            start->move_down->check(snap))
             start = start->move_down;
         auto enqueue = [&](const m_tetris::TetrisNode* node, int kick) {
             if (!node || !node->check(snap)) return;
@@ -166,7 +176,8 @@ public:
             }
             if (!node->move_down || !node->move_down->check(snap)) {
                 Landing landing = classify_landing(node, kick, map, snap, config_);
-                const auto index = node->index_filtered;
+                const auto index = config_ && config_->retainSpinVariants?
+                    node->index_filtered*3+(landing.spin?(landing.mini?1:2):0):node->index_filtered;
                 if (landingMarks_[index] != generation_) {
                     landingMarks_[index] = generation_;
                     landingIndices_[index] = landings_.size();

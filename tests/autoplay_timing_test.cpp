@@ -24,6 +24,8 @@
 #include "tetr/runtime/game_context.h"
 
 #include <cassert>
+#include <atomic>
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -39,6 +41,8 @@ struct Strategy final:Autoplay::Strategy {
     Piece::Type selection=Piece::Type::none();
     int decisions=0;
     std::unique_ptr<Autoplay::Strategy> clone_for_search() const override { return std::make_unique<Strategy>(*this); }
+    std::any capture_state() const override{return decisions;}
+    void restore_state(const std::any& state) override{if(const auto* n=std::any_cast<int>(&state))decisions=*n;}
     bool initialize(Runtime::GameContext&) override { return true; }
     Piece::Type choose_position(Runtime::GameContext& context,Runtime::PlayerSessionState&,Runtime::Playfield field,
         const std::vector<Piece::Type>& sequence,const std::vector<Piece::Type>&,Piece::Pose start,
@@ -91,6 +95,77 @@ struct Fixture {
             [&](Piece::Pose& p,Runtime::Rotation r,Piece::KickIndex& k) {return piece.try_rotate(p,r,field,k);},pump);
     }
 };
+struct RollingHoleBot final:Autoplay::Strategy {
+    struct Probe {std::atomic<int> calls{0};std::atomic<bool> thinking{false};};
+    std::shared_ptr<Probe> probe=std::make_shared<Probe>();
+    std::unique_ptr<Autoplay::Strategy> clone_for_search() const override{return std::make_unique<RollingHoleBot>(*this);}
+    bool initialize(Runtime::GameContext&) override{return true;}
+    Piece::Type choose_position(Runtime::GameContext& c,Runtime::PlayerSessionState&,Runtime::Playfield field,
+        const std::vector<Piece::Type>& next,const std::vector<Piece::Type>&,Piece::Pose start,
+        Autoplay::HoldInput,Piece::Pose& answer,Runtime::RotationRecord& record) override {
+        ++probe->calls;probe->thinking=true;c.services.clock.sleep_for(seconds(.08));probe->thinking=false;
+        const auto piece=Piece::get_definition(next.front());answer=start;answer.rotation=Runtime::Rotation(1);
+        answer.position.col=4-piece.cells(answer.rotation).front()[1];record={};
+        while(piece.can_place(answer.translated(1,0),field))++answer.position.row;
+        return next.front();
+    }
+    std::string movement_script(Runtime::GameContext&,Runtime::Playfield,Piece::Definition,
+        Piece::Pose,Piece::Pose,Runtime::RotationRecord) override{return "XLH";}
+};
+void locks_and_clears_inside_the_same_rolling_wave() {
+    for(bool handling:{false,true})for(double pps:{0.,4.,20.}) {
+        double baseline=0;
+        for(bool rolling:{false,true}) {
+            Fixture f(pps);RollingHoleBot bot;f.context.attach_autoplay(bot);
+            auto& p=f.session->player;auto& b=p.gameplay.playfield;
+            f.context.config.field.width=b.width=10;f.context.config.field.height=b.visibleHeight=b.activeHeight=20;
+            b.field.initialize(10,20);f.context.config.autoplay.handlingSimulation=handling;
+            f.context.config.garbage.mode=Runtime::GarbageMode::QuickPlay;
+            f.context.config.garbage.riseInterval=seconds(.03);f.context.config.garbage.cap=20;
+            f.context.config.garbage.hitMultiplier=f.context.config.garbage.cancelMultiplier=0;
+            f.context.config.field.lineClearDelay={};f.context.config.field.entryDelay={};
+            f.session->gameStartTime=f.context.now();
+            Engine::initialize_quick_play(f.context,p);
+            Engine::GarbageService::initialize(p,f.context.config.garbage.holePattern);
+            for(int row=15;row<20;++row)for(int col=0;col<10;++col)
+                if(col!=4)b.field.set_cell(row,col,Runtime::BoardCell::garbage());
+            b.garbageHeight=5;
+            auto hole=std::find(p.garbage.holeOrder.begin(),p.garbage.holeOrder.end(),4);
+            std::iter_swap(p.garbage.holeOrder.begin(),hole);p.garbage.previousHoleColumn=4;
+            f.session->quickPlay.progress.receiveProtection=18; // Stable, known hole, normal QP policy.
+            bool progressedWhileThinking=false;
+            f.services.clock.waitInterrupt=[&]{if(bot.probe->thinking && b.garbageHeight>5)progressedWhileThinking=true;};
+            if(rolling) {
+                Engine::GarbageService::add_buffer(f.context,p,b.field,20,true,20);
+                assert(Engine::GarbageService::raise_ready_buffer(f.context,p,b.field)==0);
+                assert(p.garbage.rising.remainingLines==20);
+            }
+            const auto start=f.context.real_now();
+            assert(f.piece()==PlayResult::Locked);
+            const double elapsed=(f.context.real_now()-start).seconds();
+            assert(bot.probe->calls==1 && p.gameplay.scoring.totalLines>=4);
+            if(!rolling)baseline=elapsed;
+            else {
+                assert(progressedWhileThinking && p.garbage.rising.remainingLines>0);
+                assert(std::abs(elapsed-baseline)<.045);
+                // Check each rise BEFORE the first actual lock. No BOT code
+                // may shift the wave's deadlines to make its placement fit.
+                auto events=Replay::decode_operation_stream(f.replay.data,0);double previous=-1;int rows=0;
+                while(!events.empty()) {
+                    const auto op=events.front();events.pop();
+                    if(op.kind==Replay::OperationKind::RaiseBuffer) {
+                        const double t=op.timestamp.seconds();
+                        if(previous>=0)assert(t-previous>=.025 && t-previous<.045);
+                        previous=t;++rows;
+                    }
+                }
+                assert(rows>=2);
+                std::cerr<<"Rolling QP: handling="<<handling<<" pps="<<pps<<" first lock "<<elapsed
+                    <<" / baseline "<<baseline<<", pending="<<p.garbage.rising.remainingLines<<'\n';
+            }
+        }
+    }
+}
 void full_cycle_cadence(double pps,double compute,double soft,double clear,double entry,int count) {
     Fixture f(pps,soft);
     f.strategy.computeSeconds=compute;
@@ -184,8 +259,8 @@ void full_speed_quick_play_redraws_and_settles_after_search_rises() {
         assert(f.piece()==PlayResult::Locked);
         std::cerr<<"Live render completed: decisions="<<f.strategy.decisions<<"\n";
         Test::TerminalScreen screen; screen.feed(output.str());output.str({});
-        assert(f.strategy.decisions>=2 && p.garbage.buffer.empty());
-        assert(b.garbageHeight==4 && !p.presentation.paintedActivePose);
+        assert(f.strategy.decisions==1 && !p.garbage.buffer.empty());
+        assert(b.garbageHeight>0 && b.garbageHeight<4 && !p.presentation.paintedActivePose);
         for (int y=-Runtime::kDisplayHiddenRows;y<20;++y) for (int x=0;x<10;++x)
             Render::draw_board_cell(f.context,p,y,x,b.field.cell(y,x));
         Test::TerminalScreen expected;expected.feed(output.str());std::cout.rdbuf(previous);
@@ -291,6 +366,7 @@ int main(int argc,char** argv) {
     full_cycle_cadence(20,.010,.002,.006,.008,8);
     full_cycle_cadence(4,.025,.004,.015,.020,4);
     full_speed_quick_play_redraws_and_settles_after_search_rises();
+    locks_and_clears_inside_the_same_rolling_wave();
     replay_repeated_types_keep_settled_cells();
     chatgpt_full_speed_reverse_gravity_screen(argc>1 ? argv[1] : "");
     hard_drop_is_instant_when_simulation_is_off();overruns_and_controls();hold_uses_one_slot();handling_cycle_spends_only_remaining_pps_wait();

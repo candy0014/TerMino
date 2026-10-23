@@ -31,6 +31,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+namespace TetrTests::room_preparation_test {
 using namespace Network;
 using namespace std::chrono_literals;
 struct Player {
@@ -49,7 +50,7 @@ struct Player {
     }
     ~Player(){disconnect_online(network);}
 };
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     std::unique_ptr<RelayServer> server;
     if(argc==1) {server=std::make_unique<RelayServer>(612);server->bind(3034);}
     std::atomic<bool> running=true,pauseRelay=false,relayPaused=false;
@@ -178,6 +179,12 @@ int main(int argc,char** argv) {
     assert(text.find("Start match now")!=std::string::npos && text.find("Cancel match")==std::string::npos);
     assert(text.find("Battle / Ready")!=std::string::npos && text.find("Spectator")!=std::string::npos && text.find("Offline")!=std::string::npos);
     const auto setups=[&] {
+        // Readiness survives policy/host changes, so all_see(..., true) is
+        // not an epoch barrier. Wait for every test actor to receive the new
+        // room state before sending setup packets tagged with its local epoch.
+        wait([&]{return std::all_of(players.begin(),players.end(),[&](const auto* p) {
+            return p->network.matchEpoch==host.network.matchEpoch && p->network.roomPolicy==host.network.roomPolicy;
+        });});
         LobbyPlayerSetup setup;setup.width=10;setup.visibleHeight=20;setup.nextCount=1;setup.nextPreview={Piece::Type{1}};setup.hybridBoardSync=true;
         for(auto* p:players)if(self(*p).role!=PlayerRole::Offline) {
             p->network.localPlayerSetup=encode_lobby_player_setup(setup);
@@ -275,4 +282,6 @@ int main(int argc,char** argv) {
     assert(host.network.matchEpoch==finalEpoch);
     wait([&]{for(auto* p:players)if(!all_see(*p,false))return false;return true;});
     std::cerr<<"room_preparation_test: live roster, immediate readiness, manual start, results, host stop and all exit keys OK\n";
+    return 0;
 }
+} // namespace TetrTests::room_preparation_test

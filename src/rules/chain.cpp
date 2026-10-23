@@ -8,13 +8,13 @@ ChainResult update_chain(const ChainInput& in) {
     ChainResult out;
     out.previousB2B = in.currentB2B;
     if (!in.attackRules.legacy) {
-        const bool pc = in.perfectClear && in.attackRules.perfectClearEnabled;
-        const bool hc = !in.perfectClear && in.halfClear && in.attackRules.halfClearEnabled;
+        const bool pc = !in.qpDisableB2B && in.perfectClear && in.attackRules.perfectClearEnabled;
+        const bool hc = !in.qpDisableB2B && !in.perfectClear && in.halfClear && in.attackRules.halfClearEnabled;
         const bool reverse = in.allSpinMod == Runtime::AllSpinMode::Reverse;
-        const bool special = in.spin || (!reverse && in.linesCleared >= 4);
+        const bool special = !in.qpDisableB2B && (in.spin || (!reverse && in.linesCleared >= 4));
         out.b2b = std::max(0, in.currentB2B);
         if (in.linesCleared == 0) {
-            out.b2bTransition = reverse && in.spin && in.currentB2B >= 5
+            out.b2bTransition = !in.qpDisableB2B && reverse && in.spin && in.currentB2B >= 5
                 ? B2BTransition::Increment : B2BTransition::Preserve;
         } else out.b2bTransition = special || pc || hc ? B2BTransition::Increment : B2BTransition::Break;
         if (out.b2bTransition == B2BTransition::Break) {
@@ -32,7 +32,9 @@ ChainResult update_chain(const ChainInput& in) {
         return out;
     }
 
-    if (in.allSpinMod == Runtime::AllSpinMode::Reverse) {
+    if(in.qpDisableB2B) {
+        out.b2bTransition=in.linesCleared ? B2BTransition::Break : B2BTransition::Preserve;
+    } else if (in.allSpinMod == Runtime::AllSpinMode::Reverse) {
         if (in.linesCleared == 0) {
             out.b2bTransition = (in.spin && in.currentB2B >= 5)
                 ? B2BTransition::Increment

@@ -11,6 +11,7 @@
 #include <any>
 #include <array>
 #include <cmath>
+#include <deque>
 #include <optional>
 #include <vector>
 
@@ -144,7 +145,9 @@ void rebase_wall_timers(Runtime::PlayerSessionState& player, Runtime::Duration o
 
 namespace Runtime {
 struct UndoHistory {
-    std::vector<UndoSnapshot> snapshots;
+    // A long game must not copy every saved board/RNG/BOT state at a
+    // capacity boundary. Retain a bounded window without relocating snapshots.
+    std::deque<UndoSnapshot> snapshots;
     std::vector<Replay::Operation> replayOperations;
     Engine::PieceLoopState* loop=nullptr;
     bool keyDown=false;
@@ -193,6 +196,7 @@ void capture_undo_snapshot(Runtime::GameContext& context) {
         history.snapshots.back().player.scoring.placedBlocks==context.session.player.gameplay.scoring.placedBlocks) return;
     history.snapshots.emplace_back(context);
     if (history.loop) history.snapshots.back().loop=*history.loop;
+    if (history.snapshots.size()>kUndoPieceLimit+1) history.snapshots.pop_front();
 }
 
 bool restore_previous_undo_snapshot(Runtime::GameContext& context) {

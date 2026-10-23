@@ -7,6 +7,7 @@
 #include "tetr/runtime/piece.h"
 #include "tetr/runtime/player_session_state.h"
 #include "tetr/rules/quick_play.h"
+#include "tetr/presentation/board_view.h"
 
 #include <iostream>
 #include <algorithm>
@@ -73,20 +74,10 @@ void move_next(
 void print_racing_goal_marker(const Runtime::GameContext& context, Runtime::PlayerSessionState& player) {
     OutputGuard output(context);
     const auto& playfield=player.gameplay.playfield;
-    const auto& scoring=player.gameplay.scoring;
-    const auto goal=Runtime::active_goal(context.config);
-    double remaining=0;std::string unit;
-    switch(goal) {
-        case Runtime::GameGoal::Time:
-            remaining=std::ceil(context.config.mode.blitzTime.seconds()-board_elapsed_seconds(context,player));unit="s";break;
-        case Runtime::GameGoal::Lines: remaining=double(context.config.mode.racingDistance)-scoring.totalLines;unit="L";break;
-        case Runtime::GameGoal::Garbage: remaining=double(context.config.mode.garbageTarget)-scoring.totalGarbageLines;unit="L";break;
-        case Runtime::GameGoal::Pieces: remaining=double(context.config.mode.pieceTarget)-scoring.placedBlocks;unit="P";break;
-        case Runtime::GameGoal::Attack: remaining=double(context.config.mode.attackTarget)-scoring.totalAttack;unit="A";break;
-        default: break;
-    }
-    const int rows=remaining>0 && remaining<=playfield.activeHeight ? static_cast<int>(remaining) : 0;
-    std::string label=rows ? " "+std::to_string(rows)+unit+" " : "";
+    const auto goal=Presentation::capture_goal_view(context.config,player,
+        Runtime::Duration::from_seconds(board_elapsed_seconds(context,player)));
+    const int rows=goal.markerRows;
+    std::string label=rows ? " "+std::to_string(rows)+goal.unit+" " : "";
     auto& previous=player.presentation.racingGoalRows;
     if (previous==rows && player.presentation.racingGoalLabel==label) return;
     const int oldRows=previous;

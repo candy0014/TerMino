@@ -4,6 +4,7 @@
 #include "tetr/runtime/playfield.h"
 #include "tetr/runtime/strong_types.h"
 #include "tetr/network/hybrid_protocol.h"
+#include "tetr/runtime/field_visibility.h"
 
 #include <optional>
 #include <cstdint>
@@ -67,6 +68,10 @@ struct BoardStateSnapshot {
     std::optional<RemoteClockSample> clock;
 };
 RemoteClockSample capture_player_clock(const Runtime::GameContext& context,const Runtime::PlayerSessionState& player);
+// Optional display control, separate from historical board/setup records.
+std::string encode_field_visibility(const Runtime::FieldVisibility& visibility);
+std::optional<Runtime::FieldVisibility> decode_field_visibility(std::string_view wire);
+void send_field_visibility(Runtime::GameContext& context);
 
 // Hash the authoritative field, queue, hold and HUD, excluding active pose and placement notifications.
 std::uint64_t board_state_fingerprint(std::string_view state);

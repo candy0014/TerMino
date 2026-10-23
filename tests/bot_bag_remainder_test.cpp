@@ -8,6 +8,7 @@
 #include <cassert>
 #include <vector>
 
+namespace TetrTests::bot_bag_remainder_test {
 namespace {
 
 std::vector<int> ids(const std::vector<Piece::Type>& pieces) {
@@ -26,7 +27,7 @@ void set_queue(Runtime::PlayerSessionState& player,
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     Runtime::SessionState session;
     Runtime::RuntimeServices services;
     Runtime::GameContext context(session, services);
@@ -127,3 +128,4 @@ int main() {
 
     return 0;
 }
+} // namespace TetrTests::bot_bag_remainder_test

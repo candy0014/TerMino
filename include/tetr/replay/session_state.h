@@ -8,20 +8,37 @@
 #include <cstdint>
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <queue>
 #include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <functional>
+#include <string_view>
 
 namespace Replay {
 class TetrioRecorder;
+struct MultiplayerReplay;
 
 struct TurnPlaybackState {
     double quotas[2]{};
     std::atomic<std::uint64_t> completedPieces[2]{};
     std::atomic<bool> ended[2]{};
+};
+
+// A local-versus recording has two decoding workers but one viewer timeline.
+// Only this small control/clock state crosses the workers; boards and operation
+// queues remain owned by their respective player threads.
+struct SharedPlaybackState {
+    std::recursive_mutex mutex;
+    Runtime::Duration elapsed{};
+    Runtime::TimePoint anchor{};
+    double speed = 1.0;
+    bool paused = false;
+    std::function<std::array<bool,5>()> readControls;
+    std::array<bool,5> controlsDown{};
 };
 
 struct ReplaySessionState {
@@ -37,6 +54,8 @@ struct ReplaySessionState {
     };
 
     struct PlaybackState {
+        std::shared_ptr<SharedPlaybackState> shared;
+        Runtime::Duration sharedClockOffset{};
         Runtime::Duration elapsed{};
         Runtime::Duration duration{};
         Runtime::Duration lastFrameRuleUpdate{};
@@ -67,6 +86,12 @@ struct ReplaySessionState {
     };
 
     std::string data;
+    std::size_t recordingLimit=10000000;
+    std::function<void(std::string_view)> recordObserver;
+    std::shared_ptr<MultiplayerReplay> multiplayerReplay;
+    bool onlineRecording=false;
+    std::array<std::uint64_t,3> onlineIdentity{}; // room, match, actor; never a credential
+    std::uint64_t onlineProfile=0;
     // Preserve the complete source for Save As, including both local players.
     std::string loadedRecording;
     std::string sourcePath;

@@ -16,7 +16,8 @@
 #include <limits>
 #include <memory>
 #include <sstream>
-int main() {
+namespace TetrTests::room_results_view_test {
+int run(int argc,char** argv) {
     using namespace Network;
     RoundStatistics large;large.gameSeconds=123.125;large.realSeconds=4.5;large.pieceTime=true;
     large.score.score=std::numeric_limits<long long>::min();large.score.placedBlocks=20;large.score.totalAttack=12;
@@ -86,4 +87,6 @@ int main() {
     try {input.poll_control_interrupt();}catch(const App::StartScreenRequested&){returnedToStart=true;}
     assert(returnedToStart && app.startScreenRequested);
     std::cerr<<"room_results_view_test: multipart results, player selection, detailed summary, clear counts and Esc return OK\n";
+    return 0;
 }
+} // namespace TetrTests::room_results_view_test

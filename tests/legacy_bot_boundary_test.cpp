@@ -4,7 +4,8 @@
 #include <cassert>
 #include <iostream>
 
-int main(){
+namespace TetrTests::legacy_bot_boundary_test {
+int run(int argc,char** argv){
     Runtime::SessionState session;
     Runtime::RuntimeServices services;
     Runtime::GameContext context(session,services);
@@ -56,4 +57,6 @@ int main(){
     assert(!Bot::init(context));
 
     std::cout<<"legacy_bot_boundary_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::legacy_bot_boundary_test

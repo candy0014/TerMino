@@ -4,6 +4,8 @@
 #include "ui_text.h"
 #include "ui_style.h"
 #include "tetr/app/post_game_interaction.h"
+#include "tetr/engine/garbage_service.h"
+#include "tetr/render/board_renderer.h"
 #include "tetr/replay/playback_clock.h"
 #include "tetr/replay/session_state.h"
 #include "tetr/runtime/game_context.h"
@@ -51,10 +53,30 @@ std::string pad(std::string text,int width) {
 }
 }
 
+Frontend::UiMetadata replay_save_metadata(const std::string& defaultName,
+    const std::string& value,std::size_t caret) {
+    Frontend::UiMetadata metadata{Frontend::UiKind::Text,"replay-save",UiText::tr("Save Replay")};
+    metadata.chinese=UiText::language()!=UiText::Language::English;
+    metadata.currentValue=".tetr/replay/"+defaultName;
+    metadata.input=value;metadata.inputCaret=std::min(caret,value.size());
+    metadata.hint=UiText::tr("Replay filename or path; absolute paths are supported.");
+    metadata.shortcuts={UiText::tr("Enter Default name   Esc Cancel"),UiText::tr("Left/Right Cursor   Backspace/Delete Edit")};
+    return metadata;
+}
+
 void freeze_post_game_times(Runtime::GameContext& c,Runtime::PlayerSessionState& p) {
+    const bool reveal=!p.timing.completedGameTime &&
+        (Presentation::field_visibility(c.config,p).invisible ||
+         (c.config.garbage.mode==Runtime::GarbageMode::QuickPlay && Runtime::reverse(c.config.quickPlay.invisible)));
     const auto times=result_times(c,p);
     p.timing.completedGameTime=Runtime::Duration::from_seconds(nonnegative(times.first.seconds()));
     p.timing.completedRealTime=Runtime::Duration::from_seconds(nonnegative(times.second.seconds()));
+    // Fixed cells stop changing at game end, so the terminal needs one repaint
+    // to expose the final field just as the next graphical snapshot does.
+    if(reveal) {
+        Render::redraw_player_board(c,p);
+        Engine::GarbageService::redraw_buffer(c,p);
+    }
 }
 
 PostGameStatistics make_post_game_statistics(const Runtime::GameContext& c,
@@ -182,6 +204,24 @@ void PostGameStatisticsView::move(int rows,int columns) {
 }
 bool PostGameStatisticsView::poll(Settings::NavigationInput& first,Settings::NavigationInput* second) {
     using K=Settings::NavigationKey;
+    if(page_!=PostGamePage::Board)if(const auto command=Frontend::poll_ui_command([](const auto& c) {
+        using C=Frontend::UiCommandKind;
+        return c.kind==C::Back || c.kind==C::StatisticsPage || c.kind==C::StatisticsPlayer ||
+            c.kind==C::StatisticsMetric || c.kind==C::StatisticsCell || c.kind==C::StatisticsChallenge;
+    })) {
+        using C=Frontend::UiCommandKind;
+        switch(command->kind) {
+        case C::Back:close();break;
+        case C::StatisticsPage:
+            page_=command->index==0?PostGamePage::Summary:command->index==1?PostGamePage::Clears:PostGamePage::Challenges;break;
+        case C::StatisticsPlayer:select_player(int(command->index)-player_);break;
+        case C::StatisticsMetric:summaryRow_=int(command->index);break;
+        case C::StatisticsCell:selectedRow_=command->row;selectedColumn_=command->column;break;
+        case C::StatisticsChallenge:challengeRow_=int(command->index);break;
+        default:break;
+        }
+        invalidate();return true;
+    }
     const auto pressed=[&](K key,bool repeat) {
         const bool a=first.update(key,repeat);const bool b=second && second->update(key,repeat);return a||b;
     };
@@ -234,6 +274,34 @@ void PostGameStatisticsView::render(Runtime::GameContext& context,const std::str
     if (!dirty_) return;
     Render::OutputGuard output(context);dirty_=false;
     canvas_.metadata={Frontend::UiKind::Statistics,"statistics",std::to_string(static_cast<int>(page_))};
+    if(Frontend::ui_surface_active()) {
+        auto& metadata=canvas_.metadata;
+        metadata.chinese=UiText::language()!=UiText::Language::English;
+        metadata.title=UiText::tr(roomResults_?"Room result summary":"Statistics");
+        metadata.notice=notice_;metadata.hint=footer;
+        metadata.shortcuts={roomResults_?UiText::tr("Left/Right Player  Tab Page  Esc Back"):UiText::tr(players_.size()>1?"Tab Page  Esc Back  Arrows Select  PgUp/PgDn Player":"Tab Page  Esc Back  Arrows Select  PgUp/PgDn Page")};
+        if(roomResults_)metadata.shortcuts.push_back(UiText::tr("Up/Down Scroll  PgUp/PgDn Page"));
+        metadata.statistics.emplace();auto& model=*metadata.statistics;
+        model.page=page_==PostGamePage::Clears?Frontend::UiStatisticsPage::Clears:page_==PostGamePage::Challenges?Frontend::UiStatisticsPage::Challenges:Frontend::UiStatisticsPage::Summary;
+        model.player=player_;model.room=roomResults_;model.obscured=context.config.display.obscuredColors;
+        model.selectedMetric=summaryRow_;model.selectedRow=selectedRow_;model.selectedColumn=selectedColumn_;model.selectedChallenge=challengeRow_;
+        const auto& result=players_[player_];
+        for(const auto& [label,value]:result.metrics)model.metrics.push_back({label,UiText::tr(label),true,value});
+        model.pieces=result.pieces;model.pieceColors=result.pieceColors;model.lines=result.lines;model.cells=result.cells;
+        model.rowTotals=result.rowTotals;model.columnTotals=result.columnTotals;model.total=result.total;
+        const auto value=[](const PostGameStatistics& player,const std::string& key) {
+            for(const auto& entry:player.metrics)if(entry.first==key)return entry.second;return std::string("—");
+        };
+        for(std::size_t i=0;i<players_.size();++i)model.players.push_back({i<playerNames_.size()?playerNames_[i]:UiText::tr("Player")+" "+std::to_string(i+1),
+            value(players_[i],"PIECES PER SECOND"),value(players_[i],"ATTACK PER MINUTE"),value(players_[i],"TOTAL RECEIVED"),value(players_[i],"TOTAL ATTACK")});
+        for(const auto& outcome:challenges_) {
+            const auto definition=Challenges::lookup(outcome.challengeId);
+            const auto label=definition?challenge_name(*definition,true):outcome.challengeId;
+            const auto score=definition?challenge_score(*definition,outcome.score):std::to_string(outcome.score.value);
+            model.challenges.push_back({outcome.challengeId,(outcome.player<0?std::string{}:UiText::tr("Player")+" "+std::to_string(outcome.player+1)+" / ")+label,true,score,outcome.personalBest?"PB":""});
+        }
+        model.challengeNotice=challengeNotice_;
+    }
     const auto insets=ui_insets(size);
     canvas_.columnsLimit=size.columns-insets.right;canvas_.rowsLimit=size.rows;canvas_.begin_frame();
     const bool obscured=context.config.display.obscuredColors;
@@ -425,6 +493,7 @@ void PostGameStatisticsView::render(Runtime::GameContext& context,const std::str
     }
     std::optional<std::pair<int,int>> cursor;
     if (savePrompt_ && size.columns>=6 && size.rows>=6) {
+        canvas_.metadata=replay_save_metadata(savePrompt_->defaultName,savePrompt_->value,savePrompt_->caret);
         const int w=std::min(width,72),x=left,top=std::max(0,size.rows-insets.bottom-6);
         canvas_.box(top,x,w-4,4,UiText::tr("Save Replay"),boxHeading,normal.foreground,background);
         const int content=std::max(1,w-4);

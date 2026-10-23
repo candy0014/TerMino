@@ -5,6 +5,7 @@
 #include <iostream>
 #include <tuple>
 
+namespace TetrTests::bot_chatgpt_learned_terrain_test {
 namespace B = Bot_chatgpt;
 
 static m_tetris::TetrisMap rows(std::initializer_list<unsigned> values) {
@@ -60,7 +61,7 @@ static void check_mirror(const m_tetris::TetrisMap& map) {
     assert(B::learned_terrain_correction(map) == B::learned_terrain_correction(mirrored));
 }
 
-int main() {
+int run(int argc,char** argv) {
     using Engine = m_tetris::TetrisEngine<rule_tetr_srs_plus::TetrisRule, B::Evaluation, B::Search>;
     Engine geometry;
     assert(geometry.prepare(10, 40));
@@ -132,4 +133,6 @@ int main() {
     assert(checks > 100 && pcs > 0 && spins > 0 && rises > 0);
     std::cout << "learned model formula, zero-bridge optimization, mirror fixtures and "
               << checks << " unchanged rule transitions passed\n";
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_learned_terrain_test

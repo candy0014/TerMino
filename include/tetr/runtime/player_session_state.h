@@ -8,6 +8,8 @@
 #include "tetr/runtime/time.h"
 #include "tetr/runtime/tetrio_random.h"
 #include "tetr/runtime/bag_randomizer.h"
+#include "tetr/runtime/field_visibility.h"
+#include "tetr/runtime/visual_effects.h"
 
 #include <deque>
 #include <algorithm>
@@ -124,7 +126,19 @@ struct TextDisplaySpan {
     std::size_t width = 0;
 };
 
+struct PlacementFeedback {
+    int sequence=0;
+    Piece::Type type=Piece::Type::none();
+    Piece::Pose pose;
+    std::vector<int> clearedRows;
+    std::optional<int> dropFromRow;
+    int clearedLines=0; // Remote checkpoints carry a count without a cumulative line total.
+};
+
 struct PlayerPresentationState {
+    PlacementFeedback placement;
+    BoardMotionFeedback boardMotion;
+    std::optional<TimePoint> lastWallContact;
     Piece::Type eventSpinPiece=Piece::Type::none();
     int eventClearLines=0;
     bool eventMini=false,eventPerfectClear=false,eventHalfClear=false;
@@ -157,6 +171,8 @@ struct PlayerPresentationState {
     int racingGoalRows = -1;
     std::string racingGoalLabel;
     SpikeDisplayState spike;
+    bool remoteAttackBaselineKnown=false;
+    std::optional<FieldVisibility> remoteFieldVisibility;
     std::array<std::size_t, 6> messageWidths{};
     std::array<std::string, 6> messageText{};
     std::array<int,6> messageRows{{-1,-1,-1,-1,-1,-1}};

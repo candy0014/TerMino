@@ -38,6 +38,7 @@ struct PlacementInput {
     double garbageMultiplier = 1.0;
     Runtime::AttackRules attackRules;
     bool retainFullRows=false;
+    bool legacyQuickPlayRules=false;
 };
 
 struct PlacementResult {

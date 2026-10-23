@@ -21,6 +21,7 @@
 #include <tuple>
 #include <vector>
 
+namespace TetrTests::disabled_movement_test {
 namespace {
 using Restrictions = Runtime::MovementRestrictions;
 using Mode = Runtime::AutoplayMode;
@@ -381,7 +382,7 @@ void init_disables_unsupported_bot() {
 }
 }
 
-int main() {
+int run(int argc,char** argv) {
     config_round_trip();
     input_and_script_guards();
     Runtime::SessionState session;
@@ -394,4 +395,6 @@ int main() {
     reconstructed_scripts_cannot_bypass_restrictions();
     init_disables_unsupported_bot();
     std::cout<<"disabled_movement_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::disabled_movement_test

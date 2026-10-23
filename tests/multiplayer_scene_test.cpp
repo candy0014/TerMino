@@ -23,6 +23,7 @@
 #include <iostream>
 #include <cmath>
 
+namespace TetrTests::multiplayer_scene_test {
 void save_screen(const Test::TerminalScreen& screen,const char* path,int columns,int rows) {
     std::ofstream out(path);out<<"{\"columns\":"<<columns<<",\"rows\":"<<rows<<",\"cells\":[";
     bool first=true;
@@ -32,7 +33,7 @@ void save_screen(const Test::TerminalScreen& screen,const char* path,int columns
     }
     out<<"]}";
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     auto session=std::make_unique<Runtime::SessionState>();Runtime::RuntimeServices services;
     Runtime::GameContext context{*session,services};Network::NetworkServices network;context.attach_network(network);
     UserConfig::Settings user;user.gameMode=4;context.attach_user_settings(user);
@@ -282,4 +283,6 @@ int main(int argc,char** argv) {
     }
     input.keyEventSource=nullptr;
     std::cout<<"multiplayer scene passed\n";
+    return 0;
 }
+} // namespace TetrTests::multiplayer_scene_test

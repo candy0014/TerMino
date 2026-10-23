@@ -80,6 +80,7 @@ public:
 
     void attach_app(App::ApplicationState& value) noexcept { app_ = &value; }
     void attach_network(Network::NetworkServices& value) noexcept { network_ = &value; }
+    void detach_network() noexcept { network_ = nullptr; }
     void attach_replay(Replay::ReplaySessionState& value) noexcept { replay_ = &value; }
     void attach_autoplay(Autoplay::Strategy& value) noexcept { autoplay_ = &value; }
     void attach_input(Input::Services& value) noexcept { input_ = &value; }

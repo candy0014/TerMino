@@ -1,8 +1,13 @@
 #include "renderer.h"
+#include "render_thread.h"
+#include "scene.h"
+#include "menu_pointer.h"
+#include "native_file_dialog.h"
 #include "input.h"
 #include "text_events.h"
 #include "window_config.h"
 #include "viewport.h"
+#include "scroll_gesture.h"
 #include "tetr/util/runtime_directory_lock.h"
 #include "tetr/frontend/graphical/session.h"
 #include "tetr/input/action.h"
@@ -13,6 +18,8 @@
 #include <SDL3/SDL_main.h>
 #include <algorithm>
 #include <chrono>
+#include <memory>
+#include <map>
 #include <cmath>
 #include <fstream>
 #include <filesystem>
@@ -24,224 +31,12 @@
 
 namespace {
 using namespace Graphical;
-void block(Renderer& r,float x,float y,float size,Color color,bool ghost=false,int style=0) {
-    const float gap=std::min(1.f,size*.05f),inset=std::min(3.f,size*.12f);
-    const float w=size*(style?.65f:1.f);x+=(size-w)/2;
-    if(ghost) {r.outline(x+inset,y+inset,w-2*inset,size-2*inset,{color.r,color.g,color.b,.5f},std::min(1.f,size*.1f));return;}
-    r.rect(x+gap,y+gap,w-2*gap,size-2*gap,{color.r*.32f,color.g*.32f,color.b*.32f});
-    r.rect(x+inset,y+inset,w-2*inset,size-2*inset,color);
-    r.rect(x+inset,y+inset,w-2*inset,std::min(2.f,size*.1f),{1,1,1,.22f});
-}
-void piece_preview(Renderer& r,Piece::Type type,float x,float y,float unit,bool available,bool obscured,int style) {
-    if(!type.valid()) return;
-    const auto cells=Piece::preview_cells(type);
-    int left=999,top=999,right=-999,bottom=-999;
-    for(const auto& cell:cells) {top=std::min(top,cell[0]);left=std::min(left,cell[1]);bottom=std::max(bottom,cell[0]);right=std::max(right,cell[1]);}
-    auto color=cell_color(Piece::metadata(type).colorId,obscured);
-    if(!available) {color.r*=.4f;color.g*=.4f;color.b*=.4f;}
-    for(const auto& cell:cells) block(r,x+(cell[1]-left-(right-left+1)/2.f)*unit,
-        y+(cell[0]-top)*unit,unit,color,false,style);
-}
-std::string decimal(double value,int precision=2) {
-    std::ostringstream out;out.setf(std::ios::fixed);out.precision(precision);out<<value;return out.str();
-}
-std::string wrapped(const std::string& value,std::size_t columns=95) {
-    std::istringstream words(value);std::string word,result;std::size_t count=0;
-    while(words>>word) {
-        if(count && count+word.size()+1>columns) {result+='\n';count=0;}
-        else if(count) {result+=' ';++count;}
-        result+=word;count+=word.size();
-    }
-    return result;
-}
-std::string spin_history(const Presentation::BoardView& b) {
-    std::string text;constexpr const char* names[]={"IJLOSTZ-","ijlostz-"};
-    for(const auto& operation:b.spinHistory) {
-        if(!text.empty())text+=' ';
-        text+=names[operation.second&1][operation.first&7];
-        text+=std::to_string((operation.first>>3)&7);
-    }
-    return text;
-}
-void garbage_bar(Renderer& r,const Presentation::BoardView& b,float x,float bottom,float unit,float height) {
-    float used=0;
-    for(std::size_t i=0;i<b.garbage.size();++i) {
-        const float h=std::min(float(b.garbage[i])*unit,height-used);if(h<=0)break;
-        const double delay=i<b.garbageReadyIn.size()?b.garbageReadyIn[i]:0;
-        const Color color=b.obscuredColors?muted:delay>.3?Color{1,.82f,.2f}:delay>0?Color{.5f,.12f,.16f}:Color{1,.25f,.35f};
-        r.rect(x,bottom-used-h,3,h,color);used+=h;
-    }
-}
-const char* status_name(SessionStatus status) {
-    switch(status) {
-    case SessionStatus::Loading:return "LOADING";
-    case SessionStatus::Countdown:return "GET READY";
-    case SessionStatus::Paused:return "PAUSED";
-    case SessionStatus::Finished:return "ROUND COMPLETE";
-    case SessionStatus::Error:return "SESSION ERROR";
-    default:return "LIVE";
-    }
-}
-void background(Renderer& r) {
-    for(int x=0;x<1200;x+=40) r.rect(x,0,1,800,{.10f,.21f,.3f,.16f});
-    r.rect(0,0,1200,3,cyan);r.rect(0,797,1200,3,purple);
-    r.text(36,25,"TerMino",32);r.text(226,38,"/ OPENGL PREVIEW",13,cyan);
-    r.text(935,37,"PHASE 03    /    GL 3.3",13,muted);
-}
-void game_view(Renderer& r,const SessionView& view,const std::string& controls) {
-    const auto& b=view.board;
-    r.text(40,100,view.replay?"REPLAY DECK":"PLAY SESSION",14,cyan);
-    r.text(40,129,status_name(view.status),20);
-    if(!b.width || b.bottom<=0) {
-        r.text(40,220,view.message.empty()?"Initializing shared game engine...":view.message,16);return;
-    }
-    // All visible and display-hidden rows fit. No fixed 10x20 assumption.
-    const float unit=std::min({27.f,580.f/(b.bottom-b.firstRow),420.f/b.width});
-    const float width=b.width*unit,height=(b.bottom-b.firstRow)*unit;
-    const float x=600-width/2,y=110+(580-height)/2;
-    r.rect(x-8,y-8,width+16,height+16,panelColor);
-    r.outline(x-8,y-8,width+16,height+16,{.13f,.32f,.42f});
-    for(int row=b.firstRow;row<b.bottom;++row) for(int col=0;col<b.width;++col) {
-        const float px=x+col*unit,py=y+(row-b.firstRow)*unit;
-        r.rect(px,py,unit-1,unit-1,row<0?Color{.027f,.043f,.073f}:Color{.035f,.065f,.095f});
-        const auto& cell=b.at(row,col);
-        if(cell.hint)r.rect(px+unit*.4f,py+unit*.4f,unit*.2f,unit*.2f,muted);
-        if(cell.appearance!=Presentation::CellAppearance::Empty) {
-            auto color=cell_color(cell.value.color_id(),b.obscuredColors);
-            if(cell.appearance==Presentation::CellAppearance::Dimmed) {color.r*=.35f;color.g*=.35f;color.b*=.35f;}
-            block(r,px,py,unit,color,false,b.squareStyle);
-            if(cell.hint)r.rect(px+unit*.4f,py+unit*.4f,unit*.2f,unit*.2f,panelColor);
-            if(cell.value.is_timed_number()) r.text(px+2,py,std::to_string(cell.value.timed_countdown()),unit*.55f);
-        }
-    }
-    const auto drawPiece=[&](const Presentation::PieceView& p,bool ghost) {
-        const auto piece=Piece::get_definition(p.type);
-        auto color=cell_color(piece.color_id(),b.obscuredColors);
-        if(!ghost && p.appearance==Presentation::CellAppearance::Dimmed) {color.r*=.35f;color.g*=.35f;color.b*=.35f;}
-        for(const auto& cell:piece.cells(p.pose.rotation)) {
-            const int row=p.pose.position.row+cell[0],col=p.pose.position.col+cell[1];
-            if(row>=b.firstRow && row<b.bottom && col>=0 && col<b.width)
-                block(r,x+col*unit,y+(row-b.firstRow)*unit,unit,color,ghost,b.squareStyle);
-        }
-    };
-    if(b.ghost) drawPiece(*b.ghost,true);
-    if(b.active) drawPiece(*b.active,false);
-    r.rect(x,y-b.firstRow*unit,width,1,{.25f,.64f,.72f,.4f});
-    if(b.holdEnabled) {
-        r.text(x-170,y,"HOLD",14,b.holdAvailable?cyan:muted);
-        piece_preview(r,b.hold,x-103,y+45,20,b.holdAvailable,b.obscuredColors,b.squareStyle);
-    }
-    r.text(x+width+42,y,"NEXT",14,cyan);
-    const float step=std::min(94.f,500.f/std::max<std::size_t>(1,b.next.size()));
-    for(std::size_t i=0;i<b.next.size();++i)
-        piece_preview(r,b.next[i],x+width+100,y+42+i*step,std::min(20.f,step/4),true,b.obscuredColors,b.squareStyle);
-    r.text(40,240,"TIME",12,muted);r.text(40,262,decimal(b.goal==Runtime::GameGoal::Time?std::max(0.,b.goalTarget-b.elapsed.seconds()):b.elapsed.seconds()),30);
-    r.text(40,325,"SCORE",12,muted);r.text(40,346,std::to_string(b.score),25);
-    r.text(40,405,"LINES / PIECES",12,muted);r.text(40,428,std::to_string(b.lines)+" / "+std::to_string(b.pieces),23);
-    r.text(40,487,"ATTACK / B2B / COMBO",12,muted);
-    r.text(40,510,std::to_string(b.attack)+" / "+std::to_string(std::max(0,b.b2b-1))+" / "+std::to_string(std::max(0,b.combo-1)),23);
-    if(view.status==SessionStatus::Paused || view.status==SessionStatus::Finished) {
-        r.rect(x-2,y+height*.4f,width+4,64,{.025f,.045f,.085f,.95f});
-        r.outline(x-2,y+height*.4f,width+4,64,cyan);
-        r.text(x+12,y+height*.4f+17,status_name(view.status),std::min(21.f,width/10),cyan);
-    }
-    garbage_bar(r,b,x-5,y+height,unit,height);
-    float hud=565;
-    if(b.goalTarget) {r.text(40,hud,"GOAL "+std::to_string(b.goalProgress)+" / "+std::to_string(b.goalTarget),16,cyan);hud+=25;}
-    if(b.quickPlay) {r.text(40,hud,"ALT "+decimal(b.altitude,1)+"  FLOOR "+std::to_string(b.floor),14,cyan);hud+=24;r.text(40,hud,"BOOST "+decimal(b.booster,1)+"  XP "+decimal(b.experience,1),14);hud+=24;}
-    if(b.windup) {r.text(40,hud,"WINDUP "+std::to_string(b.windup),16,{1,.4f,.5f});hud+=24;}
-    if(b.spinPiece.valid()) {r.text(900,175,std::string(Piece::metadata(b.spinPiece).name)+"-SPIN"+(b.mini?" MINI":""),17,purple);}
-    if(b.clearLines)r.text(900,207,b.clearLines<0?"VOID":std::to_string(b.clearLines)+" LINES",17,cyan);
-    r.text(900,250,"PPS "+decimal(b.elapsed.seconds()>0?b.pieces/b.elapsed.seconds():0),15);
-    r.text(900,281,"APM "+decimal(b.elapsed.seconds()>0?b.attack*60/b.elapsed.seconds():0),15);
-    if(b.perfectClear || b.halfClear)r.text(900,320,b.perfectClear?"ALL CLEAR":"HALF CLEAR",18,purple);
-    if(b.clutch)r.text(900,360,"CLUTCH "+std::to_string(b.clutch),16,cyan);
-    if(b.blighted)r.text(900,394,"BLIGHTED",16,purple);
-    if(b.spike)r.text(900,427,"SPIKE "+std::to_string(b.spike),16,cyan);
-    if(!b.headline.empty())r.text(350,72,b.headline,18,cyan);
-    if(!view.challengeNotice.empty())r.text(40,708,view.challengeNotice,12,purple);
-    if(b.population)r.text(900,465,"ALIVE "+std::to_string(b.rank)+" / "+std::to_string(b.population),16,cyan);
-    if(!b.stageTask.empty())r.text(900,465,"STAGE "+std::to_string(b.stages)+"/4  "+b.stageTask,13,cyan);
-    if(!b.spinHistory.empty())r.text(900,490,wrapped(spin_history(b),20),13,purple);
-    if(view.status==SessionStatus::Finished)r.text(900,580,"Tab: Statistics\nS: Save As\nR: Retry\nP: Settings",15,muted);
-    if(view.replay) {
-        const float ratio=view.replayDuration>0?std::clamp(view.replayPosition/view.replayDuration,0.,1.):0;
-        r.rect(350,705,500,3,{.13f,.2f,.3f});r.rect(350,705,500*ratio,3,cyan);
-        r.text(350,716,decimal(view.replayPosition)+" / "+decimal(view.replayDuration)+"s    "+decimal(view.replaySpeed)+"x",14);
-        r.text(40,755,"Space/F2 pause    Left/Right seek 10s    -/+ speed    R restart    P/Esc menu    S save after finish",13,muted);
-    } else r.text(32,756,controls,12,muted);
-    if(!view.message.empty()) r.text(350,668,view.message,12,cyan);
-}
-void scene_tile(Renderer& r,const Presentation::BoardView& b,float x,float y,float w,float h,bool miniature=false) {
-    r.rect(x,y,w,h,panelColor);r.outline(x,y,w,h,{.12f,.27f,.38f});
-    if(b.width<=0 || b.bottom<=b.firstRow)return;
-    r.text(x+8,y+4,b.username.empty()?"PLAYER":b.username,miniature?9:16,cyan);
-    const float unit=std::max(.5f,std::min((w-(miniature?12.f:110.f))/b.width,(h-(miniature?30.f:175.f))/(b.bottom-b.firstRow)));
-    const float left=x+(miniature?6:38),top=y+(miniature?20:36);
-    for(int row=b.firstRow;row<b.bottom;++row)for(int col=0;col<b.width;++col) {
-        const auto& cell=b.at(row,col);const float px=left+col*unit,py=top+(row-b.firstRow)*unit;
-        r.rect(px,py,unit-.4f,unit-.4f,{.045f,.075f,.10f});
-        if(cell.hint)r.rect(px+unit*.4f,py+unit*.4f,unit*.2f,unit*.2f,muted);
-        if(cell.appearance!=Presentation::CellAppearance::Empty) {
-            auto c=cell_color(cell.value.color_id(),b.obscuredColors);
-            if(cell.appearance==Presentation::CellAppearance::Dimmed) {c.r*=.35f;c.g*=.35f;c.b*=.35f;}
-            block(r,px,py,unit,c,false,b.squareStyle);
-            if(cell.hint)r.rect(px+unit*.4f,py+unit*.4f,unit*.2f,unit*.2f,panelColor);
-            if(cell.value.is_timed_number() && !miniature)r.text(px,py,std::to_string(cell.value.timed_countdown()),unit*.6f);
-        }
-    }
-    const auto draw=[&](const Presentation::PieceView& p,bool ghost) {
-        const auto piece=Piece::get_definition(p.type);
-        for(const auto& cell:piece.cells(p.pose.rotation)) {
-            const int row=p.pose.position.row+cell[0],col=p.pose.position.col+cell[1];
-            if(row>=b.firstRow && row<b.bottom && col>=0 && col<b.width)
-                {auto color=cell_color(piece.color_id(),b.obscuredColors);
-                if(p.appearance==Presentation::CellAppearance::Dimmed){color.r*=.35f;color.g*=.35f;color.b*=.35f;}
-                block(r,left+col*unit,top+(row-b.firstRow)*unit,unit,color,ghost,b.squareStyle);}
-        }
-    };
-    if(b.ghost)draw(*b.ghost,true);if(b.active)draw(*b.active,false);
-    garbage_bar(r,b,left-5,top+(b.bottom-b.firstRow)*unit,unit,(b.bottom-b.firstRow)*unit);
-    if(!miniature) {
-        const float right=left+b.width*unit+16;
-        r.text(right,top,"NEXT",10,muted);
-        float ny=top+23;
-        for(auto next:b.next) {piece_preview(r,next,right+25,ny,9,true,b.obscuredColors,b.squareStyle);ny+=std::min(48.f,400.f/std::max<std::size_t>(1,b.next.size()));}
-        if(b.holdEnabled) {r.text(x+8,y+h-90,"HOLD",10,muted);piece_preview(r,b.hold,x+60,y+h-73,9,b.holdAvailable,b.obscuredColors,b.squareStyle);}
-        r.text(x+8,y+h-47,std::to_string(b.pieces)+"P  "+std::to_string(b.lines)+"L  "+std::to_string(b.attack)+"A   "+decimal(b.elapsed.seconds())+"s",12);
-        std::string event=b.spinPiece.valid()?std::string(Piece::metadata(b.spinPiece).name)+"-SPIN ":"";
-        if(b.clearLines)event+=b.clearLines<0?"VOID ":std::to_string(b.clearLines)+"L ";
-        if(b.perfectClear || b.halfClear)event+=b.perfectClear?"PC ":"HC ";
-        if(b.clutch)event+="CLUTCH "+std::to_string(b.clutch)+" ";
-        r.text(x+8,y+h-138,event,11,cyan);
-        if(!b.spinHistory.empty())r.text(x+8,y+h-121,spin_history(b),10,purple);
-        r.text(x+8,y+h-27,"B2B "+std::to_string(std::max(0,b.b2b-1))+"   COMBO "+std::to_string(std::max(0,b.combo-1))+"   WINS "+std::to_string(b.wins)+"   "+b.headline,11,purple);
-    }
-}
-void scene_view(Renderer& r,const SessionView& view) {
-    std::vector<const Presentation::BoardView*> full;
-    std::vector<const Presentation::BoardView*> mini;
-    if(!view.spectator)full.push_back(&view.board);
-    for(const auto& peer:view.peers)(peer.miniature?mini:full).push_back(&peer.board);
-    const float area=mini.empty()?1136.f:810.f;
-    const int columns=std::max(1,std::min(3,static_cast<int>(full.size())));
-    const int rows=std::max(1,(static_cast<int>(full.size())+columns-1)/columns);
-    for(std::size_t i=0;i<full.size();++i)scene_tile(r,*full[i],32+(i%columns)*area/columns,100+(i/columns)*610.f/rows,area/columns-12,610.f/rows-8);
-    if(!mini.empty()) {
-        const int cols=std::max(1,static_cast<int>(std::ceil(std::sqrt(mini.size()/2.f))));
-        const int rows=(static_cast<int>(mini.size())+cols-1)/cols;
-        for(std::size_t i=0;i<mini.size();++i)scene_tile(r,*mini[i],850+(i%cols)*320.f/cols,100+(i/cols)*610.f/rows,320.f/cols-3,610.f/rows-3,true);
-    }
-    r.text(32,718,view.roomStatus,13,cyan);
-    r.text(32,742,view.replay?"Replay: Space pause   -/+ speed   Left/Right seek   Tab results / focus":"Tab: focus / statistics   P: settings   R: retry   Ctrl+Shift+F12: host ends match",13,muted);
-    r.text(32,770,view.controls,10,muted);
-}
 struct Options {
     std::string dataDir,profile,profileTwo,replay,font,screenshot;
     std::vector<std::string> bindings;
     int frames=0,smoke=0,frameLimit=0;
     std::optional<std::pair<int,int>> windowSize;
-    bool play=false,vsync=true,vsyncOverride=false,hidden=false,continuous=false;
+    bool migrateConfig=false,play=false,vsync=true,vsyncOverride=false,hidden=false,continuous=false;
 };
 Options options(int argc,char** argv) {
     Options result;
@@ -259,13 +54,14 @@ Options options(int argc,char** argv) {
             const auto size=value();const auto x=size.find('x');
             if(x==std::string::npos)throw std::runtime_error("--window-size requires WIDTHxHEIGHT");
             const int w=std::stoi(size.substr(0,x)),h=std::stoi(size.substr(x+1));
-            if(w<840 || h<560 || w>16384 || h>16384)throw std::runtime_error("Window dimensions must be 840x560..16384x16384");
+            if(w<=0 || h<=0 || w>16384 || h>16384)throw std::runtime_error("Window dimensions must be positive and at most 16384x16384");
             result.windowSize=std::pair{w,h};
         }
         else if(arg=="--screenshot") result.screenshot=value();
         else if(arg=="--frames") {result.frames=std::stoi(value());result.hidden=true;}
         else if(arg=="--smoke-test") {result.smoke=1;result.vsync=false;result.vsyncOverride=true;}
         else if(arg=="--play") result.play=true;
+        else if(arg=="--migrate-config")result.migrateConfig=true;
         else if(arg=="--no-vsync") {result.vsync=false;result.vsyncOverride=true;}
         else if(arg=="--vsync") {result.vsync=true;result.vsyncOverride=true;}
         else if(arg=="--hidden") result.hidden=true;
@@ -273,6 +69,9 @@ Options options(int argc,char** argv) {
             std::cerr<<"TerMino OpenGL / shared full application\n"
                 "[player1-keybindings] [player2-keybindings] (same native key format as tetr)\n"
                 "--data-dir DIR  isolated runtime directory\n"
+                "--migrate-config  import profiles into .tetr/config.json and exit\n"
+                "Start multiple windows with independent settings and shared scores/replays.\n"
+                "Only the first window saves configuration; additional settings are temporary.\n"
                 "--profile FILE  read original platform profile and bindings\n"
                 "--profile2 FILE read Player 2 profile\n"
                 "--replay FILE   open single-board or local-versus recording\n"
@@ -315,26 +114,31 @@ int main(int argc,char** argv) {
         for(auto* path:{&opt.font,&opt.profile,&opt.profileTwo,&opt.replay,&opt.screenshot})if(!path->empty())*path=absolute(*path);
         for(auto& binding:opt.bindings)binding=absolute(binding);
         if(!opt.dataDir.empty()) {std::filesystem::create_directories(std::filesystem::u8path(opt.dataDir));std::filesystem::current_path(std::filesystem::u8path(opt.dataDir));}
-        Util::RuntimeDirectoryLock directoryLock(".tetr/client.lock");
+        Util::RuntimeDirectoryLock directoryLock(".tetr/client.lock",Util::RuntimeDirectoryLock::Access::Shared);
         if(!directoryLock.acquired())throw std::runtime_error(directoryLock.error());
-        auto windowConfig=load_window_config(".tetr/graphics.ini");
+        Util::RuntimeDirectoryLock settingsLock(".tetr/settings.lock");
+        const bool persistSettings=settingsLock.acquired();
+        if(opt.migrateConfig) {if(!persistSettings || !UserConfig::migrate_client_config())throw std::runtime_error("Could not migrate client settings; existing files were preserved.");return 0;}
+        auto windowConfig=load_window_config(UserConfig::kClientConfigPath);
         if(opt.windowSize){windowConfig.width=opt.windowSize->first;windowConfig.height=opt.windowSize->second;windowConfig.maximized=false;}
         if(opt.frameLimit)windowConfig.frameLimit=opt.frameLimit;
         if(opt.vsyncOverride)windowConfig.vsync=opt.vsync;
+        SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS,"0");SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS,"0");
         if(!SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS))throw std::runtime_error(SDL_GetError());
         if(opt.font.empty())opt.font=std::string(SDL_GetBasePath())+"resources/fonts/NotoSansCJKsc-Regular.otf";
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,3);SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_CONTEXT_PROFILE_CORE);SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER,1);
         const SDL_WindowFlags flags=SDL_WINDOW_OPENGL|SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY|(opt.hidden?SDL_WINDOW_HIDDEN:0)|(!opt.hidden && windowConfig.maximized?SDL_WINDOW_MAXIMIZED:0);
-        window=SDL_CreateWindow("TerMino / OpenGL",windowConfig.width,windowConfig.height,flags);
-        if(!window)throw std::runtime_error(SDL_GetError());SDL_SetWindowMinimumSize(window,840,560);
+        window=SDL_CreateWindow("TerMino",windowConfig.width,windowConfig.height,flags);
+        if(!window)throw std::runtime_error(SDL_GetError());
         gl=SDL_GL_CreateContext(window);if(!gl)throw std::runtime_error(SDL_GetError());
         if(!gladLoadGL(reinterpret_cast<GLADloadfunc>(SDL_GL_GetProcAddress)) || !GLAD_GL_VERSION_3_3)throw std::runtime_error("OpenGL 3.3 Core is required");
         std::cerr<<"TerMino GL: "<<glGetString(GL_VERSION)<<" / "<<glGetString(GL_RENDERER)<<" / video="<<SDL_GetCurrentVideoDriver()<<" / hidden="<<opt.hidden<<'\n';
         SDL_GL_SetSwapInterval(windowConfig.vsync?1:0);
         {
-            Renderer renderer(opt.font);EventClock eventClock;
+            EventClock eventClock;
             UserConfig::Settings first,second;
+            first.persistenceEnabled=persistSettings;
             UserConfig::load_keybindings(first,opt.bindings.empty()?UserConfig::kDefaultKeybindingPath:opt.bindings[0]);
             const auto profile=[](const char* name){const char* p=std::getenv(name);return p?std::string(p):std::string{};};
             UserConfig::load_startup_settings(first,false,opt.profile.empty()?profile("TETR_USER_CONFIG"):opt.profile);
@@ -343,13 +147,33 @@ int main(int argc,char** argv) {
             UserConfig::load_player_two_keybindings(second,opt.bindings.size()<2?UserConfig::kDefaultPlayerTwoKeybindingPath:opt.bindings[1]);
             UserConfig::load_startup_settings(second,true,opt.profileTwo.empty()?profile("TETR_USER_CONFIG_PLAYER2"):opt.profileTwo);
             if(!opt.profileTwo.empty())second.persistencePath.clear();
+            if(!persistSettings)SDL_SetWindowTitle(window,first.uiLanguage?"TerMino - Session settings":"TerMino - 临时设置");
             if(!opt.replay.empty()) {first.gameMode=5;first.replayPath=opt.replay;}
             LaunchOptions launch;launch.startScreen=!opt.play && opt.replay.empty();launch.continuousCancellation=opt.continuous;launch.audio=!opt.hidden;
-            if(opt.profile.empty() && !std::getenv("TETR_USER_CONFIG")) {int owner=0;std::ifstream(".tetr/active_player")>>owner;launch.playerTwoActive=owner==1;}
+            if(opt.profile.empty() && !std::getenv("TETR_USER_CONFIG")) {launch.playerTwoActive=UserConfig::load_active_player()==1;}
             Session session(std::move(first),std::move(second),launch);
-            bool running=true,textActive=false;int frame=0,smokeStep=0;
-            TextEvents textEvents;auto& composition=textEvents.composition;const auto smokeStart=std::chrono::steady_clock::now();
+            complete_input_sample(session.input(),eventClock,SDL_GetTicksNS());
+            FrameRequest request;int logicalW=0,logicalH=0;
+            const auto geometry=[&] {
+                SDL_GetWindowSizeInPixels(window,&request.width,&request.height);
+                SDL_GetWindowSize(window,&logicalW,&logicalH);
+                const auto flags=SDL_GetWindowFlags(window);
+                request.presentable=(flags&(SDL_WINDOW_HIDDEN|SDL_WINDOW_MINIMIZED|SDL_WINDOW_OCCLUDED))==0;
+            };
+            geometry();
+            RenderThread renderer(window,session,opt.font,request,windowConfig.frameLimit,windowConfig.vsync,opt.frames,opt.screenshot);
+            std::cerr<<"TerMino GL: rendering="<<renderer.backend()<<" worker / SDL input=event-driven main thread\n";
+            bool running=true,textActive=false;int smokeStep=0,imeFrame=-1;
+            TextEvents textEvents;MenuPointer pointer;auto& composition=textEvents.composition;const auto smokeStart=std::chrono::steady_clock::now();
+            bool mapDrawing=false;std::optional<std::pair<int,int>> lastPaint;
+            std::optional<ScrollGesture> mouseScroll;
+            struct TouchGesture {ScrollGesture scroll;std::optional<UiHit> hit;std::uint64_t page=0;float x=0,y=0;bool dragged=false;};
+            std::map<std::pair<SDL_TouchID,SDL_FingerID>,TouchGesture> fingers;
+            const auto cursorDeleter=[](SDL_Cursor* cursor){if(cursor)SDL_DestroyCursor(cursor);};
+            std::unique_ptr<SDL_Cursor,decltype(cursorDeleter)> hand(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER),cursorDeleter),
+                crosshair(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_CROSSHAIR),cursorDeleter);
             while(running) {
+                if(auto dialog=session.take_file_dialog())show_file_dialog(window,std::move(dialog));
                 const auto frameStart=std::chrono::steady_clock::now();
                 const bool requested=session.text_input_active();
                 if(requested!=textActive) {
@@ -367,55 +191,157 @@ int main(int argc,char** argv) {
                     }
                     if(elapsed>2.5)running=false;
                 }
-                SDL_Event event;
-                while(SDL_PollEvent(&event)) {
+                // Physical input is committed before slower UI/clipboard work.
+                // Neither rendering nor its rate/VSync sleeps runs here.
+                const auto events=poll_input_events(session.input(),eventClock,[&] {pointer.cancel(session.input());});
+                geometry();
+                for(const auto& polled:events) {
+                    const auto& event=polled.event;
                     if(event.type==SDL_EVENT_QUIT)running=false;
-                    if(event.type==SDL_EVENT_WINDOW_FOCUS_LOST){session.input().set_focused(false);textEvents.reset();}
-                    if(event.type==SDL_EVENT_WINDOW_FOCUS_GAINED)regain_focus(session.input());
-                    if(textActive && session.input().accepting_input())textEvents.consume(event,
+                    if(event.type==SDL_EVENT_WINDOW_FOCUS_LOST){textEvents.reset();mapDrawing=false;lastPaint.reset();mouseScroll.reset();fingers.clear();}
+                    if(event.type==SDL_EVENT_MOUSE_BUTTON_UP && event.button.button==SDL_BUTTON_LEFT)mouseScroll.reset();
+                    if(event.type==SDL_EVENT_FINGER_DOWN || event.type==SDL_EVENT_FINGER_MOTION ||
+                        event.type==SDL_EVENT_FINGER_UP || event.type==SDL_EVENT_FINGER_CANCELED) {
+                        const auto id=std::pair{event.tfinger.touchID,event.tfinger.fingerID};
+                        const auto current=session.controls();const auto feedback=renderer.feedback();
+                        const auto viewport=Viewport::fit(logicalW,logicalH);
+                        if(!polled.acceptingInput || !current.ui || !feedback || viewport.scale<=0 ||
+                            feedback->width!=request.width || feedback->height!=request.height){fingers.erase(id);continue;}
+                        const auto& m=current.ui->metadata;
+                        const float x=(event.tfinger.x*logicalW-viewport.x)/viewport.scale,y=(event.tfinger.y*logicalH-viewport.y)/viewport.scale;
+                        if(event.type==SDL_EVENT_FINGER_DOWN) {
+                            fingers[id]={ScrollGesture(feedback->interaction,m,x,y),feedback->interaction.hit(x,y,m),m.page,x,y,false};
+                            if(textActive && feedback->interaction.textRect && contains(*feedback->interaction.textRect,x,y))fingers[id].hit.reset();
+                        }
+                        if(const auto it=fingers.find(id);it!=fingers.end()) {
+                            auto& g=it->second;
+                            if(g.page!=m.page){fingers.erase(it);continue;}
+                            const bool paint=g.hit && g.hit->kind==Frontend::UiCommandKind::MapPaint;
+                            if(event.type==SDL_EVENT_FINGER_MOTION) {
+                                g.dragged|=std::hypot(x-g.x,y-g.y)>6;
+                                if(!paint)if(auto movement=g.scroll.move(x,y))renderer.scroll(*movement);
+                            }
+                            const auto hit=paint?feedback->interaction.hit(x,y,m):g.hit;
+                            if(hit && ((paint && (event.type==SDL_EVENT_FINGER_DOWN || event.type==SDL_EVENT_FINGER_MOTION)) ||
+                                (event.type==SDL_EVENT_FINGER_UP && !g.dragged && !g.scroll.scrollbar()))) {
+                                Frontend::UiCommand command{hit->back?Frontend::UiCommandKind::Back:hit->kind,hit->index,hit->ancestor,m.page};
+                                command.row=hit->row;command.column=hit->column;command.alternate=event.type==SDL_EVENT_FINGER_MOTION;
+                                session.ui_command(command);
+                            }
+                            if(event.type==SDL_EVENT_FINGER_UP || event.type==SDL_EVENT_FINGER_CANCELED) {
+                                if(paint)session.ui_command({Frontend::UiCommandKind::MapEndStroke,0,{},m.page});
+                                fingers.erase(it);
+                            }
+                        }
+                        continue;
+                    }
+                    if(event.type==SDL_EVENT_MOUSE_MOTION && mouseScroll) {
+                        const auto viewport=Viewport::fit(logicalW,logicalH);
+                        if(polled.acceptingInput && viewport.scale>0)
+                            if(auto movement=mouseScroll->move((event.motion.x-viewport.x)/viewport.scale,(event.motion.y-viewport.y)/viewport.scale))renderer.scroll(*movement);
+                        continue;
+                    }
+                    if(event.type==SDL_EVENT_KEY_DOWN && event.key.scancode==SDL_SCANCODE_F4 && !event.key.repeat &&
+                        polled.acceptingInput && composition.empty()) {
+                        const auto current=session.controls();
+                        if(current.ui)if(const auto command=file_browse_command(current.ui->metadata))session.ui_command(*command);
+                    }
+                    if(textActive && polled.acceptingInput)textEvents.consume(event,
                         [&](Frontend::TextEditEvent edit){session.text_event(std::move(edit));},[] {
                             char* text=SDL_GetClipboardText();std::string value=text?text:"";SDL_free(text);return value;
                         });
-                    if(event.type==SDL_EVENT_KEY_DOWN || event.type==SDL_EVENT_KEY_UP)deliver_key(session.input(),event.key,eventClock);
+                    if((event.type==SDL_EVENT_MOUSE_BUTTON_UP && event.button.button==SDL_BUTTON_LEFT) ||
+                       (event.type==SDL_EVENT_MOUSE_MOTION && mapDrawing && !(event.motion.state&SDL_BUTTON_LMASK))) {
+                        mapDrawing=false;lastPaint.reset();
+                        const auto current=session.controls();
+                        if(current.ui)session.ui_command({Frontend::UiCommandKind::MapEndStroke,0,{},current.ui->metadata.page});
+                    }
+                    if((event.type==SDL_EVENT_MOUSE_BUTTON_DOWN || event.type==SDL_EVENT_MOUSE_WHEEL ||
+                        (event.type==SDL_EVENT_MOUSE_MOTION && mapDrawing)) && polled.acceptingInput) {
+                        const auto current=session.controls();
+                        if(current.ui) {
+                            const auto& metadata=current.ui->metadata;
+                            const auto viewport=Viewport::fit(logicalW,logicalH);
+                            const auto feedback=renderer.feedback();
+                            if(viewport.scale<=0 || !feedback || feedback->width!=request.width || feedback->height!=request.height)continue;
+                            if(event.type==SDL_EVENT_MOUSE_WHEEL) {
+                                if(const auto area=feedback->interaction.scroll((event.wheel.mouse_x-viewport.x)/viewport.scale,
+                                    (event.wheel.mouse_y-viewport.y)/viewport.scale,metadata);area && event.wheel.y!=0) {
+                                    if(const auto command=pointer.editor_wheel(metadata,*area,event.wheel.y))session.ui_command(*command);
+                                } else if(const auto area=feedback->interaction.menu_scroll((event.wheel.mouse_x-viewport.x)/viewport.scale,
+                                    (event.wheel.mouse_y-viewport.y)/viewport.scale,metadata);area && event.wheel.y!=0) {
+                                    renderer.scroll({metadata.page,*area,-event.wheel.y*3});
+                                } else if(!textActive)pointer.wheel(session.input(),metadata,event.wheel.y,SDL_GetTicks());
+                            } else if(event.type==SDL_EVENT_MOUSE_MOTION || event.button.button==SDL_BUTTON_LEFT) {
+                                const bool motion=event.type==SDL_EVENT_MOUSE_MOTION;
+                                const float x=motion?event.motion.x:event.button.x,y=motion?event.motion.y:event.button.y;
+                                if(!motion) {
+                                    if(textActive && feedback->interaction.textRect && contains(*feedback->interaction.textRect,(x-viewport.x)/viewport.scale,(y-viewport.y)/viewport.scale))continue;
+                                    ScrollGesture scroll(feedback->interaction,metadata,(x-viewport.x)/viewport.scale,(y-viewport.y)/viewport.scale);
+                                    if(scroll.scrollbar()){mouseScroll=scroll;continue;}
+                                }
+                                if(const auto hit=feedback->interaction.hit((x-viewport.x)/viewport.scale,(y-viewport.y)/viewport.scale,metadata)) {
+                                    if(motion && hit->kind!=Frontend::UiCommandKind::MapPaint)continue;
+                                    pointer.cancel(session.input());
+                                    Frontend::UiCommand command{hit->back?Frontend::UiCommandKind::Back:hit->kind,hit->index,hit->ancestor,metadata.page};
+                                    command.row=hit->row;command.column=hit->column;
+                                    command.alternate=motion || (!motion && event.button.clicks>=2);
+                                    if(hit->kind==Frontend::UiCommandKind::MapPaint) {
+                                        const auto cell=std::pair{hit->row,hit->column};
+                                        if(motion && lastPaint==cell)continue;
+                                        command.alternate=motion;mapDrawing=true;lastPaint=cell;
+                                    } else {mapDrawing=false;lastPaint.reset();}
+                                    session.ui_command(command);
+                                }
+                            }
+                        }
+                    }
                 }
-                const auto view=session.view();
+                const auto view=session.controls();
+                pointer.update(session.input(),view.ui?&view.ui->metadata:nullptr,SDL_GetTicks());
                 if(view.status==SessionStatus::Closed)running=false;
                 if(view.status==SessionStatus::Error)throw std::runtime_error(view.message);
-                int width=0,height=0;SDL_GetWindowSizeInPixels(window,&width,&height);
-                if(width>0 && height>0) {
-                    renderer.begin(width,height);background(renderer);
-                    if(!view.ui || view.ui->overlay) {
-                        if(view.peers.empty())game_view(renderer,view,view.controls);
-                        else scene_view(renderer,view);
+                request.textActive=textActive;request.composition=composition;
+                request.pointer.reset();SDL_Cursor* wanted=SDL_GetDefaultCursor();
+                if(SDL_GetMouseFocus()==window && session.input().accepting_input()) {
+                    float x=0,y=0;SDL_GetMouseState(&x,&y);const auto viewport=Viewport::fit(logicalW,logicalH);
+                    if(viewport.scale>0) {
+                        request.pointer=std::array<float,2>{(x-viewport.x)/viewport.scale,(y-viewport.y)/viewport.scale};
+                        const auto feedback=renderer.feedback();
+                        if(view.ui && feedback && feedback->width==request.width && feedback->height==request.height)
+                            if(const auto hit=feedback->interaction.hit((*request.pointer)[0],(*request.pointer)[1],view.ui->metadata))
+                                wanted=hit->kind==Frontend::UiCommandKind::MapPaint?crosshair.get():hand.get();
                     }
-                    if(view.ui)renderer.surface(*view.ui);
-                    if(textActive && view.ui && view.ui->caret) {
-                        const float cw=1136.f/view.ui->extent.first,ch=650.f/view.ui->extent.second;
-                        const float x=32+view.ui->caret->second*cw,y=92+(view.ui->caret->first+1)*ch;
-                        if(!composition.empty()) {renderer.rect(x,y,500,30,panelColor);renderer.text(x,y,composition,20,cyan);}
-                        int logicalW=0,logicalH=0;SDL_GetWindowSize(window,&logicalW,&logicalH);
+                }
+                if(wanted && SDL_GetCursor()!=wanted)SDL_SetCursor(wanted);
+                renderer.submit(request);
+                if(const auto feedback=renderer.feedback();feedback && textActive && feedback->frames!=imeFrame &&
+                    feedback->width==request.width && feedback->height==request.height) {
+                    imeFrame=feedback->frames;
+                    if(const auto field=feedback->interaction.textRect) {
+                        const float x=std::min(field->x,780.f),y=field->y;
                         const auto logical=Viewport::fit(logicalW,logicalH);
                         SDL_Rect area{logical.screen_x(x),logical.screen_y(y),std::max(1,int(400*logical.scale)),std::max(1,int(24*logical.scale))};
                         SDL_SetTextInputArea(window,&area,0);
                     }
-                    renderer.end();++frame;
-                    if(opt.frames && frame>=opt.frames)running=false;
-                    if(!running && !opt.screenshot.empty())renderer.screenshot(opt.screenshot,width,height);
-                    SDL_GL_SwapWindow(window);
                 }
+                if(renderer.finished())running=false;
                 if(opt.smoke && !running) {
-                    if(view.board.pieces<1 || !view.board.hold.valid())throw std::runtime_error("SDL smoke failed: shared engine did not receive drop/Hold");
-                    std::cerr<<"OPENGL_SMOKE_OK pieces="<<view.board.pieces<<" hold="<<view.board.hold.index()<<'\n';
+                    if(view.pieces<1 || !view.hold.valid())throw std::runtime_error("SDL smoke failed: shared engine did not receive drop/Hold");
+                    std::cerr<<"OPENGL_SMOKE_OK pieces="<<view.pieces<<" hold="<<view.hold.index()<<'\n';
                 }
-                std::this_thread::sleep_until(frameStart+std::chrono::microseconds(1000000/windowConfig.frameLimit));
+                // Wake for input as soon as it is queued. The 1 ms idle bound
+                // also publishes held-key time without tying it to a frame.
+                if(running)SDL_WaitEventTimeout(nullptr,1);
             }
+            renderer.stop();(void)renderer.feedback();
             if(textActive)SDL_StopTextInput(window);
         }
         if(!opt.hidden) {
             windowConfig.maximized=(SDL_GetWindowFlags(window)&SDL_WINDOW_MAXIMIZED)!=0;
             if(!windowConfig.maximized)SDL_GetWindowSize(window,&windowConfig.width,&windowConfig.height);
         }
-        if(!save_window_config(".tetr/graphics.ini",windowConfig))std::cerr<<"Could not save graphical window settings.\n";
+        if(persistSettings && !save_window_config(UserConfig::kClientConfigPath,windowConfig))std::cerr<<"Could not save graphical window settings.\n";
         SDL_GL_DestroyContext(gl);SDL_DestroyWindow(window);SDL_Quit();return 0;
     } catch(const std::exception& error) {
         std::cerr<<"TerMino OpenGL: "<<error.what()<<'\n';

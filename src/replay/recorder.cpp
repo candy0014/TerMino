@@ -23,6 +23,8 @@ std::string recording_for_save(const Runtime::GameContext& context) {
         std::ostringstream metadata;
         metadata.imbue(std::locale::classic());
         metadata<<"{undo_count,"<<state.undoCount<<"}{pause_count,"<<state.pauseCount<<'}';
+        if(state.onlineIdentity[2])metadata<<"{online_room,"<<state.onlineIdentity[0]<<"}{online_epoch,"<<state.onlineIdentity[1]<<"}{online_actor,"<<state.onlineIdentity[2]<<'}';
+        if(state.onlineProfile)metadata<<"{online_profile,"<<state.onlineProfile<<'}';
         const auto& timing=context.session.player.timing;
         auto gameTime=timing.completedGameTime,realTime=timing.completedRealTime;
         const auto* app=context.app_component();
@@ -50,6 +52,7 @@ std::string recording_for_save(const Runtime::GameContext& context) {
 void append_record(Runtime::GameContext& context, const std::string& record) {
     auto& state = session(context);
     if (state.tetrioRecorder) return; // The tournament has its own uncapped recording.
+    const auto previousSize=state.data.size();
     if (state.recordingStart && !context.config.mode.replayMode) {
         const auto* app = context.app_component();
         const auto& clock = app && app->primaryContext ? *app->primaryContext : context;
@@ -57,6 +60,7 @@ void append_record(Runtime::GameContext& context, const std::string& record) {
         state.data += "{wall_time," + std::to_string(elapsed.seconds()) + "}";
     }
     state.data += record;
+    if(state.recordObserver)state.recordObserver(std::string_view(state.data).substr(previousSize));
 }
 
 std::string replay_base(const Runtime::GameContext& context, OperationKind op) {
@@ -83,7 +87,7 @@ void record_add_solid_garbage(Runtime::GameContext& context, int height, Runtime
 
 void record_add_buffer(Runtime::GameContext& context, int attack, bool instant, int resolvedLines,
                        double incomingFraction, bool deferDisplay,std::optional<int> receivedAttack) {
-    if (session(context).data.length() >= 10000000) return;
+    if (session(context).data.length() >= session(context).recordingLimit) return;
     std::ostringstream record;
     record.imbue(std::locale::classic());
     record << '{' << replay_base(context,OperationKind::AddBuffer)
@@ -125,7 +129,7 @@ void record_end_move_data(
 }
 
 void record_quick_play_state(Runtime::GameContext& context, const Runtime::PlayerSessionState& player) {
-    if (session(context).data.length() >= 10000000) return;
+    if (session(context).data.length() >= session(context).recordingLimit) return;
     const auto& qp = context.session.quickPlay;
     const auto& p = qp.progress;
     std::ostringstream record;

@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 
+namespace TetrTests::tetrio_inputs_test {
 namespace {
 Replay::TetrioInputEncoder native_i_spin_fixture() {
     Runtime::Playfield field;
@@ -142,7 +143,7 @@ void fixture(const std::string& name, const Replay::TetrioInputEncoder& encoder,
 }
 }
 
-int main(int argc, char** argv) {
+int run(int argc,char** argv) {
     tests();
     if (argc == 2 && std::string(argv[1]) == "--fixtures") {
         std::cout << "{";
@@ -169,4 +170,6 @@ int main(int argc, char** argv) {
         std::cout << ",\"rotation_profile\":" << Replay::tetrio_native_rotation_profile();
         std::cout << "}\n";
     } else std::cout << "TETR.IO input encoder tests passed\n";
+    return 0;
 }
+} // namespace TetrTests::tetrio_inputs_test

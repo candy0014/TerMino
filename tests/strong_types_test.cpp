@@ -5,13 +5,14 @@
 #include <cassert>
 #include <type_traits>
 
+namespace TetrTests::strong_types_test {
 static_assert(!std::is_convertible_v<int,Piece::Type>);
 static_assert(!std::is_convertible_v<int,Runtime::Rotation>);
 static_assert(!std::is_convertible_v<int,Piece::KickIndex>);
 static_assert(std::is_copy_constructible_v<Piece::Pose>);
 static_assert(!std::is_convertible_v<int, Runtime::BoardCell>);
 
-int main(){
+int run(int argc,char** argv){
     for(int value=-20;value<=20;++value){
         const auto r=Compat::rotation_from_legacy(value);
         assert(Compat::to_legacy(r)>=0&&Compat::to_legacy(r)<4);
@@ -66,3 +67,4 @@ int main(){
     assert(Compat::to_legacy(Compat::piece_type_from_legacy(-2))==-2); // hold disabled
     return 0;
 }
+} // namespace TetrTests::strong_types_test

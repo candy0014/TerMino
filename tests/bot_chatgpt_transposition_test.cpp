@@ -52,7 +52,9 @@ int main() {
             assert(disabled.statistics().pruned==0);
         }
         B::TranspositionEngine candidate(owner.context());A::configure_native(candidate,root);
-        for(int i=0;i<200;++i){const auto b=A::native_pass(candidate,root);assert(A::first_legal(owner.context().get(),root,b));}
+        for(int i=0;i<2000 && (i<200 || candidate.statistics().pruned==0);++i) {
+            const auto b=A::native_pass(candidate,root);assert(A::first_legal(owner.context().get(),root,b));
+        }
         assert(candidate.statistics().pruned>0);
         if(held==4)B::TranspositionTestAccess::key_guards(candidate);
     }

@@ -25,6 +25,7 @@
 #include <memory>
 #include <sstream>
 
+namespace TetrTests::field_visibility_test {
 namespace {
 using namespace Runtime;
 using Id=UserConfig::SettingId;
@@ -213,4 +214,6 @@ void network_timing() {
     malformed=wire;malformed.replace(start+15,end-start-15,"999999:6,");assert(!Network::decode_board_state(malformed,10,20));
 }
 }
-int main() {configuration();independent_piece_timers();periodic_visibility();hidden_active_garbage_repaint();row_moves_and_undo();network_timing();}
+int run(int argc,char** argv) {configuration();independent_piece_timers();periodic_visibility();hidden_active_garbage_repaint();row_moves_and_undo();network_timing();    return 0;
+}
+} // namespace TetrTests::field_visibility_test

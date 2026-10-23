@@ -11,6 +11,7 @@
 #include <random>
 #include <string>
 
+namespace TetrTests::board_state_receive_codec_test {
 namespace {
 
 void assert_field_equal(const Runtime::Playfield& expected,const Runtime::Playfield& actual,int width,int visibleHeight){
@@ -28,7 +29,7 @@ void random_roundtrip(){
         auto& player=session.player;
         auto& playfield=player.gameplay.playfield;
         const int width=4+static_cast<int>(rng()%7);
-        const int height=10+static_cast<int>(rng()%11);
+        const int height=static_cast<int>(rng()%21);
         playfield.width=width;
         playfield.visibleHeight=height;
         playfield.activeHeight=height;
@@ -166,8 +167,9 @@ void malformed_inputs(){
 
 } // namespace
 
-int main(){
+int run(int argc,char** argv){
     random_roundtrip();
     malformed_inputs();
     return 0;
 }
+} // namespace TetrTests::board_state_receive_codec_test

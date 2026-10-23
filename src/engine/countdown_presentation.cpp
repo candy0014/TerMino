@@ -109,6 +109,16 @@ static CountdownResult run_countdown(
     const std::function<bool()>& refreshLayout,
     const std::function<bool(CountdownResult)>& allowControl,
     const std::function<Runtime::Duration()>& remaining = {}) {
+    struct CountdownPresentation {
+        Runtime::SessionState& first;
+        Runtime::GameContext* second;
+        void show(int digit) {
+            first.countdownDigit=digit;
+            if(second)second->session.countdownDigit=digit;
+        }
+        ~CountdownPresentation() {show(0);}
+    } presentation{context.session,secondContext};
+    presentation.show(0);
     if (firstMovementInput) precharge_movement_input(context,*firstMovementInput);
     if (secondContext && secondMovementInput) precharge_movement_input(*secondContext,*secondMovementInput);
     if(Runtime::active_goal(context.config)==Runtime::GameGoal::None && context.config.garbage.mode != Runtime::GarbageMode::Multiplayer) return CountdownResult::Completed;
@@ -148,14 +158,17 @@ static CountdownResult run_countdown(
             const double seconds=remaining().seconds();
             if(seconds<=0) break;
             const int digit=std::clamp(static_cast<int>(std::ceil(seconds)),1,3);
+            presentation.show(digit);
             if(digit!=shown || resized) {draw(shapes[3-digit]);Render::flush();shown=digit;}
             if(firstMovementInput) precharge_movement_input(context,*firstMovementInput);
             const auto result=poll_countdown_input(context,firstInput,allowControl);
             if(result!=CountdownResult::Completed) return result;
             context.services.clock.sleep_for(Runtime::Duration::from_seconds(0.001));
         }
-    } else for(const auto& shape:shapes){
+    } else for(int digit=3;digit>=1;--digit){
+        const auto& shape=shapes[3-digit];
         const Runtime::TimePoint started=context.real_now();
+        presentation.show(digit);
         draw(shape);
         fflush(stdout);
         const auto result=wait_countdown_second(

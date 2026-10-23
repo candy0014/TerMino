@@ -20,6 +20,7 @@ struct DoubleHoleReverseInput {
     int linesCleared = 0;
     int clearedGarbageLines = 0;
     bool blighted = false;
+    double roundingRoll = 1.0;
 };
 
 struct DoubleHoleReverseResult {

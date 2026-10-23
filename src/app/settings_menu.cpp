@@ -1,4 +1,5 @@
 #include "single_player_challenges.h"
+#include "online_replay.h"
 #include "tetr/app/settings_menu.h"
 #include "tetr/app/application_state.h"
 #include "settings_input.h"
@@ -21,6 +22,7 @@
 #include "tetr/config/normalization.h"
 #include "tetr/config/multiplayer_config.h"
 #include "tetr/replay/file_path.h"
+#include "tetr/replay/recent.h"
 #include "tetr/network/network_services.h"
 
 #include <algorithm>
@@ -42,6 +44,8 @@ void print_action_confirmation(const TerminalSettingsView& view, const SettingNo
     if(node.key=="copy-host-config") {view.print_message("Press Enter again to copy the host configuration. Arrow keys cancel.");return;}
     if(node.confirmTwice) {
         view.print_message(node.kind==NodeKind::ChallengeReplay || node.kind==NodeKind::RecentReplay ? "Press Enter again to play this replay. Arrow keys cancel." :
+            node.kind==NodeKind::RecentReplayDelete ? "Press Enter again to delete this replay file. Arrow keys cancel." :
+            node.kind==NodeKind::RecentReplaysClear ? "Press Enter again to delete all recent replay files. Arrow keys cancel." :
             node.kind==NodeKind::ChallengeStart ? "Press Enter again to start this challenge. Arrow keys cancel." :
             node.kind==NodeKind::PresetEdit ? "Press Enter again to edit this preset. Arrow keys cancel." :
             node.kind==NodeKind::PresetDelete ? "Press Enter again to delete this preset. Arrow keys cancel." :
@@ -152,7 +156,7 @@ bool synchronize_shared_appearance(Runtime::GameContext& displayed, bool save) {
         // Save the displayed copy first: promoted Player 2 can share a path
         // with the secondary context, whose gameplay settings may be stale.
         // Keep an unused Player 2 profile absent until it is initialized.
-        if (save && !user->presetDefined && user!=uninitializedSecond && savedPaths.insert(user->persistencePath).second)
+        if (save && !user->presetDefined && user!=uninitializedSecond && savedPaths.insert(UserConfig::profile_identity(*user)).second)
             saved=UserConfig::save(*user) && saved;
     }
     for (auto* context:contexts) {
@@ -176,6 +180,10 @@ void choose_value(Runtime::GameContext& context, const TerminalSettingsView& vie
     NavigationInput input(context);
     for (;;) {
         checkControls();
+        const auto command=Frontend::poll_ui_command();
+        if(command && command->ancestor)throw MenuJump{*command->ancestor,command->index};
+        if(command && command->kind==Frontend::UiCommandKind::Back)throw MenuExit::CancelEdit;
+        if(command)selected=command->index;
         if (input.update(NavigationKey::Left, false) || input.update(NavigationKey::Backspace, false)) throw MenuExit::CancelEdit;
         const bool up = input.update(NavigationKey::Up, true);
         const bool down = input.update(NavigationKey::Down, true);
@@ -187,7 +195,7 @@ void choose_value(Runtime::GameContext& context, const TerminalSettingsView& vie
         if (input.update(NavigationKey::PageUp, true)) selected = selected > view.page_rows() ? selected - view.page_rows() : 0;
         if (input.update(NavigationKey::PageDown, true)) selected = std::min(selected + view.page_rows(), item.choice.values.size() - 1);
         if (previous != selected || view.terminal_size_changed()) view.print_choices(item, selected, breadcrumb);
-        if (input.update(NavigationKey::Confirm, false) || input.update(NavigationKey::Right, false)) {
+        if (command || input.update(NavigationKey::Confirm, false) || input.update(NavigationKey::Right, false)) {
             Model::apply_choice(item, item.choice.values[selected]);
             return;
         }
@@ -226,6 +234,7 @@ void add_room_entries(SettingNode& root,const Network::NetworkServices& network)
         append("room-role","Player status",UiText::tr(self!=network.roomMembers.end() && self->role==Network::PlayerRole::Offline?"Offline":
             self!=network.roomMembers.end() && self->role==Network::PlayerRole::Spectator?"Spectator":"Battle"),network.multiplayerRoom);
         append("room-users","Room users");
+        append("room-replays","Room replays");
         if(!host && network.roomPolicy.forceRules) append("room-view-host","View host configuration");
         gap("room-leave-gap");append("room-leave","Leave room");
     }
@@ -240,6 +249,7 @@ bool room_action(Runtime::GameContext& primary,Runtime::GameContext& displayed,c
     const CheckMenuControls& checkControls,const SettingNode& node) {
     auto& n=*primary.network_component();
     const auto& key=node.key;
+    if(key=="room-replays"){run_room_replay_menu(primary);return false;}
     if(key=="room-start") {
         primary.user_settings().gameMode=4;
         n.roomOnlineMode=true;n.roomGameMode=primary.user_settings().gameMode;n.roleRoomInstance=n.roomInstance;
@@ -280,7 +290,7 @@ bool show_rooms(Runtime::GameContext& primary, Runtime::GameContext& displayed,
     const TerminalSettingsView& view, const CheckMenuControls& checkControls, const std::string& action) {
     enum class Page { Main, Create, Join, List, Room, Users, Member };
     auto& network = *primary.network_component();
-    Page page = action=="room-create"?Page::Create:action=="room-join"?Page::Join:action=="room-list"?Page::List:Page::Users;
+    Page page = action=="play-rooms"?Page::Main:action=="room-create"?Page::Create:action=="room-join"?Page::Join:action=="room-list"?Page::List:Page::Users;
     std::string name;
     bool automaticName=page==Page::Create,nameRequested=false;
     if(automaticName)network.suggestedRoomName.clear();
@@ -305,7 +315,7 @@ bool show_rooms(Runtime::GameContext& primary, Runtime::GameContext& displayed,
         menu = SettingNode{"rooms", "Rooms", network.roomMessage};
         if (page == Page::Main) {
             menu.children = {row("create", "Create room"), row("join", "Join by name"),
-                row("list", "Room lobby"), row("back", "Back to settings")};
+                row("list", "Room lobby"), row("back", view.play_rooms()?"Back":"Back to settings")};
         } else if (page == Page::Create || page == Page::Join) {
             menu.title = page == Page::Create ? "Create room" : "Join by name";
             auto field = row("name", "Room name", page == Page::Create
@@ -381,6 +391,7 @@ bool show_rooms(Runtime::GameContext& primary, Runtime::GameContext& displayed,
                 if (member.slot == network.roomPlayerIndex) player.summary += " [" + UiText::tr("You") + "]";
                 menu.children.push_back(std::move(player));
             }
+            menu.children.push_back(row("replays", "Room replays"));
             menu.children.push_back(row("leave", "Leave room"));
             menu.children.push_back(row("back", "Back to settings"));
         }
@@ -395,6 +406,7 @@ bool show_rooms(Runtime::GameContext& primary, Runtime::GameContext& displayed,
         dirty = false; revision = network.roomRevision;
     };
     for (;;) {
+        try {
         checkControls(); poll_server(primary);
         if (!network.room.name.empty() && (page==Page::Create || page==Page::Join || page==Page::List)) return false;
         if (network.room.name.empty() && (page==Page::Users || page==Page::Member)) return false;
@@ -412,8 +424,17 @@ bool show_rooms(Runtime::GameContext& primary, Runtime::GameContext& displayed,
             Network::request_room(network, Network::RoomOperation::List,{},true,true); lastRefresh = std::chrono::steady_clock::now();
         }
         if (dirty || revision != network.roomRevision || roomView.terminal_size_changed()) rebuild();
-        if (input.update(NavigationKey::Left, false) || input.update(NavigationKey::Backspace, false)) {
+        const auto command=Frontend::poll_ui_command();
+        if(command && command->ancestor) {
+            if(page==Page::Member && *command->ancestor==view.navigation_depth()+1) {
+                page=Page::Users;selected=command->index;menu.children.clear();dirty=true;continue;
+            }
+            throw MenuJump{*command->ancestor,command->index};
+        }
+        if(command && command->kind==Frontend::UiCommandKind::Activate)selected=command->index;
+        if ((command && command->kind==Frontend::UiCommandKind::Back) || input.update(NavigationKey::Left, false) || input.update(NavigationKey::Backspace, false)) {
             if(page==Page::Member) {page=Page::Users;selected=userSelection;dirty=true;continue;}
+            if(view.play_rooms() && page!=Page::Main) {page=Page::Main;selected=0;dirty=true;continue;}
             return false;
         }
         const bool up = input.update(NavigationKey::Up, true), down = input.update(NavigationKey::Down, true);
@@ -423,13 +444,14 @@ bool show_rooms(Runtime::GameContext& primary, Runtime::GameContext& displayed,
         if (input.update(NavigationKey::PageUp, true)) selected = selected > roomView.page_rows() ? selected - roomView.page_rows() : 0;
         if (input.update(NavigationKey::PageDown, true)) selected = std::min(selected + roomView.page_rows(), menu.children.size() - 1);
         if (previous != selected) { dirty = true; rebuild(); }
-        if (input.update(NavigationKey::Confirm, false) || input.update(NavigationKey::Right, false)) {
+        if (command || input.update(NavigationKey::Confirm, false) || input.update(NavigationKey::Right, false)) {
             const auto key = menu.children[selected].key;
             if (!menu.children[selected].enabled) {
                 roomView.print_message(page==Page::Create?"Generating room name...":page==Page::Member?menu.children[selected].description:"Only the room host can change this option."); continue;
             }
             if (key == "back") {
                 if(page==Page::Member) {page=Page::Users;selected=userSelection;dirty=true;continue;}
+                if(view.play_rooms() && page!=Page::Main) {page=Page::Main;selected=0;dirty=true;continue;}
                 return false;
             } else if (key == "create" || key == "join") {
                 page = key == "create" ? Page::Create : Page::Join; selected = 0;
@@ -440,7 +462,7 @@ bool show_rooms(Runtime::GameContext& primary, Runtime::GameContext& displayed,
                 SettingItem item{Model::SettingId::ServerIp, "Room name", std::ref(name)};
                 item.owner = &displayed.user_settings();
                 item.hint = menu.children[selected].description; item.allowEmptyText = page==Page::Create;
-                const auto controls = [&] { checkControls(); poll_server(primary); };
+                const auto controls = [&] {checkControls();poll_server(primary);};
                 bool escape = false;
                 const auto draft = read_scalar_text(primary, controls, [&](const std::string& value, std::size_t caret) {
                     roomView.print_scalar_input(item, "SETTINGS > NETWORK > Rooms", value, caret);
@@ -461,6 +483,7 @@ bool show_rooms(Runtime::GameContext& primary, Runtime::GameContext& displayed,
             else if (key == "refresh") { Network::request_room(network, Network::RoomOperation::List); lastRefresh = std::chrono::steady_clock::now(); }
             else if (key.rfind("room:", 0) == 0) Network::request_room(network, Network::RoomOperation::Join, key.substr(5));
             else if (key == "leave") Network::request_room(network, Network::RoomOperation::Leave);
+            else if(key=="replays") {run_room_replay_menu(primary);input.suppress_held_keys();dirty=true;}
             else if(key.rfind("manage-player:",0)==0) {
                 memberSlot=std::stoi(key.substr(14));memberName=menu.children[selected].title;
                 userSelection=selected;page=Page::Member;selected=0;
@@ -486,6 +509,15 @@ bool show_rooms(Runtime::GameContext& primary, Runtime::GameContext& displayed,
             dirty = true;
         }
         primary.services.clock.sleep_for(Runtime::Duration::from_seconds(.001));
+        } catch(MenuJump jump) {
+            const auto depth=view.play_rooms()?0:view.navigation_depth()+1;
+            if(jump.depth<depth)throw;
+            if(page==Page::Member && jump.depth==depth)page=Page::Users;
+            selected=jump.index;menu.children.clear();dirty=true;input.suppress_held_keys();
+        } catch(MenuExit exit) {
+            if(exit!=MenuExit::CancelEdit)throw;
+            dirty=true;input.suppress_held_keys();
+        }
     }
 }
 
@@ -622,7 +654,15 @@ void show_host_configuration(Runtime::GameContext& primary,Runtime::GameContext&
             view.print_menu(menu,selected,breadcrumb(root,path));dirty=false;
             if(!network.roomPreview.incoming.payload) view.print_message("Host configuration is loading. Please wait.");
         }
-        if(input.update(NavigationKey::Left,false) || input.update(NavigationKey::Backspace,false)) {
+        const auto command=Frontend::poll_ui_command();
+        if(command && command->ancestor) {
+            path.resize(*command->ancestor);selected=command->index;dirty=true;confirmation=false;continue;
+        }
+        if(command && command->kind==Frontend::UiCommandKind::Activate) {
+            if(selected!=command->index)confirmation=false;
+            selected=command->index;
+        }
+        if((command && command->kind==Frontend::UiCommandKind::Back) || input.update(NavigationKey::Left,false) || input.update(NavigationKey::Backspace,false)) {
             if(path.empty()) return;
             const auto key=path.back();path.pop_back();auto& parent=current_menu(root,path);
             const auto found=std::find_if(parent.children.begin(),parent.children.end(),[&](const auto& child){return child.key==key;});
@@ -638,7 +678,7 @@ void show_host_configuration(Runtime::GameContext& primary,Runtime::GameContext&
         while(menu.children[selected].kind==NodeKind::Separator)
             selected=(selected+menu.children.size()+(up?-1:1))%menu.children.size();
         if(previous!=selected) {dirty=true;confirmation=false;}
-        const bool confirm=input.update(NavigationKey::Confirm,false),right=input.update(NavigationKey::Right,false);
+        const bool confirm=input.update(NavigationKey::Confirm,false) || command.has_value(),right=input.update(NavigationKey::Right,false);
         if(confirm || right) {
             const auto& node=menu.children[selected];
             if(node.key=="copy-host-config") {
@@ -671,6 +711,8 @@ void initialize_local_versus_player_settings(Runtime::GameContext& context) {
     synchronize_shared_appearance(first);
     const std::string secondKeybindingPath = second.user_settings().keybindingPath;
     const std::string secondPersistencePath = second.user_settings().persistencePath;
+    const int secondPersistencePlayer=second.user_settings().persistencePlayer;
+    const auto secondPersistencePlatform=second.user_settings().persistencePlatform;
     if (app->singlePlayerOwner == 1 && app->savedPlayerOneSettings) {
         second.user_settings() = first.user_settings();
         first.user_settings() = *app->savedPlayerOneSettings;
@@ -679,6 +721,7 @@ void initialize_local_versus_player_settings(Runtime::GameContext& context) {
     }
     second.user_settings().keybindingPath = secondKeybindingPath;
     second.user_settings().persistencePath = secondPersistencePath;
+    second.user_settings().persistencePlayer=secondPersistencePlayer;second.user_settings().persistencePlatform=secondPersistencePlatform;
     const auto firstMods=UserConfig::snapshot_quick_play_mods(first.user_settings());
     const auto secondMods=UserConfig::snapshot_quick_play_mods(second.user_settings());
     first.user_settings().gameMode = second.user_settings().gameMode = 6;
@@ -690,8 +733,8 @@ void initialize_local_versus_player_settings(Runtime::GameContext& context) {
     app->singlePlayerOwner = 0;
     persist(first);
     persist(second);
-    if (!first.user_settings().persistencePath.empty()) {
-        std::ofstream(std::filesystem::path(first.user_settings().persistencePath).parent_path() / "active_player") << 0;
+    if (first.user_settings().persistenceEnabled && !first.user_settings().persistencePath.empty()) {
+        UserConfig::save_active_player(std::filesystem::u8path(first.user_settings().persistencePath),0);
     }
 
     Input::refresh_bindings(first.input_services(), first.user_settings().keyCodes, first.user_settings().additionalKeyCodes);
@@ -717,8 +760,8 @@ void adopt_single_player_settings(Runtime::GameContext& displayedContext) {
         primary.user_settings(), Runtime::selected_game_mode(primary.user_settings()));
     primary.config.quickPlay.continuousCancellation = app->qpContinuousCancellation;
     persist(primary);
-    if (!primary.user_settings().persistencePath.empty()) {
-        std::ofstream(std::filesystem::path(primary.user_settings().persistencePath).parent_path() / "active_player") << app->singlePlayerOwner;
+    if (primary.user_settings().persistenceEnabled && !primary.user_settings().persistencePath.empty()) {
+        UserConfig::save_active_player(std::filesystem::u8path(primary.user_settings().persistencePath),app->singlePlayerOwner);
     }
 
 }
@@ -745,6 +788,47 @@ MenuResult run_network_menu(Runtime::GameContext& context) {
         position.path = {"NETWORK"}; position.selectedEntries["root/NETWORK"] = "room-create";
     }
     return run_menu(context);
+}
+
+MenuResult run_play_room_menu(Runtime::GameContext& context) {
+    if(!Frontend::ui_surface_active())return run_network_menu(context);
+    auto* app=context.app_component();
+    auto& primary=app && app->primaryContext?*app->primaryContext:context;
+    auto& network=*primary.network_component();
+    Input::ControlInputScope controls(primary.input_component());
+    auto surface=make_settings_surface();
+    TerminalSettingsView view(primary,false,0,true,surface);view.set_play_rooms(true);
+    NavigationInput input(primary);
+    bool settingsWasDown=action_pressed(primary,Input::Action::OpenSettings);
+    bool retryWasDown=restart_pressed(primary);
+    const auto check=[&] {
+        poll_server(primary);
+        if(network.connection==Network::ConnectionState::Failed || network.connection==Network::ConnectionState::Full)
+            throw Network::ConnectionError(network.connectionMessage);
+        // Text owns shortcut letters while a room name is being entered.
+        if(surface->metadata.kind==Frontend::UiKind::Text || surface->metadata.kind==Frontend::UiKind::KeyCapture) {
+            input.suppress_held_keys();
+            settingsWasDown=action_pressed(primary,Input::Action::OpenSettings);
+            retryWasDown=restart_pressed(primary);
+            return;
+        }
+        if(input.update(NavigationKey::Back,false))
+            throw surface->metadata.kind==Frontend::UiKind::Choices?MenuExit::CancelEdit:MenuExit::StartScreen;
+        const bool settingsDown=action_pressed(primary,Input::Action::OpenSettings);
+        const bool settingsPressed=settingsDown && !settingsWasDown;settingsWasDown=settingsDown;
+        if(settingsPressed)throw MenuExit::Root;
+        const bool retryDown=restart_pressed(primary);
+        const bool retryPressed=retryDown && !retryWasDown;retryWasDown=retryDown;
+        if(retryPressed && !network.room.name.empty())throw MenuExit::Restart;
+    };
+    try {
+        if(show_rooms(primary,primary,view,check,"play-rooms") || !network.room.name.empty())return MenuResult::StartGame;
+    } catch(MenuExit exit) {
+        if(exit==MenuExit::Restart)return MenuResult::StartGame;
+        if(exit==MenuExit::Root)return run_network_menu(primary); // Explicit settings key only.
+    }
+    if(app)app->startScreenRequested=true;
+    return MenuResult::StartScreen;
 }
 
 static MenuResult run_menu_impl(Runtime::GameContext& context, bool fromStart,PresetEditorSession* editor) {
@@ -875,13 +959,25 @@ static MenuResult run_menu_impl(Runtime::GameContext& context, bool fromStart,Pr
         redraw();
     };
     for (;;) {
+        try {
         poll_server(primary);
         if(primary.network_component() && (networkRevision!=primary.network_component()->roomRevision ||
             networkMessage!=primary.network_component()->connectionMessage)) {
             networkRevision=primary.network_component()->roomRevision;
             networkMessage=primary.network_component()->connectionMessage;redraw(true);
         }
-        if (input.update(NavigationKey::Back, false)) {
+        const auto command=Frontend::poll_ui_command();
+        if(command && command->ancestor) {
+            remember();path.resize(std::min(*command->ancestor,path.size()));
+            selected=std::min(command->index,current_menu(root,path).children.size()-1);
+            position().selectedEntries[path_key(path)]=current_menu(root,path).children[selected].key;
+            confirmationPending=false;redraw();continue;
+        }
+        if(command && (command->kind==Frontend::UiCommandKind::Activate || command->kind==Frontend::UiCommandKind::BrowseFile)) {
+            if(selected!=command->index)confirmationPending=false;
+            selected=command->index;remember();redraw();
+        }
+        if (input.update(NavigationKey::Back, false) || (command && command->kind==Frontend::UiCommandKind::Back && path.empty())) {
             remember();
             if(!editor || request_preset_exit(primary,current_view(),*editor)) return return_to_start();
             input.suppress_held_keys();current_view().invalidate();redraw();continue;
@@ -920,7 +1016,7 @@ static MenuResult run_menu_impl(Runtime::GameContext& context, bool fromStart,Pr
             remember(); path.clear(); confirmationPending = false; redraw();
         }
         settingsWasDown = settingsDown;
-        const bool left = input.update(NavigationKey::Left, false) || input.update(NavigationKey::Backspace, false);
+        const bool left = (command && command->kind==Frontend::UiCommandKind::Back) || input.update(NavigationKey::Left, false) || input.update(NavigationKey::Backspace, false);
         if (left) {
             const bool cancelled = confirmationPending;
             const auto kind = current_menu(root,path).children[selected].kind;
@@ -956,7 +1052,8 @@ static MenuResult run_menu_impl(Runtime::GameContext& context, bool fromStart,Pr
             view.print_selection(menu, previous, selected, breadcrumb(root, path));
         }
         const bool right = input.update(NavigationKey::Right, false);
-        const bool confirm = input.update(NavigationKey::Confirm, false);
+        const bool enter = input.update(NavigationKey::Confirm, false);
+        const bool confirm = enter || (command && (command->kind==Frontend::UiCommandKind::Activate || command->kind==Frontend::UiCommandKind::BrowseFile));
         if (right || confirm) {
             auto& node = menu.children[selected];
             if(!node.enabled && node.kind==NodeKind::RoomAction) {
@@ -977,20 +1074,26 @@ static MenuResult run_menu_impl(Runtime::GameContext& context, bool fromStart,Pr
             const bool copying=node.kind==NodeKind::CopyOtherPlayer;
             const bool mapOperation=map_action(node.kind);
             const bool needsConfirmation=(!editor && resetting) || preset || copying || node.confirmTwice;
+            const bool deletingReplay=node.kind==NodeKind::RecentReplayDelete || node.kind==NodeKind::RecentReplaysClear;
             if (needsConfirmation && confirmationPending && right) {
                 confirmationPending = false;
                 view.print_message(resetting ? "RESET cancelled." : "Confirmation cancelled.");
                 continue;
             }
-            // Only a fresh Enter press confirms; Right requests or cancels confirmation.
-            if (needsConfirmation && (!confirmationPending || !confirm)) {
+            // Replay deletion needs a fresh Enter; repeated clicks only show
+            // its prompt. Right requests or cancels confirmation.
+            if (needsConfirmation && (!confirmationPending || !(deletingReplay ? enter : confirm))) {
                 confirmationPending = true;
                 print_action_confirmation(view,node);
                 continue;
             }
             confirmationPending = false;
             remember();
-            if (node.kind == NodeKind::Group) {
+            if(node.kind==NodeKind::VirtualControls) {
+                if(app && app->virtualControlsEditor)app->virtualControlsEditor();
+                input.suppress_held_keys();
+            }
+            else if (node.kind == NodeKind::Group) {
                 if (node.key == "player") position().selectedEntries["root/player"] = player==2 ? "both" : player ? "player2" : "player1";
                 const auto key=node.key;
                 path.push_back(key); selected = 0; redraw();
@@ -1014,6 +1117,14 @@ static MenuResult run_menu_impl(Runtime::GameContext& context, bool fromStart,Pr
                 reconcile_modes(displayed,wasLocal);redraw(true);
                 if(starting)return MenuResult::StartGame;
                 current_view().print_message(saved?"Temporary challenge settings updated.":"Could not save settings. Check the settings directory.");
+            }
+            else if(deletingReplay) {
+                const bool clearing=node.kind==NodeKind::RecentReplaysClear;
+                const bool deleted=clearing ? Replay::clear_recent() : Replay::delete_recent(std::filesystem::u8path(node.replayPath));
+                if(!clearing && deleted)path.pop_back();
+                redraw(true);
+                current_view().print_message(clearing ? (deleted ? "Recent replays cleared." : "Could not delete all recent replay files.") :
+                    (deleted ? "Replay deleted." : "Could not delete the replay file."));
             }
             else if(node.kind==NodeKind::RecentReplay) {
                 std::error_code error;
@@ -1046,6 +1157,15 @@ static MenuResult run_menu_impl(Runtime::GameContext& context, bool fromStart,Pr
                 NavigationInput editorInput(primary);
                 auto checkControls = [&]() {
                     poll_server(primary);
+                    if(const auto navigation=Frontend::poll_ui_command([&](const auto& c) {
+                        return c.kind==Frontend::UiCommandKind::BrowseFile || (c.ancestor && *c.ancestor<=path.size()) ||
+                            (c.kind==Frontend::UiCommandKind::Back && (surface->metadata.kind==Frontend::UiKind::Text ||
+                             surface->metadata.kind==Frontend::UiKind::KeyCapture || surface->metadata.kind==Frontend::UiKind::Choices));
+                    })) {
+                        if(navigation->kind==Frontend::UiCommandKind::BrowseFile && node.item && node.item->filePath)throw ReplayBrowseRequested{};
+                        if(navigation->ancestor)throw MenuJump{*navigation->ancestor,navigation->index};
+                        throw MenuExit::CancelEdit;
+                    }
                     // Key capture accepts navigation and game keys as bindings.
                     const bool capturingKey = node.item && node.item->keyBinding;
                     const bool scalarInput = node.item && !capturingKey && node.item->choice.labels.empty();
@@ -1215,7 +1335,20 @@ static MenuResult run_menu_impl(Runtime::GameContext& context, bool fromStart,Pr
                         auto* other=wasLocal ? (&displayed==app->primaryContext ? app->localPlayerTwoContext : app->primaryContext) : nullptr;
                         valid=other!=nullptr;
                         if(valid) UserConfig::copy_settings_except_bindings(displayed.user_settings(),other->user_settings());
-                    } else if (node.item) valid = edit_item(displayed, view, *node.item, breadcrumb(root, path), checkControls, savedByEscape);
+                    } else if(node.item && node.item->filePath && command && command->kind==Frontend::UiCommandKind::BrowseFile) {
+                        if(const auto file=choose_replay_file(displayed,[&]{poll_server(primary);},&actionMessage)) {
+                            displayed.user_settings().replayPath=*file;
+                            UserConfig::Presets::define(displayed.user_settings(),Model::SettingId::ReplayPath);
+                        }
+                    } else if (node.item) {
+                        try {valid=edit_item(displayed,view,*node.item,breadcrumb(root,path),checkControls,savedByEscape);}
+                        catch(ReplayBrowseRequested&) {
+                            if(const auto file=choose_replay_file(displayed,[&]{poll_server(primary);},&actionMessage)) {
+                                displayed.user_settings().replayPath=*file;
+                                UserConfig::Presets::define(displayed.user_settings(),Model::SettingId::ReplayPath);
+                            }
+                        }
+                    }
                     else if (node.kind == NodeKind::ResetSection) {
                         UserConfig::reset_section(displayed.user_settings(), node.section, is_player_two(displayed));
                         Input::refresh_bindings(displayed.input_services(), displayed.user_settings().keyCodes, displayed.user_settings().additionalKeyCodes);
@@ -1294,11 +1427,17 @@ static MenuResult run_menu_impl(Runtime::GameContext& context, bool fromStart,Pr
                 else if (preset) current_view().print_message(editor ? "Preset draft updated." : "Preset changes saved.");
                 else if (copying) current_view().print_message("Other player's settings copied. Changes saved.");
                 else if (mapOperation) current_view().print_message(actionMessage);
-                else if (presetLibraryOperation) current_view().print_message(actionMessage);
+                else if (presetLibraryOperation || !actionMessage.empty()) current_view().print_message(actionMessage);
                 if (savedByEscape) return return_to_start();
             }
         }
         primary.services.clock.sleep_for(Runtime::Duration::from_seconds(0.001));
+        } catch(MenuJump jump) {
+            input.suppress_held_keys();remember();path.resize(std::min(jump.depth,path.size()));
+            selected=std::min(jump.index,current_menu(root,path).children.size()-1);
+            position().selectedEntries[path_key(path)]=current_menu(root,path).children[selected].key;
+            confirmationPending=false;redraw(editor!=nullptr);
+        }
     }
 }
 MenuResult run_menu(Runtime::GameContext& context,bool fromStart) {return run_menu_impl(context,fromStart,nullptr);}

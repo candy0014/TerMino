@@ -128,7 +128,7 @@ Environment make_environment(const Runtime::RuntimeConfig& config) {
     env.lockResetLimit = config.handling.lockResetLimit;
     env.infiniteMovement = config.handling.infiniteMovement;
     const auto types=Piece::types_for_rotation_system(config.rotationSystem,config.legacyRotationRules,
-        config.legacyFoolPieceSet ? 10 : config.quickPlay.defaultFloor);
+        config.legacyFoolPieceSet ? 10 : config.quickPlay.defaultFloor,config.legacyEventGeometry);
     if (types.size()==7) std::copy(types.begin(),types.end(),env.pieceTypes.begin());
     env.autoplayPps = config.autoplay.pps;
     env.autoplaySearchWidth = config.autoplay.searchWidth;
@@ -140,6 +140,7 @@ Environment make_environment(const Runtime::RuntimeConfig& config) {
 namespace Bot_candy0014 {
 Autoplay::Availability availability(const Bot::Environment& env) {
     if(env.handlingSimulation) return {false,"Handling simulation is currently supported only by bot_chatgpt."};
+    if(Bot::QuickPlaySearch::enabled(env))return Bot::QuickPlaySearch::availability(env);
     if (env.gravityIntervalSeconds == 0) return {false, "Instant gravity (20G) is unsupported."};
     if (auto result = standard_geometry(env); !result) return result;
     if (env.movement.disableHardDrop) return {false, "Bots require hard drop for locking."};
@@ -171,6 +172,7 @@ Autoplay::Availability availability(const Bot::Environment& env) {
 namespace Bot_mech {
 Autoplay::Availability availability(const Bot::Environment& env) {
     if(env.handlingSimulation) return {false,"Handling simulation is currently supported only by bot_chatgpt."};
+    if(Bot::QuickPlaySearch::enabled(env))return Bot::QuickPlaySearch::availability(env);
     if (env.wall_only_horizontal()) return {false, "DAS must be greater than zero."};
     if (env.gravityIntervalSeconds == 0) return {false, "Instant gravity (20G) is unsupported."};
     if (auto result = standard_geometry(env); !result) return result;
@@ -187,7 +189,7 @@ Autoplay::Availability availability(const Bot::Environment& env) {
 namespace Bot_zzztoj {
 Autoplay::Availability availability(const Bot::Environment& env) {
     if(env.handlingSimulation) return {false,"Handling simulation is currently supported only by bot_chatgpt."};
-    if (Bot::QuickPlaySearch::enabled(env) && (env.autoplayMode==7 || env.autoplayMode==0))
+    if (Bot::QuickPlaySearch::enabled(env))
         return Bot::QuickPlaySearch::availability(env);
     if (auto result=standard_attack_rules(env); !result) return result;
     if (env.wall_only_horizontal()) return {false, "DAS must be greater than zero."};
@@ -223,15 +225,18 @@ Autoplay::Availability availability(const Bot::Environment& env) {
     base.cancellationMultiplier=1.0;
     base.spinBonuses=Runtime::SpinBonuses::AllMiniPlus;
     base.attackRules={};
+    // ChatGPT's movement graph applies instant gravity after each action and
+    // the host proves the returned route. The upstream Botris guard below
+    // describes its own graph, not this BOT's actual capabilities.
+    if(base.gravityIntervalSeconds<=1e-7)base.gravityIntervalSeconds=.6;
     if (auto result = Bot_zzztoj::availability(base); !result) return result;
-    if (!env.handlingSimulation && env.gravityIntervalSeconds <= 1e-7) return {false, "Instant gravity (20G) is unsupported."};
     return {};
 }
 }
 namespace Autoplay {
 Availability availability(const Runtime::RuntimeConfig& config, Runtime::AutoplayMode mode) {
     if(mode!=Runtime::AutoplayMode::Disabled && config.initialMap && config.initialMap->generator==Runtime::MapGenerator::CustomSequence) {
-        const auto types=Piece::types_for_rotation_system(config.rotationSystem,config.legacyRotationRules);
+        const auto types=Piece::types_for_rotation_system(config.rotationSystem,config.legacyRotationRules,10,config.legacyEventGeometry);
         for(const auto type:config.initialMap->sequence)
             if(std::find(types.begin(),types.end(),type)==types.end()) return {false,"The map sequence contains pieces unsupported by this bot."};
     }
@@ -257,6 +262,7 @@ Availability availability(const Runtime::RuntimeConfig& config, Runtime::Autopla
 namespace Bot_coldclear {
 Autoplay::Availability availability(const Bot::Environment& env) {
     if(env.handlingSimulation) return {false,"Handling simulation is currently supported only by bot_chatgpt."};
+    if(Bot::QuickPlaySearch::enabled(env))return Bot::QuickPlaySearch::availability(env);
     if (env.fieldWidth != 10 || env.fieldHeight != 20) return {false,"Cold Clear requires a 10 by 20 field."};
     if (env.antiGravity) return {false,"Cold Clear does not support anti-gravity."};
     if (!Runtime::standard_rotation_system(static_cast<Runtime::RotationSystem>(env.rotationSystem)) || env.quickPlayFool)

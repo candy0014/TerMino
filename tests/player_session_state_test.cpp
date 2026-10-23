@@ -4,7 +4,8 @@
 #include <cassert>
 #include <vector>
 
-int main(){
+namespace TetrTests::player_session_state_test {
+int run(int argc,char** argv){
     Runtime::SessionState session;
     assert(&session.player!=&session.opponent);
 
@@ -45,3 +46,4 @@ int main(){
     assert(second.gameplay.scoring.score==0);
     return 0;
 }
+} // namespace TetrTests::player_session_state_test

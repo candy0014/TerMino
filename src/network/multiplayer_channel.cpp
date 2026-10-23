@@ -2,6 +2,7 @@
 
 #include "tetr/network/transport.h"
 #include "tetr/network/network_services.h"
+#include "tetr/network/room_replay.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/runtime/player_session_state.h"
 #include <algorithm>
@@ -9,6 +10,17 @@
 #include <limits>
 
 namespace Network {
+
+void send_field_visibility(Runtime::GameContext& context) {
+    auto& n=network_services(context);
+    if(!n.initialized || n.connection!=ConnectionState::Connected || uses_local_duplex(n))return;
+    const auto& f=context.config.field;
+    const auto wire=encode_field_visibility({f.invisible,f.periodicInvisible,f.invisibilityDelay,f.invisibilityInterval,f.invisibilityDuration});
+    const auto now=context.real_now();
+    if(wire!=n.lastFieldVisibility || now-n.lastFieldVisibilitySend>=Runtime::Duration::from_seconds(.5)) {
+        send(n,wire);n.lastFieldVisibility=wire;n.lastFieldVisibilitySend=now;
+    }
+}
 
 namespace {
 BoardFrameStamp next_stamp(HybridBoardSync& sync,Runtime::TimePoint now) {
@@ -64,6 +76,8 @@ void flush_piece_motion_frame(Runtime::GameContext& context) {
 }
 void configure_board_sync(Runtime::GameContext& context,bool peerSupportsHybrid,std::uint32_t epoch) {
     auto& network=network_services(context); network.boardSync={};
+    network.lastFieldVisibility.clear();network.lastFieldVisibilitySend={};
+    if(!network.multiplayerRoom)network.peerFieldVisibility.erase(-1);
     auto& sync=network.boardSync; sync.enabled=peerSupportsHybrid && !uses_local_duplex(network);
     sync.epoch=epoch; sync.incoming.reset(epoch);
 }
@@ -86,6 +100,7 @@ void request_board_snapshot(Runtime::GameContext& context) {
 }
 void send_piece_motion_frame(Runtime::GameContext& context,const Runtime::PlayerSessionState& player,Piece::Pose pose,
     bool coalesceWithinDisplayFrame) {
+    record_room_replay_board(context,player,ActivePieceState::active(pose));
     if (!hybrid_board_sync_enabled(context) || context.config.mode.replayMode) return;
     auto& network=network_services(context);
     // A thumbnail has no falling piece. Avoid serializing and hashing the
@@ -149,21 +164,23 @@ void send_board_state_frame(
     bool forceCheckpoint) {
     auto& network=network_services(context);
     if (uses_local_duplex(network)) return;
+    record_room_replay_board(context,player,activePiece,placement);
     const auto now=context.real_now();
     if(network.multiplayerRoom && network.boardBudget) {
         const auto& budget=*network.boardBudget;
         if(placement)network.boardSync.lastPlacement=placement;
         send_mini_board_frame(context,player);
-        if(!budget.full)return;
+        if(!budget.full){send_field_visibility(context);return;}
     }
     const auto state=encode_board_state(context,player,activePiece,placement);
     auto& sync=network.boardSync;
-    if (!sync.enabled) {send(network,state); return;}
+    if (!sync.enabled) {send(network,state);send_field_visibility(context);return;}
     const auto hash=board_state_fingerprint(state);
     const bool changed=sync.revision==0 || hash!=sync.fingerprint;
     if (!changed && !placement && !forceCheckpoint &&
         now-sync.lastSnapshot<Runtime::Duration::from_seconds(0.5)) {
         if (activePiece.kind!=ActivePieceStateKind::Locked) emit_motion(context,player,wire_pose(player,activePiece));
+        send_field_visibility(context);
         return;
     }
     if (changed) {++sync.revision; sync.fingerprint=hash;}
@@ -175,6 +192,9 @@ void send_board_state_frame(
     sync.pose=activePiece.kind==ActivePieceStateKind::Locked ? std::optional<Piece::Pose>{} : wire_pose(player,activePiece);
     sync.lastPlacement=placement;
     ++sync.snapshotsSent; sync.snapshotBytes+=wire.size();
+    // Optional metadata must not precede the first authoritative board packet
+    // at the countdown deadline or wake a single-packet receiver ahead of it.
+    send_field_visibility(context);
 }
 
 std::optional<FramePacket> try_receive_frame(
@@ -183,8 +203,13 @@ std::optional<FramePacket> try_receive_frame(
     int visibleHeight) {
     auto& network=network_services(context); auto& sync=network.boardSync;
     if(network.multiplayerRoom) return try_receive_multiplayer_frame(context);
+    if(const auto v=network.peerFieldVisibility.find(-1);v!=network.peerFieldVisibility.end())
+        context.session.opponent.presentation.remoteFieldVisibility=v->second;
     while (!sync.terminal) {
         auto wire=try_receive(network); if (!wire) break;
+        if(const auto visibility=decode_field_visibility(*wire)) {
+            context.session.opponent.presentation.remoteFieldVisibility=*visibility;continue;
+        }
         if (auto packet=decode_frame_packet(*wire,boardWidth,visibleHeight)) {
             if (packet->type==FramePacketType::PieceTurn) {
                 auto& state=network.pieceTurns;

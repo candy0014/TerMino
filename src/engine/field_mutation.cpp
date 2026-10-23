@@ -26,10 +26,11 @@ std::vector<CellChange> apply_gravity_collapse(
     int width,
     const std::vector<Rules::RowMove>& moves,
     const CellValue& cellValue,
-    const CopyRow& copyRow) {
+    const CopyRow& copyRow,
+    bool collectChanges) {
     std::vector<CellChange> changes;
     for (const auto& move : moves) {
-        for (int col = 0; col < width; ++col) {
+        if (collectChanges) for (int col = 0; col < width; ++col) {
             const auto next = cellValue(move.source, col);
             if (cellValue(move.destination, col) != next) {
                 changes.push_back(CellChange{move.destination, col, next});
@@ -45,7 +46,8 @@ TimedSolidDecayResult decay_timed_solid_garbage(
     int firstRow,
     int endRow,
     const CellValue& cellValue,
-    const SetCell& setCell) {
+    const SetCell& setCell,
+    bool collectChanges) {
     TimedSolidDecayResult out;
     for (int row = firstRow; row < endRow; ++row) {
         bool releaseRow = false;
@@ -54,7 +56,7 @@ TimedSolidDecayResult decay_timed_solid_garbage(
             if (value.is_timed_number()) {
                 value = value.decremented_timed();
                 setCell(row, col, value);
-                out.changes.push_back(CellChange{row, col, value});
+                if (collectChanges) out.changes.push_back(CellChange{row, col, value});
             }
             if (cellValue(row, col).is_timed_release()) releaseRow = true;
         }
@@ -65,7 +67,7 @@ TimedSolidDecayResult decay_timed_solid_garbage(
                 ? Runtime::BoardCell::empty()
                 : Runtime::BoardCell::garbage();
             setCell(row, col, value);
-            out.changes.push_back(CellChange{row, col, value});
+            if (collectChanges) out.changes.push_back(CellChange{row, col, value});
         }
         ++out.releasedRows;
     }

@@ -4,6 +4,7 @@
 #include "tetr/runtime/time.h"
 
 #include <array>
+#include <cstddef>
 #include <map>
 
 namespace Runtime { class GameContext; }
@@ -11,6 +12,9 @@ namespace Runtime { class GameContext; }
 namespace App::Settings {
 
 enum class NavigationKey { Up, Down, Confirm, Left, Right, Back, Backspace, PageUp, PageDown, Tab };
+// Unwind a nested editor without committing its draft, then restore this
+// ancestor menu and selection in the owning settings controller.
+struct MenuJump {std::size_t depth,index;};
 
 class NavigationInput {
 public:

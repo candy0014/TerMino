@@ -7,5 +7,6 @@ enum class AudioCue {Piece,Position,Clear,Height};
 std::vector<double> cue_frequencies(AudioCue cue,int value,int extra=0);
 void play_audio_cue(AudioCue cue,int value,int extra=0);
 void play_audio_heights(const std::vector<int>& heights);
+void shutdown_audio();
 }
 #endif

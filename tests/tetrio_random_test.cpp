@@ -5,7 +5,8 @@
 #include <iostream>
 #include <set>
 
-int main() {
+namespace TetrTests::tetrio_random_test {
+int run(int argc,char** argv) {
     for (int loser = 0; loser <= 6; ++loser) for (int winner = 0; winner < 2; ++winner) {
         App::FirstToSeven match;
         for (int i = 1; i <= loser; ++i) {
@@ -54,4 +55,6 @@ int main() {
     assert(cancelled.column == 1 && cancelled.random.state() == 282475249);
     assert(cancelled.row(10) == 1 && cancelled.random.state() == 1622650073);
     std::cout << "TETR.IO random profile and first-to-seven tests passed\n";
+    return 0;
 }
+} // namespace TetrTests::tetrio_random_test

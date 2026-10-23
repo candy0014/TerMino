@@ -6,6 +6,7 @@
 #include <limits>
 #include <tuple>
 
+namespace TetrTests::bot_chatgpt_time_b2b_evaluation_test {
 namespace B = Bot_chatgpt;
 
 static m_tetris::TetrisMap rows(std::initializer_list<unsigned> values) {
@@ -38,7 +39,7 @@ static void near(double a, double b) {
     assert(std::abs(a - b) <= 16 * std::numeric_limits<double>::epsilon() * scale);
 }
 
-int main() {
+int run(int argc,char** argv) {
     using Engine = m_tetris::TetrisEngine<rule_tetr_srs_plus::TetrisRule, B::Evaluation, B::Search>;
     Engine geometry;
     assert(geometry.prepare(10, 40));
@@ -207,4 +208,6 @@ int main() {
               << " death=" << deaths << " release=" << releases
               << " absorbed=" << absorbed << " discounted=" << changed
               << " max_formula_rounding=" << maximumFormulaError << '\n';
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_time_b2b_evaluation_test

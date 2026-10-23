@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <fstream>
+namespace TetrTests::forced_handling_test {
 struct TemporaryMaps {
     std::filesystem::path file=std::filesystem::temp_directory_path()/("termino_forced_maps_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".txt");
     std::string previous;
@@ -38,7 +39,7 @@ const Model::SettingNode* field(const Model::SettingNode& node,Id id) {
     for(const auto& child:node.children) if(const auto* found=field(child,id)) return found;
     return nullptr;
 }
-int main() {
+int run(int argc,char** argv) {
     UserConfig::Settings user;user.das=.37;user.arr=.04;user.dcd=.025;user.softDropFactor=12;
     for(const auto& entry:UserConfig::forced_handling_settings()) {
         assert(!UserConfig::clamped_int(user,entry.enabled));
@@ -106,4 +107,6 @@ int main() {
     assert(UserConfig::Presets::undo(preset) && !preset.forceDas && preset.das==.23);
     std::filesystem::remove(user.persistencePath);
     std::cerr<<"forced_handling: OK\n";
+    return 0;
 }
+} // namespace TetrTests::forced_handling_test

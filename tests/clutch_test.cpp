@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 
+namespace TetrTests::clutch_test {
 namespace {
 
 struct Capture {
@@ -220,7 +221,7 @@ void test_popup_and_local_result_banner() {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
 #ifdef __linux__
     setenv("TERM", "xterm", 1);
 #endif
@@ -229,4 +230,6 @@ int main() {
     test_consecutive_state_and_height_limit();
     test_popup_and_local_result_banner();
     std::cerr << "clutch_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::clutch_test

@@ -3,6 +3,7 @@
 #include "settings_presets.h"
 #include "settings_maps.h"
 #include "tetr/config/map_store.h"
+#include "tetr/frontend/ui_surface.h"
 #include "tetr/config/presets.h"
 #include "tetr/runtime/piece.h"
 #include "tetr/replay/recent.h"
@@ -128,10 +129,19 @@ bool setting_effective(Id id, const UserConfig::Settings& user, const Runtime::R
 bool when(const UserConfig::Settings& user,Id controller,bool condition) {
     return !UserConfig::Presets::defined(user,controller) || condition;
 }
-// Hide only controls belonging to another setting's selected branch. Runtime
-// overrides affect the hint, not whether the base setting can be configured.
+// Hide controls belonging to another setting's selected branch or frontend.
+// Runtime overrides affect the hint, not whether the base setting can be configured.
 bool setting_visible(Id id, const UserConfig::Settings& user, const Runtime::RuntimeConfig& config) {
     switch (id) {
+        // Fixed challenges own these rules; retain the field for saved games.
+        case Id::ChallengeRules: return false;
+        case Id::EffectsIntensity:
+        case Id::BoardBounciness:
+        case Id::FieldShake:
+        case Id::ParticleIntensity:
+        case Id::LandingEffect:
+        case Id::LineClearEffect:
+        case Id::HardDropTrail: return Frontend::ui_surface_active();
         case Id::B2BRewardAmount: return when(user,Id::B2BReward,config.attackRules.b2bReward==Runtime::B2BReward::FixedAttack);
         case Id::B2BChargeThreshold:
         case Id::B2BChargeReduction: return when(user,Id::B2BCharging,user.b2bCharging!=0);
@@ -185,6 +195,7 @@ public:
             {std::move(choices.labels), std::move(choices.values), descriptor.cycleImmediately},
             descriptor.keyBinding, descriptor.squarePreview, &user, ValuePart::Raw, std::move(hint)};
         item.effective = effective(id);
+        item.filePath = id==Id::ReplayPath;
         SettingNode node{"setting-" + std::to_string(static_cast<int>(id)), item.label, item.hint,
             NodeKind::Setting, std::move(item), {}, descriptor.section};
         node.visible = visible && setting_visible(id,user,config);
@@ -366,13 +377,20 @@ SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, 
         "Opening piece count; 0 disables protection. Within this count, pending garbage at least equal to previously sent garbage grants extra cancellation, never extra attack."));
     auto garbage = b.group("garbage-rules", "GARBAGE", "Garbage buffering, shape and opening cancellation protection.",
         std::move(sharedGarbageFields));
-    SettingNode recent{"recent-replays","Recent replays","The latest 30 games. Enter twice to watch without changing your mode or replay path."};
+    SettingNode recent{"recent-replays","Recent replays","The latest 30 games. Choose a replay to play or delete it."};
     recent.visible=mode==Runtime::GameMode::Replay && !user.presetDefined;
+    SettingNode clear{"clear-replays","Clear replays","Delete all files in the recent list. Extra Save As copies are kept.",NodeKind::RecentReplaysClear};
+    clear.confirmTwice=true;recent.children.push_back(std::move(clear));
     if(recent.visible)for(const auto& entry:Replay::recent_replays()) {
-        SettingNode row{entry.path.generic_u8string(),entry.label,"Enter twice to play this replay.",NodeKind::RecentReplay};
-        row.literalTitle=true;row.replayPath=entry.path.generic_u8string();row.confirmTwice=true;recent.children.push_back(std::move(row));
+        SettingNode row{entry.path.generic_u8string(),entry.label,"Choose to play or delete this replay."};
+        row.literalTitle=true;
+        SettingNode play{"play","Play replay","Play without changing your mode or replay path.",NodeKind::RecentReplay};
+        play.replayPath=entry.path.generic_u8string();
+        SettingNode remove{"delete","Delete replay","Delete this replay file from disk. Press Enter twice to confirm.",NodeKind::RecentReplayDelete};
+        remove.replayPath=entry.path.generic_u8string();remove.confirmTwice=true;
+        row.children={std::move(play),std::move(remove)};recent.children.push_back(std::move(row));
     }
-    if(recent.children.empty()) {SettingNode empty{"empty","No recent replays",{},NodeKind::Setting};empty.enabled=false;recent.children.push_back(std::move(empty));}
+    if(recent.children.size()==1) {SettingNode empty{"empty","No recent replays",{},NodeKind::Setting};empty.enabled=false;recent.children.push_back(std::move(empty));}
     auto model = b.section(Section::Model, {
         b.projected(Id::GameMode, Part::GameMode, "Model", options(
             {"Zen", "QuickPlay", "Multiplayer", "Local Versus", "Replay"},
@@ -498,6 +516,9 @@ SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, 
         b.field(Id::ControlRotate180), b.field(Id::ControlHold),
         b.field(Id::ControlRetry), b.field(Id::ControlOpenSettings), b.field(Id::ControlReplay), b.field(Id::ControlUndo), b.field(Id::ControlPause)
     }, "Keyboard bindings; select an action to capture a key."));
+#ifdef __ANDROID__
+    root.children.back()={"CONTROLS","Virtual buttons","Edit gameplay button positions, sizes, shapes and opacity.",NodeKind::VirtualControls};
+#endif
     root.children.push_back(b.section(Section::Network, {
         b.field(Id::ServerIp),
         b.field(Id::Username,true,"Change your username before or after connecting; online changes sync with the server."),
@@ -516,7 +537,16 @@ SettingNode make_tree(UserConfig::Settings& user, bool localVersus, int player, 
         b.field(Id::ShowSpawnPosition, true,
             "Mark the next piece's normal spawn cells with light dots in empty cells and small holes in blocks; requires NEXT and ignores Clutch."),
         b.field(Id::ContinueInputUnfocused, true,
-            "OFF ignores keyboard input while the game terminal is unfocused. ON continues accepting it. Shared by both players.")
+            "OFF ignores keyboard input while the game terminal is unfocused. ON continues accepting it. Shared by both players."),
+        b.group("effects", "Effects", "Board motion, particles, and light effects. Shared by both players.", {
+            b.field(Id::EffectsIntensity, true, "Graphical effects: 0 disables all effects; 100 is normal; 200 is maximum. Shared by both players."),
+            b.field(Id::BoardBounciness, true, "Graphical board bounciness: directional wall pushes, Spin tilt, landing and line-clear recoil move the complete board and side panels. 0 disables elastic motion; higher values extend the return."),
+            b.field(Id::FieldShake, true, "Graphical impact shake from incoming garbage and strong line clears. Independent of board bounciness; 0 disables this effect."),
+            b.field(Id::ParticleIntensity, true, "Graphical landing and line-clear particles. 0 disables this effect."),
+            b.field(Id::LandingEffect, true, "Graphical lock glow and impact rings. 0 disables this effect."),
+            b.field(Id::LineClearEffect, true, "Graphical line-clear light and expanding waves. 0 disables this effect."),
+            b.field(Id::HardDropTrail, true, "Graphical hard-drop light trails. 0 disables this effect.")
+        }, Frontend::ui_surface_active())
     }, "Shared by both players: block appearance, color visibility, and interface language."));
     auto maps=make_map_menu(user);
     maps.children.push_back(b.field(Id::MapId,false));

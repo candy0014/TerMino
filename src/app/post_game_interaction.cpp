@@ -1,4 +1,5 @@
 #include "single_player_challenges.h"
+#include "online_replay.h"
 #include "tetr/app/start_screen_navigation.h"
 #include "tetr/input/services.h"
 #include "tetr/app/post_game_interaction.h"
@@ -24,7 +25,9 @@
 #include "tetr/render/terminal_renderer.h"
 #include "tetr/replay/session_state.h"
 #include "tetr/network/network_services.h"
+#include "tetr/network/room_replay.h"
 #include "tetr/util/terminal_text.h"
+#include "tetr/util/runtime_directory_lock.h"
 #include "settings_input.h"
 #include "settings_navigation.h"
 #include "ui_text.h"
@@ -68,9 +71,16 @@ static std::string default_replay_name(Runtime::GameContext& context) {
 static bool write_replay_file(
     const std::string& replay,
     const std::filesystem::path& path) {
-    std::ofstream rep(path,std::ios::out|std::ios::trunc);
+    Util::FileWriteLock writeLock(path);if(!writeLock.acquired())return false;
+    auto temporary=path;temporary+=".tmp";
+    std::ofstream rep(temporary,std::ios::out|std::ios::trunc|std::ios::binary);
     rep<<replay<<Replay::replay_hash_suffix(replay);
-    return static_cast<bool>(rep);
+    rep.close();if(!rep)return false;
+#ifdef _WIN32
+    return MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
+#else
+    std::error_code error;std::filesystem::rename(temporary,path,error);return !error;
+#endif
 }
 
 static int replay_prompt_position(const Runtime::GameContext& context,
@@ -114,7 +124,18 @@ static void draw_replay_prompt_rows(Runtime::GameContext& context,
         TerminalCanvas canvas;
         const int start=std::max(0,36-static_cast<int>(rows.size()));
         for(std::size_t i=0;i<rows.size();++i)canvas.write(start+static_cast<int>(i),4,rows[i],120,{{210,230,248}},{{9,17,28}});
-        Frontend::present_ui({std::move(canvas.pending),{},false,true});return;
+        Frontend::UiFrame frame{std::move(canvas.pending),{},false,true};
+        frame.metadata={Frontend::UiKind::Notice,"replay-notice",UiText::tr("Replay")};
+        frame.metadata.chinese=UiText::language()!=UiText::Language::English;
+        for(const auto& row:rows) {if(!frame.metadata.hint.empty())frame.metadata.hint+='\n';frame.metadata.hint+=row;}
+        for(const std::size_t action:{8u,9u}) {
+            std::string keys;
+            for(const int key:UserConfig::control_keys(context.user_settings(),action)) {
+                if(!keys.empty())keys+=" / ";keys+=UiText::key_label(key);
+            }
+            frame.metadata.entries.push_back({std::to_string(action),UiText::tr(action==8?"Restart":"Settings"),true,keys});
+        }
+        Frontend::present_ui(std::move(frame));return;
     }
     Render::OutputGuard output(context);
     clear_replay_prompt_lines(context,player);
@@ -237,7 +258,7 @@ static ReplaySaveResult save_replay_interactively(
     Runtime::PlayerSessionState& player,
     int replayPos,
     const std::string& replay,
-    const std::vector<int>& saveKeys,Runtime::GameContext* second=nullptr,PostGameStatisticsView* statistics=nullptr) {
+    const std::vector<int>& saveKeys,Runtime::GameContext* second=nullptr,PostGameStatisticsView* statistics=nullptr,bool updateRecent=true,bool incomplete=false) {
     struct RestoreCapture {
         Input::Services& input;bool active;
         explicit RestoreCapture(Input::Services& source):input(source),active(source.gameplay_input_active()) {if(active)input.end_gameplay_input();}
@@ -250,20 +271,25 @@ static ReplaySaveResult save_replay_interactively(
         context.config.display.obscuredColors ? Render::ColorRole::Ghost : Render::ColorRole::Text,
         context.config.display.obscuredColors);
     const std::string defaultName=default_replay_name(context);
+    const auto saveTitle=UiText::tr(incomplete?"Save incomplete replay":"Save Replay");
     std::string draft;
     std::size_t draftCaret=0;
     const auto redraw=[&](const std::string& value,std::size_t caret) {
         draft=value; draftCaret=caret;
         if(Frontend::ui_surface_active() && !statistics) {
             TerminalCanvas canvas;
-            canvas.box(11,12,100,7,UiText::tr("Save Replay"),{{58,222,240}},{{230,240,255}},{{9,17,28}});
+            canvas.box(11,12,100,7,saveTitle,{{58,222,240}},{{230,240,255}},{{9,17,28}});
             canvas.write(13,15,".tetr/replay/"+defaultName,94,{{230,240,255}},{{9,17,28}});
             canvas.write(14,15,UiText::tr("Enter Default name   Esc Cancel"),94,{{130,165,190}},{{9,17,28}});
             const auto prompt=UiText::tr("Custom replay name: ");
             const int at=static_cast<int>(Util::TerminalText::width(prompt+value.substr(0,caret)));
             const int scroll=std::max(0,at-92);
             canvas.write(16,15,Util::TerminalText::slice(prompt+value,scroll,94),94,{{230,240,255}},{{14,48,60}});
-            Frontend::present_ui({std::move(canvas.pending),std::pair{16,15+at-scroll},false,true});return;
+            Frontend::UiFrame frame{std::move(canvas.pending),std::pair{16,15+at-scroll},false,true};
+            frame.metadata=replay_save_metadata(defaultName,value,caret);
+            frame.metadata.title=saveTitle;
+            if(incomplete)frame.metadata.hint=UiText::tr("Some player recordings are missing. This copy keeps the local personal replay.");
+            Frontend::present_ui(std::move(frame));return;
         }
         if (statistics) {
             statistics->show_replay_save_prompt(defaultName,value,caret);
@@ -272,6 +298,7 @@ static ReplaySaveResult save_replay_interactively(
         }
         const auto layout=Render::board_text_layout(context,player);
         auto rows=Util::TerminalText::wrap_words(UiText::tr("Replay file [.tetr/replay/")+defaultName+"]",layout.columns);
+        if(incomplete)rows.push_back(UiText::tr("Save incomplete replay"));
         const auto instructions=Util::TerminalText::wrap_words(
             UiText::tr("Enter: default name   Esc / /cancel: cancel"),layout.columns);
         rows.insert(rows.end(),instructions.begin(),instructions.end());
@@ -337,7 +364,9 @@ static ReplaySaveResult save_replay_interactively(
         feedback(UiText::tr("Could not save the replay."));
         return ReplaySaveResult::Failed;
     }
-    Replay::mark_explicitly_saved(Replay::session(context).recentPath.empty()?Replay::session(context).sourcePath:Replay::session(context).recentPath,*path);
+    auto& state=Replay::session(context);
+    if(updateRecent && !context.config.mode.replayMode && !state.recentPath.empty() &&
+       Replay::rename_recent(std::filesystem::u8path(state.recentPath),*path))state.recentPath=path->generic_u8string();
     attach_challenge_replay(context,*path);
     if(second)attach_challenge_replay(*second,*path);
     const std::string message=UiText::tr("Replay saved: ")+path->string();
@@ -350,7 +379,7 @@ void remember_finished_replay(Runtime::GameContext& context,const std::string& r
     if(context.config.mode.replayMode || !state.recentPath.empty() || state.tetrioRecorder ||
        !context.session.player.timing.completedGameTime)return;
     const auto data=recording.empty()?Replay::recording_for_save(context):recording;
-    if(data.empty() || data.size()>20000000 || data.find("{end_all,")==std::string::npos)return;
+    if(data.empty() || data.size()>std::max<std::size_t>(20000000,state.recordingLimit+4096) || data.find("{end_all,")==std::string::npos)return;
     const auto now=std::time(nullptr);std::tm local{};
 #ifdef _WIN32
     localtime_s(&local,&now);
@@ -374,11 +403,20 @@ void remember_finished_replay(Runtime::GameContext& context,const std::string& r
     }
 }
 
-bool save_finished_online_replay(Runtime::GameContext& context) {
+bool save_finished_online_replay(Runtime::GameContext& context,PostGameStatisticsView* statistics) {
+    if(context.session.roomScene.enabled && context.network_component()) {
+        auto& n=Network::network_services(context);
+        if(n.multiplayerRoom && ((n.replays && n.replays->supported) || !context.session.player.timing.completedGameTime))
+            return save_online_room_replay(context,context.session.roomScene.roomInstance?context.session.roomScene.roomInstance:n.roomInstance,context.session.roomScene.epoch,statistics);
+    }
     auto& player=context.session.player;
     if(!player.timing.completedGameTime || context.config.mode.replayMode || Replay::session(context).data.size()>10000000) return false;
     return save_replay_interactively(context,player,replay_prompt_position(context,player),
-        Replay::recording_for_save(context),replay_save_keys(context))==ReplaySaveResult::Saved;
+        Replay::recording_for_save(context),replay_save_keys(context),nullptr,statistics)==ReplaySaveResult::Saved;
+}
+bool save_replay_copy(Runtime::GameContext& context,const std::string& recording,bool updateRecent,PostGameStatisticsView* statistics,bool incomplete) {
+    return save_replay_interactively(context,context.session.player,replay_prompt_position(context,context.session.player),
+        recording,replay_save_keys(context),nullptr,incomplete?nullptr:statistics,updateRecent,incomplete)==ReplaySaveResult::Saved;
 }
 
 void run_post_game_interaction(Runtime::GameContext& context, Runtime::PlayerSessionState& player) {
@@ -397,7 +435,9 @@ void run_post_game_interaction(Runtime::GameContext& context, Runtime::PlayerSes
             std::error_code error;
             if (replayPath && !replayPath->parent_path().empty()) std::filesystem::create_directories(replayPath->parent_path(), error);
             if (replayPath && !error && write_replay_file(Replay::recording_for_save(context), *replayPath)) {
-                Replay::mark_explicitly_saved(Replay::session(context).recentPath.empty()?Replay::session(context).sourcePath:Replay::session(context).recentPath,*replayPath);
+                auto& state=Replay::session(context);
+                if(!context.config.mode.replayMode && !state.recentPath.empty() &&
+                   Replay::rename_recent(std::filesystem::u8path(state.recentPath),*replayPath))state.recentPath=replayPath->generic_u8string();
                 attach_challenge_replay(context,*replayPath);
                 std::cerr << "TETR_TEST_REPLAY path=" << replayPath->string() << '\n';
             }
@@ -495,7 +535,8 @@ void run_local_versus_post_game_interaction(
                 std::filesystem::create_directories(replayPath->parent_path(),error);
             }
             if (replayPath && !error && write_replay_file(replay,*replayPath)) {
-                Replay::mark_explicitly_saved(Replay::session(first).recentPath,*replayPath);
+                auto& state=Replay::session(first);
+                if(Replay::rename_recent(std::filesystem::u8path(state.recentPath),*replayPath))state.recentPath=replayPath->generic_u8string();
                 attach_challenge_replay(first,*replayPath);attach_challenge_replay(second,*replayPath);
                 std::cerr << "TETR_LOCAL_VERSUS_REPLAY path="
                           << replayPath->string() << '\n';

@@ -21,6 +21,7 @@
 #include <iostream>
 #include <sstream>
 
+namespace TetrTests::hold_rules_test {
 namespace {
 struct Fixture {
     Runtime::SessionState session;
@@ -210,10 +211,12 @@ void checkpoint_restores_hold() {
     assert(Render::hold_draw_mode(f.context,f.session.player)==Render::PieceDrawMode::Normal);
 }
 }
-int main() {
+int run(int argc,char** argv) {
     std::ostringstream output;
     auto* previous=std::cout.rdbuf(output.rdbuf());
     config_round_trip(); play_hold_sequences(); network_and_color(); checkpoint_restores_hold();
     std::cout.rdbuf(previous);
     std::cout<<"hold_rules_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::hold_rules_test

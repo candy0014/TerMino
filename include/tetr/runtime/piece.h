@@ -40,6 +40,7 @@ struct Metadata {
     bool tetrioRotation = false;
     int spawnRotation = 0;
     std::array<Offset,4> rotationOrigins{}; // (row, col), before rotation offsets.
+    Offset previewOffset{}; // Keep canonical matrix origins out of preview layout.
 };
 
 struct CatalogEntry {
@@ -88,9 +89,15 @@ Pose fit_spawn_inside_walls(Pose pose, const Shape& cells, int width);
 Shape preview_cells(Type type);
 // April Fools includes the normal seven pieces and event floors 1 through
 // foolFloorLimit, inclusive. Omitting the limit enumerates the full catalog.
-std::vector<Type> types_for_rotation_system(Runtime::RotationSystem system, bool legacy = false, int foolFloorLimit = 10);
-std::vector<Type> april_fools_piece_types();
-Type april_fools_piece(int familyIndex);
+std::vector<Type> types_for_rotation_system(Runtime::RotationSystem system, bool legacy = false, int foolFloorLimit = 10,
+    bool legacyEvents = false);
+std::vector<Type> april_fools_piece_types(bool legacy = false);
+Type april_fools_piece(int familyIndex, bool legacy = false);
+Type canonical_event_piece(Type type);
+constexpr bool event_rotation_system(Runtime::RotationSystem system) noexcept {
+    return system==Runtime::RotationSystem::Pentomino || system==Runtime::RotationSystem::Hexomino ||
+        system==Runtime::RotationSystem::AprilFools2026;
+}
 constexpr int standard_tetromino_count() noexcept { return 7; }
 
 } // namespace Piece

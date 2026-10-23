@@ -1,4 +1,5 @@
 #include "tetr/util/file_path.h"
+#include "tetr/util/runtime_directory_lock.h"
 #include "tetr/challenges/challenges.h"
 #include "tetr/config/presets.h"
 #include "tetr/config/normalization.h"
@@ -364,7 +365,12 @@ bool History::attach_replay(std::uint64_t runId,const std::filesystem::path& pat
     retain();return changed;
 }
 std::filesystem::path history_path(const UserConfig::Settings& settings) {
-    return std::filesystem::u8path(settings.persistencePath.empty()?UserConfig::kDefaultUserConfigPath:settings.persistencePath).concat(".challenges");
+    const auto profile=std::filesystem::u8path(settings.persistencePath.empty()?UserConfig::kDefaultUserConfigPath:settings.persistencePath);
+    if(profile.extension()==".json") {
+        const auto stem=std::string(settings.persistencePlayer==1?"player2_":"player1_")+settings.persistencePlatform;
+        return profile.parent_path()/(stem+".challenges");
+    }
+    return std::filesystem::path(profile).concat(".challenges");
 }
 bool replay_exists(const Record& record) {std::error_code error;return !record.replayPath.empty() && std::filesystem::is_regular_file(std::filesystem::u8path(record.replayPath),error) && !error;}
 std::int64_t utc_now_milliseconds() {return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();}
@@ -393,6 +399,7 @@ bool load(History& history,const std::filesystem::path& path) {
     parsed.retain();history=std::move(parsed);return true;
 }
 bool save(const History& history,const std::filesystem::path& path) {
+    Util::FileWriteLock writeLock(path);if(!writeLock.acquired())return false;
     if(!history.nextRunId || history.records.size()>50000)return false;
     std::set<std::pair<std::uint64_t,std::string>> seen;
     std::vector<std::string> replayPaths;replayPaths.reserve(history.records.size());

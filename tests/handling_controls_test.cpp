@@ -16,6 +16,7 @@
 #include <set>
 #include <thread>
 
+namespace TetrTests::handling_controls_test {
 namespace {
 using Id=UserConfig::SettingId;
 using Clock=std::chrono::steady_clock;
@@ -353,10 +354,12 @@ void buffered_undo_has_release_debounce() {
     }
 }
 }
-int main() {
+int run(int argc,char** argv) {
     dcd_pauses_without_catchup(); sdf_rates_and_infinity(); initial_movement_before_gravity_and_collision();
     every_horizontal_cell_falls_into_a_pit(); instant_drop_allows_the_example_right_and_180(); buffered_rotation_precedes_instant_fall();
     hard_drop_finishes_before_instant_fall();
     units_persistence_replay_and_resets(); event_wait_wakes_both_readers();
     buffered_undo_has_release_debounce();
+    return 0;
 }
+} // namespace TetrTests::handling_controls_test

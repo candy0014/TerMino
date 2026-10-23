@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 import zipfile
-from package_frontends import audit_stage, sha256
+from package_frontends import audit_stage, required_files, sha256
 
 
 def extract(archive, destination):
@@ -37,6 +37,8 @@ def verify(folder):
     info = json.loads((folder / 'PACKAGE.json').read_text(encoding='utf-8'))
     files = audit_stage(folder)
     actual = {p.relative_to(folder).as_posix() for p in files} - {'PACKAGE.json'}
+    if not required_files(info) <= actual:
+        raise ValueError(f'Missing required package files: {sorted(required_files(info) - actual)}')
     if actual != set(info['files']):
         raise ValueError('Manifest file set differs from archive')
     for name, expected in info['files'].items():
@@ -62,31 +64,43 @@ class Runner:
         exe = self.folder / (name + ('.exe' if self.windows else ''))
         return (['wine', str(exe)] if self.wine else [str(exe)]) + [self.path(a) if isinstance(a, Path) else str(a) for a in args]
 
+    def environment(self, env=None):
+        result = dict(os.environ if env is None else env)
+        if self.windows:
+            # Linux's offscreen driver is not a Windows SDL driver.
+            result.pop('SDL_VIDEO_DRIVER', None);result.pop('SDL_VIDEODRIVER', None)
+        if self.wine:
+            result.pop('DISPLAY', None);result.pop('WAYLAND_DISPLAY', None)
+        return result
+
     def run(self, name, *args, env=None, timeout=90):
-        result = subprocess.run(self.command(name, *args), cwd=self.folder, env=env, stdout=subprocess.PIPE,
+        result = subprocess.run(self.command(name, *args), cwd=self.folder, env=self.environment(env), stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, encoding='utf-8', errors='replace', timeout=timeout)
         if result.returncode:
             raise RuntimeError(result.stdout)
         return result.stdout
 
-    def launcher_help(self):
-        launcher = self.folder / ('Play.bat' if self.windows else 'Play.sh')
+    def launcher_help(self, name='Play'):
+        launcher = self.folder / (name + ('.bat' if self.windows else '.sh'))
         if self.windows:
             command = (['wine', 'cmd'] if self.wine else ['cmd']) + ['/d', '/c', self.path(launcher).replace('/', '\\'), '--help']
         else:
             command = [str(launcher), '--help']
-        result = subprocess.run(command, cwd=self.folder.parent, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        result = subprocess.run(command, cwd=self.folder.parent, env=self.environment(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 encoding='utf-8', errors='replace', timeout=60)
         if result.returncode or 'TerMino' not in result.stdout:
             raise RuntimeError(f'Packaged launcher failed from another directory: {result.stdout}')
 
 
-def smoke(folder, info, wine=False, skip_graphics=False):
+def smoke(folder, info, wine=False, skip_graphics=False, launcher='Play'):
+    if info['frontend'] == 'bundle':
+        return {'terminal': smoke(folder, dict(info, frontend='terminal'), wine, skip_graphics),
+                'opengl': smoke(folder, dict(info, frontend='opengl'), wine, skip_graphics, 'PlayGL')}
     windows = info['platform'] == 'Windows'
     runner = Runner(folder, windows, wine)
     main = 'tetr_gl' if info['frontend'] == 'opengl' else 'tetr'
     assert 'TerMino' in runner.run(main, '--help')
-    runner.launcher_help()
+    runner.launcher_help(launcher)
     if main == 'tetr_gl':
         if skip_graphics:
             return {'help': 'passed', 'launcher': 'passed', 'hidden_opengl': 'not run; graphics environment unavailable'}
@@ -94,16 +108,19 @@ def smoke(folder, info, wine=False, skip_graphics=False):
         result = runner.run(main, '--data-dir', runtime, '--smoke-test', '--hidden', '--window-size', '1024x768',
                             '--frame-limit', '120', '--screenshot', folder.parent / 'hidden.bmp')
         assert 'hidden=1' in result and 'OPENGL_SMOKE_OK' in result
-        saved = (runtime / '.tetr/graphics.ini').read_text(encoding='utf-8')
-        assert 'width=1024' in saved and 'height=768' in saved and 'frame_limit=120' in saved
+        saved = json.loads((runtime / '.tetr/config.json').read_text(encoding='utf-8'))['graphics']
+        assert saved['width'] == 1024 and saved['height'] == 768 and saved['frame_limit'] == 120
         assert (folder.parent / 'hidden.bmp').stat().st_size > 1000
         # A bounded second run reads the saved configuration, with no mouse
         # or terminal input and no visible test window.
         runner.run(main, '--data-dir', runtime, '--hidden', '--frames', '4')
         return {'help': 'passed', 'launcher': 'passed', 'hidden_opengl': 'passed', 'window_settings': 'passed'}
-    config = folder / '.tetr' / ('player1_windows.ini' if windows else 'player1_linux.ini')
+    config = folder / '.tetr/config.json'
+    platform = 'windows' if windows else 'linux'
+    def write_profile(settings):
+        config.write_text(json.dumps({'version': 1, 'players': {'player1': {platform: {'settings': settings}}}}), encoding='utf-8')
     config.parent.mkdir(exist_ok=True)
-    config.write_text('[MODEL]\nModel = 3\n[GAME]\nSimulation PPS = 2.5\n[AUTOPLAY]\nAutoplay = 1\nPPS of Autoplay = 0\n', encoding='utf-8')
+    write_profile({'MODEL': {'Model': 3}, 'GAME': {'Simulation PPS': 2.5}, 'AUTOPLAY': {'Autoplay': 1, 'PPS of Autoplay': 0}})
     env = dict(os.environ, TETR_TEST_BATCH='1', TETR_EXIT_AFTER_GAME='1', TETR_TEST_MAX_PIECES='8',
                TETR_TEST_SEED='20261017', TETR_TEST_CLOCK_SCALE='100', TETR_TEST_REPLAY='candidate-smoke.txt')
     # Package launchers also clear these imports. Direct executable checks
@@ -114,7 +131,7 @@ def smoke(folder, info, wine=False, skip_graphics=False):
     replay = folder / '.tetr/replay/candidate-smoke.txt'
     contents = replay.read_bytes()
     assert b'{end_all,' in contents and b'{end_place_data,' in contents
-    config.write_text('[MODEL]\nModel = 5\nReplay = .tetr/replay/candidate-smoke.txt\nTime Multiplier = 100\n', encoding='utf-8')
+    write_profile({'MODEL': {'Model': 5, 'Replay': '.tetr/replay/candidate-smoke.txt', 'Time Multiplier': 100}})
     env.pop('TETR_TEST_MAX_PIECES'); env.pop('TETR_TEST_REPLAY')
     runner.run(main, '--play', env=env);assert replay.read_bytes() == contents
     runner.run('tetr_ft7', '--help', env=env)
@@ -122,7 +139,7 @@ def smoke(folder, info, wine=False, skip_graphics=False):
     if server.exists():
         history = folder.parent / '中文房间历史' / 'room-codes.txt'
         env['TETR_ROOM_CODE_HISTORY'] = runner.path(history)
-        process = subprocess.Popen(runner.command('tetr_server'), cwd=folder, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        process = subprocess.Popen(runner.command('tetr_server'), cwd=folder, env=runner.environment(env), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         try:
             until = time.monotonic() + 10
             while time.monotonic() < until:
@@ -153,7 +170,9 @@ def cross_frontends(archives, wine=False):
         for index, archive in enumerate(archives):
             destination = base / str(index);destination.mkdir()
             folder = extract(archive, destination)
-            info = verify(folder);folders[(info['platform'], info['frontend'])] = folder
+            info = verify(folder)
+            for frontend in (('terminal', 'opengl') if info['frontend']=='bundle' else (info['frontend'],)):
+                folders[(info['platform'], frontend)] = folder
         for operating_system in ('Linux', 'Windows'):
             windows = operating_system == 'Windows'
             native = windows == (os.name == 'nt')
@@ -166,26 +185,34 @@ def cross_frontends(archives, wine=False):
             profile = base / 'replay-profile.ini';profile.write_text('[MODEL]\nTime Multiplier = 100\n', encoding='utf-8')
             runtime = base / (operating_system + '-跨端运行')
             graphical.run('tetr_gl', '--data-dir', runtime, '--profile', profile, '--replay', replay, '--hidden', '--frames', '180', '--no-vsync')
-            # Prove actual clients share an OS lock, and that terminating the
-            # owner releases it without deleting either the lock or data.
+            # Graphical windows share data but only the settings owner persists
+            # configuration. The legacy terminal retains exclusive access.
             owner = subprocess.Popen(graphical.command('tetr_gl', '--data-dir', runtime, '--hidden', '--frames', '1800', '--frame-limit', '60'),
-                                     cwd=graphical.folder, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                                     cwd=graphical.folder, env=graphical.environment(), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             try:
                 ready = queue.Queue()
                 def read_ready():
                     lines = b''
                     while True:
                         line = owner.stderr.readline();lines += line
-                        if not line or b'hidden=1' in line:
+                        # Window creation precedes synchronous profile
+                        # migration. Wait for completed frontend startup before
+                        # taking the settings owner's baseline configuration.
+                        if not line or b'SDL input=event-driven main thread' in line:
                             ready.put(lines);return
                 threading.Thread(target=read_ready, daemon=True).start()
                 diagnostics = ready.get(timeout=20)
-                if b'hidden=1' not in diagnostics:raise RuntimeError(diagnostics.decode(errors='replace'))
-                blocked = subprocess.run(graphical.command('tetr_gl', '--data-dir', runtime, '--hidden', '--frames', '1'),
-                                         cwd=graphical.folder, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
-                assert blocked.returncode and b'in use by another' in blocked.stdout
+                if b'hidden=1' not in diagnostics or b'SDL input=event-driven main thread' not in diagnostics:
+                    raise RuntimeError(diagnostics.decode(errors='replace'))
+                if owner.poll() is not None:raise RuntimeError('Settings owner exited before the concurrent-window check')
+                config = runtime / '.tetr/config.json'
+                previous_config = config.read_bytes()
+                additional = subprocess.run(graphical.command('tetr_gl', '--data-dir', runtime, '--hidden', '--frames', '1', '--window-size', '840x560'),
+                                         cwd=graphical.folder, env=graphical.environment(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+                assert additional.returncode == 0 and b'hidden=1' in additional.stdout, additional.stdout
+                assert config.read_bytes() == previous_config
                 conflict = subprocess.run(terminal.command('tetr', '--play'), cwd=runtime,
-                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+                                          env=terminal.environment(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
                 assert conflict.returncode == 3 and b'in use by another' in conflict.stdout
             finally:
                 owner.terminate()
@@ -194,7 +221,7 @@ def cross_frontends(archives, wine=False):
             assert (runtime / '.tetr/client.lock').is_file()
             graphical.run('tetr_gl', '--data-dir', runtime, '--hidden', '--frames', '2')
             results.append({'platform': operating_system, 'environment': 'native' if native else 'Wine',
-                            'terminal_to_opengl_replay': 'passed', 'cross_client_lock_and_crash_release': 'passed'})
+                            'terminal_to_opengl_replay': 'passed', 'concurrent_graphical_windows_and_crash_release': 'passed'})
     return results
 
 
@@ -220,7 +247,7 @@ def main():
     parser.add_argument('--wine', action='store_true', help='execute Windows candidates through Wine, never claim native Windows acceptance')
     parser.add_argument('--structure-only', action='store_true')
     parser.add_argument('--skip-graphics', action='store_true', help='record graphics execution as not run, without inventing a pass')
-    parser.add_argument('--matrix', action='store_true', help='require exactly the four OS/frontend combinations from one clean commit')
+    parser.add_argument('--matrix', action='store_true', help='require two combined packages or four separate clients from one clean commit')
     parser.add_argument('--cross-frontends', action='store_true', help='check cross-client replay, directory contention and crash release')
     parser.add_argument('--report', type=Path)
     args = parser.parse_args()
@@ -233,8 +260,10 @@ def main():
         results.append(result);print(json.dumps(result, ensure_ascii=False))
     if args.matrix:
         combos = [(r['platform'], r['frontend']) for r in results]
-        if set(combos) != {(p, f) for p in ('Linux', 'Windows') for f in ('terminal', 'opengl')} or len(combos) != 4:
-            raise ValueError('Expected exactly Linux/Windows × terminal/opengl')
+        separate = {(p, f) for p in ('Linux', 'Windows') for f in ('terminal', 'opengl')}
+        combined = {(p, 'bundle') for p in ('Linux', 'Windows')}
+        if not ((set(combos)==separate and len(combos)==4) or (set(combos)==combined and len(combos)==2)):
+            raise ValueError('Expected Linux/Windows combined bundles, or four separate terminal/opengl clients')
         if len({r['source_commit'] for r in results}) != 1 or any(r['source_dirty'] for r in results):
             raise ValueError('Matrix packages must use one clean source commit')
     crossed = cross_frontends(archives, args.wine) if args.cross_frontends and not args.structure_only and not args.skip_graphics else []

@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <vector>
 
+namespace TetrTests::bot_zzztoj_test {
 namespace {
 
 void require(bool condition, const char* message) {
@@ -56,7 +57,7 @@ int place_and_clear(Runtime::Playfield& field, const Piece::Definition& piece,
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     Runtime::SessionState session;
     Runtime::RuntimeServices services;
     Runtime::GameContext context(session, services);
@@ -178,3 +179,4 @@ int main() {
     require(!Bot::init(context), "plain SRS must be rejected");
     return 0;
 }
+} // namespace TetrTests::bot_zzztoj_test

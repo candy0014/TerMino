@@ -35,10 +35,25 @@ void initialize_board(Runtime::GameContext& context, Runtime::PlayerSessionState
         context.config.field.height=4;
     }
     presentation.invisibleFlash=false;
+    presentation.remoteFieldVisibility.reset();
     presentation.visibilityTime={};
     presentation.altitudeDisplay={};
     presentation.replayPromptDisplay.clear();
     presentation.roundEndHeadline.clear();
+    // Placement feedback belongs to this round, including snapshots published
+    // before its first piece locks and remote boards initialized without a queue.
+    presentation.eventSpinPiece=Piece::Type::none();
+    presentation.placement={};
+    presentation.boardMotion={};
+    presentation.lastWallContact.reset();
+    presentation.eventClearLines=0;
+    presentation.eventMini=presentation.eventPerfectClear=presentation.eventHalfClear=false;
+    presentation.remotePlacementRevision=0;
+    presentation.remoteSpinPiece=Piece::Type::none();
+    presentation.remoteClearLines=0;
+    presentation.remoteMini=presentation.remotePerfectClear=presentation.remoteHalfClear=false;
+    presentation.spike={};
+    presentation.remoteAttackBaselineKnown=false;
     presentation.racingGoalRows=-1;
     // A new round clears the terminal, so unchanged HUD values must be drawn
     // again instead of reusing the previous round's display cache.
@@ -113,7 +128,7 @@ void initialize_board(Runtime::GameContext& context, Runtime::PlayerSessionState
             context.config.quickPlay.fool == Runtime::FoolMode::Disabled)
             tmp.push_back(Piece::Type::from_index(21));
         if(context.config.quickPlay.fool == Runtime::FoolMode::AprilFools2026){
-            tmp = Piece::april_fools_piece_types();
+            tmp = Piece::april_fools_piece_types(context.config.legacyEventGeometry);
         }
         presentation.blockMaxHeight=2,presentation.blockMaxWidth=3;
         for(auto x:tmp){

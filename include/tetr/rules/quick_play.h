@@ -8,9 +8,19 @@ namespace Rules {
 
 int qp_floor(double altitude);
 int qp_snowball_size(int clearedLines);
+// Zero at the maximum field size; otherwise the number of lines to grow.
+int qp_snowball_lines_until_growth(int clearedLines);
 double qp_floor_altitude(int floor);
+struct QuickPlayPressure {double mean,relativeVariance;};
+// Normal-mode received rows/minute and between-run squared coefficient of
+// variation. See docs/QP2_PRESSURE_SAMPLE.md for the fitted data and limits.
+QuickPlayPressure qp_pressure(double altitude,double ownApm);
 double qp_survival_apm(double altitude);
 bool qp_hard_mode(const Runtime::QuickPlayConfig& config);
+bool qp_gravity_increases(const Runtime::QuickPlayConfig& config);
+int qp_fatigue_garbage_due(const Runtime::QuickPlayConfig& config,double elapsed);
+bool qp_garbage_concentrates(const Runtime::QuickPlayConfig& config,int floor,
+    const Runtime::QuickPlayProgress& progress,double elapsed);
 Runtime::Duration qp_garbage_delay(const Runtime::QuickPlayConfig& config, int floor, double cancellation);
 Runtime::Duration qp_garbage_rise_interval(const Runtime::QuickPlayConfig& config, Runtime::Duration configured);
 double qp_messiness(const Runtime::QuickPlayConfig& config, int floor,

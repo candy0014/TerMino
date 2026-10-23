@@ -8,6 +8,7 @@
 
 #include <functional>
 #include <chrono>
+#include <optional>
 #include <vector>
 
 namespace Input { struct Services; }
@@ -56,7 +57,10 @@ PlayerInputResult process_player_input_frame(
     const std::vector<int>& moveKeys,
     const PlayerInputConfig& config,
     const std::function<bool(int)>& keyDown,
-    const std::function<Runtime::TimePoint()>& now);
+    const std::function<Runtime::TimePoint()>& now,
+    // Effects cannot predate the piece, but held time must never be promoted
+    // to its spawn time when the physical input sample is older.
+    std::optional<Runtime::TimePoint> repeatThrough = std::nullopt);
 
 PlayerInputResult process_buffered_player_input_frame(
     MovementInputState& input, MovementController& movement,

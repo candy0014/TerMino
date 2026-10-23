@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+namespace TetrTests::core_rules_test {
 namespace {
 
 int legacy_b2b_flag(const Rules::ChainInput& in) {
@@ -451,7 +452,7 @@ void test_current_tetrio_attack_matrix_in_every_mode() {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     test_lock_analysis();
     test_spin_detection();
     test_chain_equivalence();
@@ -460,3 +461,4 @@ int main() {
     test_current_tetrio_attack_matrix_in_every_mode();
     return 0;
 }
+} // namespace TetrTests::core_rules_test

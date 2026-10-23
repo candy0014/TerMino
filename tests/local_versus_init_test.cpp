@@ -28,6 +28,7 @@
 #include <iostream>
 #include <sstream>
 
+namespace TetrTests::local_versus_init_test {
 namespace {
 
 std::size_t count_occurrences(const std::string& text, const std::string& needle) {
@@ -95,7 +96,7 @@ struct LocalPlayerFixture {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
 #ifdef __linux__
     setenv("TERM", "xterm", 1);
 #endif
@@ -482,4 +483,6 @@ int main() {
     std::filesystem::remove(replayPath);
 
     std::cerr << "local_versus_init_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::local_versus_init_test

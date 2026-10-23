@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+namespace TetrTests::bot_chatgpt_terrain_bridge_test {
 namespace B = Bot_chatgpt;
 
 // Fixtures read top to bottom, matching the verified replay report.
@@ -154,7 +155,7 @@ void random_legal_boards() {
     }
 }
 
-int main() {
+int run(int argc,char** argv) {
     // Official-engine-verified moch vs zzz replay, round 4 after piece 266.
     // The horizontal I seals the centre, but row "jiiiisszz." is missing
     // only its rightmost cell. The next L clears it before Z continues Spin.
@@ -228,4 +229,6 @@ int main() {
               << " bridge_cells=" << v2.removableBridgeCavities
               << " buried=" << v1.buriedCavities << "->" << v2.terrain.buriedCavities
               << '\n';
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_terrain_bridge_test

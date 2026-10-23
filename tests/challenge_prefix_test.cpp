@@ -22,6 +22,7 @@
 #include <iostream>
 #include <memory>
 
+namespace TetrTests::challenge_prefix_test {
 namespace {
 using namespace Challenges;
 Definition only_quads() {
@@ -184,7 +185,9 @@ void empty_prefix_spawns_nothing() {
     assert(player.gameplay.scoring.placedBlocks==0 && player.gameplay.scoring.roundPieceTypes.empty());
 }
 }
-int main() {
+int run(int argc,char** argv) {
     independent_prefixes();complete_timed_prefix();replay_bounds();placement_hook_and_save();empty_prefix_spawns_nothing();
     std::cerr<<"challenge prefix isolation, scoring, replay bounds and lock hook passed\n";
+    return 0;
 }
+} // namespace TetrTests::challenge_prefix_test

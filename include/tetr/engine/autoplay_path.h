@@ -42,6 +42,13 @@ std::optional<AutoplayPath> search_autoplay_path(const Runtime::Playfield& field
     MovementState start,Piece::Pose target,Runtime::RotationRecord rotation,
     const Runtime::HandlingConfig& handling,const Runtime::MovementRestrictions& restrictions,
     Runtime::GravityInterval gravity,bool handlingPresentation=false,
-    const std::function<bool()>& cancelled={},const AutoplaySpinRules& spinRules={});
+    const std::function<bool()>& cancelled={},const AutoplaySpinRules& spinRules={},int maxExpanded=0);
+// Retain the selected column/orientation across vertical board motion, then
+// settle into the CURRENT holes and prove a route from the CURRENT live pose.
+std::optional<AutoplayPath> repair_autoplay_path(const Runtime::Playfield& field,
+    const Piece::Definition& piece,MovementState start,Piece::Pose& target,
+    Runtime::RotationRecord& rotation,int raised,const Runtime::HandlingConfig& handling,
+    const Runtime::MovementRestrictions& restrictions,Runtime::GravityInterval gravity,
+    bool timed,const AutoplaySpinRules& spinRules={},std::string_view preferredScript={});
 }
 #endif

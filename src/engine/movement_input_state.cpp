@@ -212,7 +212,8 @@ void MovementInputState::prechargeHorizontal(int key, Runtime::TimePoint now,
         // elapsed time into the next piece's DAS timer.
         if (state->phase==KeyPhase::Pressed || state->phase==KeyPhase::Repeating) {
             state->phase=KeyPhase::Pressed;
-            state->timestamp=now;
+            // A stale sample can be earlier than a newly arrived press.
+            state->timestamp=std::max(state->timestamp,now);
         }
         return;
     }

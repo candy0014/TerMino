@@ -7,6 +7,7 @@
 #include <iostream>
 #include <thread>
 
+namespace TetrTests::network_connection_test {
 struct Client {
     Runtime::SessionState session;
     Runtime::RuntimeServices services;
@@ -15,7 +16,7 @@ struct Client {
     Client() { context.attach_network(network); }
     void join(const std::string& ip="127.0.0.1") { Network::initialize_network_services(context,ip,3); }
 };
-int main() {
+int run(int argc,char** argv) {
     using Network::ConnectionState;
     Client a,b,c;
     a.join(); // Client is allowed to start before its server.
@@ -140,4 +141,6 @@ int main() {
     assert(b.network.connection==ConnectionState::Connected);
     Network::disconnect_online(b.network); customPump();
     std::cerr<<"network_connection_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::network_connection_test

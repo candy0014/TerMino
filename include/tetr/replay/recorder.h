@@ -34,7 +34,7 @@ void record_quick_play_state(Runtime::GameContext& context, const Runtime::Playe
 
 template<typename... T>
 void add_replay(Runtime::GameContext& context, OperationKind op, const T&... args) {
-    if (Replay::session(context).data.length() >= 10000000) return;
+    if (Replay::session(context).data.length() >= Replay::session(context).recordingLimit) return;
     std::string res = "{" + replay_base(context, op);
     if constexpr (sizeof...(args) > 0) {
         auto add = [&](const auto& x) { res += "," + std::to_string(x); };
@@ -48,7 +48,7 @@ void add_replay(Runtime::GameContext& context, OperationKind op, const T&... arg
 // producers should use OperationKind so protocol spelling cannot leak inward.
 template<typename... T>
 void add_replay(Runtime::GameContext& context, const std::string& op, const T&... args) {
-    if (Replay::session(context).data.length() >= 10000000) return;
+    if (Replay::session(context).data.length() >= Replay::session(context).recordingLimit) return;
     std::string res = "{" + replay_base(context, op);
     if constexpr (sizeof...(args) > 0) {
         auto add = [&](const auto& x) { res += "," + std::to_string(x); };

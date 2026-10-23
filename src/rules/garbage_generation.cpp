@@ -79,6 +79,12 @@ void avoid_previous_column(const GarbageGenerationConfig& config, GarbageGenerat
     if(!alternatives.empty()) std::iter_swap(first,state.holeOrder.begin()+alternatives[rng()%alternatives.size()]);
 }
 
+int qp_margin(const GarbageGenerationConfig& config) {
+    if(!config.concentrate)return 0;
+    return config.legacyQuickPlayRules ? (config.width>4?2:0) :
+        std::min((config.width-1)/2,static_cast<int>(std::floor(config.width/5.0+.5)));
+}
+
 void choose_qp_hole(const GarbageGenerationConfig& config, GarbageGenerationState& state, std::mt19937& rng) {
     std::vector<int> columns(config.width);
     std::iota(columns.begin(), columns.end(), 0);
@@ -87,7 +93,7 @@ void choose_qp_hole(const GarbageGenerationConfig& config, GarbageGenerationStat
         [&](int a, int b) { return config.digScores[a] < config.digScores[b]; });
     std::vector<double> weights(config.width);
     double total = 0;
-    const int margin = config.concentrate && config.width > 4 ? 2 : 0;
+    const int margin = qp_margin(config);
     for (int rank = 0; rank < config.width; ++rank) {
         const int column = columns[rank];
         if (column < margin || column >= config.width - margin) continue;
@@ -111,6 +117,49 @@ void choose_qp_hole(const GarbageGenerationConfig& config, GarbageGenerationStat
 
 } // namespace
 
+std::vector<double> qp_garbage_dig_scores(int width,int firstRow,int bottom,
+    const std::function<Runtime::BoardCell(int,int)>& cell,bool legacy) {
+    std::vector<double> scores;
+    if(legacy) {
+        int top=bottom;std::vector<int> holes;
+        for(int y=firstRow;y<bottom;++y) {
+            bool garbage=false;
+            for(int x=0;x<width;++x) {
+                if(cell(y,x).occupied())top=std::min(top,y);
+                garbage|=cell(y,x).is_normal_garbage();
+            }
+            if(garbage && holes.empty())for(int x=0;x<width;++x)
+                if(cell(y,x).empty_cell())holes.push_back(x);
+        }
+        for(int x=0;x<width;++x) {
+            int lowest=top,distance=holes.empty()?0:width;bool empty=false;
+            for(int y=bottom-1;y>=top;--y)if(cell(y,x).empty_cell()){lowest=y;empty=true;break;}
+            for(int hole:holes)distance=std::min(distance,std::abs(hole-x));
+            scores.push_back(empty?lowest-top+5*distance:0);
+        }
+        return scores;
+    }
+    // The reviewed client chooses the first hole in the lowest incomplete
+    // row (only when that row contains garbage), then ranks each skyline.
+    int anchor=-1;
+    for(int y=bottom-1;y>=firstRow;--y) {
+        int hole=-1;bool garbage=false;
+        for(int x=0;x<width;++x) {
+            if(hole<0 && cell(y,x).empty_cell())hole=x;
+            garbage|=cell(y,x).is_normal_garbage();
+        }
+        if(hole>=0) {if(garbage)anchor=hole;break;}
+    }
+    for(int x=0;x<width;++x) {
+        double score=0;
+        for(int y=firstRow;y<bottom;++y)if(cell(y,x).occupied()) {
+            score=bottom-y+(anchor<0?0:5*std::abs(x-anchor));break;
+        }
+        scores.push_back(score);
+    }
+    return scores;
+}
+
 void prepare_garbage_batch(
     const GarbageGenerationConfig& config,
     GarbageGenerationState& state,
@@ -119,8 +168,9 @@ void prepare_garbage_batch(
     apply_special_hole_shape(config,state);
     repair_hole_order(state, config.width);
     if (config.qpPolicy && !preserveHole) {
-        const int margin = config.concentrate && config.width > 4 ? 2 : 0;
-        if (state.holeOrder[0] < margin || state.holeOrder[0] >= config.width - margin ||
+        const int margin = qp_margin(config);
+        if ((!config.legacyQuickPlayRules && state.lastColumn<0) ||
+            state.holeOrder[0] < margin || state.holeOrder[0] >= config.width - margin ||
             chance(rng, config.continuousMessiness)) choose_qp_hole(config, state, rng);
         return;
     }

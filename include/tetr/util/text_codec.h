@@ -12,14 +12,7 @@
 
 namespace Util::Text {
 
-inline std::optional<double> parse_finite_real(std::string_view text) noexcept {
-    if (text.empty()) return std::nullopt;
-    double value = 0.0;
-    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
-    if (result.ec != std::errc{} || result.ptr != text.data() + text.size() ||
-        !std::isfinite(value)) return std::nullopt;
-    return value;
-}
+std::optional<double> parse_finite_real(std::string_view text) noexcept;
 
 template <typename Integer>
 std::optional<Integer> parse_integer(std::string_view text) noexcept {

@@ -10,7 +10,7 @@
 #include <optional>
 #include <set>
 
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
 #include "tetr/input/keyboard_monitor.h"
 #endif
 
@@ -21,6 +21,7 @@ namespace Input {
 // when UserConfig changes.
 struct Services {
     BindingSet bindings;
+    int virtualPlayerSlot=-1;
     // Local Versus contexts have different bindings but read one physical
     // keyboard state.  A delegated source avoids two evdev readers competing
     // for the same device events.
@@ -34,7 +35,7 @@ struct Services {
     KeyEventBuffer* keyEventSource = nullptr;
     // Optional focus-aware physical backend for embedding/tests.
     FocusState* focusSource = nullptr;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     KeyboardMonitor keyboard;
 #endif
     bool initialized = false;
@@ -60,6 +61,8 @@ struct Services {
     void begin_gameplay_input();
     void end_gameplay_input();
     bool gameplay_input_active() const { return gameplayInputActive_; }
+    // Captured atomically with the latest batch, never read ahead of its events.
+    KeyEventBuffer::SampleTime gameplay_sample_time() const { return gameplaySampleTime_; }
     bool gameplay_key_down(int key) const;
     std::optional<std::chrono::steady_clock::time_point> gameplay_press_time(int key) const;
     void poll_gameplay_events();
@@ -88,12 +91,13 @@ private:
     std::set<int> suppressedControlKeys_;
     std::map<int, bool> gameplayDown_;
     std::map<int, std::chrono::steady_clock::time_point> gameplayPressedAt_;
+    KeyEventBuffer::SampleTime gameplaySampleTime_;
     std::deque<KeyEvent> pendingEvents_;
     std::uint64_t focusGeneration_=0;
 #ifdef _WIN32
     std::mutex consoleMutex_;
     FocusState consoleFocus_;
-#elif !defined(__linux__)
+#elif !defined(__linux__) || defined(__ANDROID__)
     FocusState unavailableFocus_;
     KeyEventBuffer unavailableEvents_;
 #endif

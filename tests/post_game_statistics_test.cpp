@@ -35,10 +35,12 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <deque>
 #ifdef __linux__
 #include <unistd.h>
 #endif
 
+namespace TetrTests::post_game_statistics_test {
 namespace {
 using D=Runtime::Duration;
 struct Capture {
@@ -115,6 +117,28 @@ void metrics_and_frozen_times() {
     r.replay.separateGameTime=false;
     assert(metric(App::make_post_game_statistics(r.context,r.p),"REAL TIME")=="N/A");
 }
+void finished_invisible_board_is_repainted() {
+    for(bool periodic:{false,true})for(bool replay:{false,true}) {
+        Rig r;r.context.config.field.invisible=true;r.context.config.field.periodicInvisible=periodic;
+        r.context.config.mode.replayMode=replay;
+        r.p.gameplay.playfield.field.set_cell(19,0,Runtime::BoardCell::piece(3));
+        r.p.gameplay.playfield.field.set_cell(-8,1,Runtime::BoardCell::piece(3));
+        r.p.presentation.activePose.reset();r.p.presentation.activePieceType.reset();
+        Capture capture;Test::TerminalScreen screen;
+        Render::redraw_player_board(r.context,r.p);screen.feed(capture.take());
+        assert(screen.at(28,31).glyph==(replay?"█":" "));
+        App::freeze_post_game_times(r.context,r.p);screen.feed(capture.take());
+        const Test::TerminalScreen::Color normal{{193,168,65}};
+        for(const auto pos:{std::pair<int,int>{28,31},{1,33}}) {
+            assert(screen.at(pos.first,pos.second).glyph=="█");
+            assert(screen.at(pos.first,pos.second).foreground==normal);
+        }
+        assert(r.context.config.field.invisible && r.p.gameplay.playfield.field.cell(19,0)==Runtime::BoardCell::piece(3));
+        App::freeze_post_game_times(r.context,r.p);assert(capture.take().empty());
+        Engine::initialize_board(r.context,r.p);
+        assert(!r.p.timing.completedGameTime && r.context.config.field.invisible);
+    }
+}
 void saved_times_survive_replay_speed_and_end_screen_waits() {
     Rig live;live.context.config.simulationPps=2.5;
     live.p.timing.completedGameTime=D::from_seconds(120.123456789);
@@ -157,6 +181,56 @@ App::PostGameStatistics table_data(Rig& r) {
     counts[{21,3}]={1,0,0};counts[{5,0}]={0,2,1};counts[{21,39}]={0,1,0};counts[{5,80}]={1,0,0};
     return App::make_post_game_statistics(r.context,r.p);
 }
+void graphical_results_are_complete_value_snapshots() {
+    Rig rig;auto data=table_data(rig);
+    // Counts must survive projection without truncation, including values
+    // beyond 32 bits, offscreen columns and the total row/column.
+    data.cells[0][0][2]=std::uint64_t{1}<<40;
+    data.rowTotals[0][2]=data.columnTotals[0][2]=data.total[2]=data.cells[0][0][2];
+    App::PostGameStatisticsView view(data);
+    Frontend::UiFrame captured;
+    Frontend::UiSurfaceScope surface([&](Frontend::UiFrame frame){captured=std::move(frame);},{128,38});
+    view.next_page();view.render(rig.context,"Save Replay: S",{28,10});
+    auto summary=*captured.metadata.statistics;
+    assert(summary.metrics.size()==data.metrics.size());
+    for(std::size_t i=0;i<data.metrics.size();++i)assert(summary.metrics[i].id==data.metrics[i].first && summary.metrics[i].value==data.metrics[i].second);
+    view.move(100,0);view.render(rig.context,"Save Replay: S",{28,10});
+    assert(captured.metadata.statistics->selectedMetric==int(data.metrics.size())-1);
+    view.next_page();view.move(100,100);view.render(rig.context,"Save Replay: S",{28,10});
+    const auto& table=*captured.metadata.statistics;
+    assert(table.page==Frontend::UiStatisticsPage::Clears && table.cells==data.cells);
+    assert(table.pieces==data.pieces && table.lines==data.lines && table.pieceColors==data.pieceColors);
+    assert(table.rowTotals==data.rowTotals && table.columnTotals==data.columnTotals && table.total==data.total);
+    assert(table.selectedRow==int(data.pieces.size()) && table.selectedColumn==int(data.lines.size()));
+    assert(summary.selectedMetric==0); // Previously published data is immutable.
+}
+void direct_statistics_commands() {
+    Rig rig;const auto data=table_data(rig);
+    App::PostGameStatisticsView view(data,data);App::Settings::NavigationInput input(rig.context);
+    Challenges::Outcome challenge;challenge.challengeId="touch-result";view.set_challenges({challenge});
+    Frontend::UiFrame shown;std::deque<Frontend::UiCommand> commands;
+    Frontend::UiSurfaceScope surface([&](Frontend::UiFrame frame){shown=std::move(frame);},{128,38},[&]() -> std::optional<Frontend::UiCommand> {
+        if(commands.empty())return {};auto c=commands.front();commands.pop_front();return c;
+    });
+    view.next_page();view.render(rig.context,"footer",{128,38});
+    const auto click=[&](Frontend::UiCommand c) {
+        c.page=shown.metadata.page;commands.push_back(c);assert(view.poll(input));view.render(rig.context,"footer",{128,38});
+    };
+    using C=Frontend::UiCommandKind;
+    click({C::StatisticsMetric,7});assert(view.selected_metric()==7);
+    const auto oldPage=shown.metadata.page;
+    click({C::StatisticsPage,1});assert(view.page()==App::PostGamePage::Clears && shown.metadata.page!=oldPage);
+    commands.push_back({C::StatisticsMetric,1,{},oldPage});assert(!view.poll(input));
+    Frontend::UiCommand cell{C::StatisticsCell};cell.row=2;cell.column=3;click(cell);
+    assert(view.selected_row()==2 && view.selected_column()==3);
+    cell.row=int(data.pieces.size());cell.column=int(data.lines.size());click(cell);
+    assert(view.selected_row()==int(data.pieces.size()) && view.selected_column()==int(data.lines.size()));
+    click({C::StatisticsPlayer,1});assert(view.player_index()==1 && view.selected_row()==0);
+    click({C::StatisticsPage,2});assert(view.page()==App::PostGamePage::Challenges);
+    click({C::StatisticsChallenge,0});assert(shown.metadata.statistics->selectedChallenge==0);
+    click({C::StatisticsPage,0});assert(view.page()==App::PostGamePage::Summary);
+    click({C::Back});assert(view.page()==App::PostGamePage::Board);
+}
 void catalog_columns_categories_and_totals() {
     Rig r;const auto t=table_data(r);
     assert((t.lines==std::vector<int>{0,1,3,39,80}));
@@ -171,16 +245,18 @@ void catalog_columns_categories_and_totals() {
     const auto i5=std::find(t.pieces.begin(),t.pieces.end(),std::string(Piece::metadata(Piece::Type{21}).name));
     assert(i5!=t.pieces.end());
     assert((t.rowTotals[i5-t.pieces.begin()]==Runtime::ClearCounts{1,1,0}));
+    Runtime::ClearCounts foolCounts{};
     for (const auto& entry:Piece::catalog()) if (entry.metadata.name==Piece::metadata(Piece::Type{21}).name &&
         entry.metadata.rotationSystem==Runtime::RotationSystem::AprilFools2026 &&
         entry.shapeIndex!=Piece::catalog_entry(Piece::Type{21}).shapeIndex) {
         r.p.gameplay.scoring.clearStatistics[{entry.type.index(),3}]={0,4,0};
+        foolCounts[1]+=4; // Legacy and canonical identifiers share one statistics row.
         const auto separate=App::make_post_game_statistics(r.context,r.p);
         const auto normal=std::find(separate.pieces.begin(),separate.pieces.end(),std::string(entry.metadata.name));
         const auto fool=std::find(separate.pieces.begin(),separate.pieces.end(),std::string(entry.metadata.name)+" [Fool]");
         assert(normal!=separate.pieces.end() && fool!=separate.pieces.end());
         assert((separate.rowTotals[normal-separate.pieces.begin()]==Runtime::ClearCounts{1,1,0}));
-        assert((separate.rowTotals[fool-separate.pieces.begin()]==Runtime::ClearCounts{0,4,0}));
+        assert(separate.rowTotals[fool-separate.pieces.begin()]==foolCounts);
     }
 }
 void round_libraries_and_max_spike() {
@@ -457,22 +533,31 @@ void actual_save_twice(bool playback,bool local) {
     const auto typed=(local?"./"+a.generic_u8string():a.filename().string())+"\n\""+b.u8string()+"\"\n";
     int descriptors[2];assert(pipe(descriptors)==0);const int saved=dup(STDIN_FILENO);assert(saved>=0);
     assert(dup2(descriptors[0],STDIN_FILENO)>=0);assert(write(descriptors[1],typed.data(),typed.size())==ssize_t(typed.size()));
+    const auto read=[](const auto& path){std::ifstream file(path);return std::string(std::istreambuf_iterator<char>(file),{});};
+    // Post-game naming replaces the managed filename. Playback Save As and
+    // explicitly chosen paths outside the cache directory retain their source.
+    const bool keepFirst=playback || local;
+    std::string firstSaved;
     int attempts=0;bool held=false;
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     first.input.keyStateProvider=[&](int key) {
         assert(std::chrono::steady_clock::now()<deadline);
-        if(key==codes[8])return std::filesystem::exists(a) && std::filesystem::exists(b);
+        if(key==codes[8])return std::filesystem::exists(a)==keepFirst && std::filesystem::exists(b);
         if(key!=codes[10])return false;
         if(held){held=false;return false;}
-        if(attempts==1 && !std::filesystem::exists(a))return false;
+        if(attempts==1) {
+            if(!std::filesystem::exists(a))return false;
+            if(firstSaved.empty())firstSaved=read(a);
+        }
         if(attempts<2){++attempts;held=true;return true;}return false;
     };
     if(local)App::run_local_versus_post_game_interaction(first.context,second.context);
     else App::run_post_game_interaction(first.context,first.p);
     assert(attempts==2);
     assert(dup2(saved,STDIN_FILENO)>=0);close(saved);close(descriptors[0]);close(descriptors[1]);std::cin.clear();
-    const auto read=[](const auto& path){std::ifstream file(path);return std::string(std::istreambuf_iterator<char>(file),{});};
-    const auto data=read(a);assert(data==read(b));
+    assert(std::filesystem::exists(a)==keepFirst);
+    const auto data=read(b);assert(!firstSaved.empty() && data==firstSaved);
+    if(keepFirst)assert(data==read(a));
     assert(data.size()>17 && Replay::replay_hash_suffix(data.substr(0,data.size()-17))==data.substr(data.size()-17));
     if(playback)assert(data==original+Replay::replay_hash_suffix(original));
     std::filesystem::remove(a);std::filesystem::remove_all(b.parent_path());
@@ -556,7 +641,7 @@ void actual_end_screen_cycle(bool replay,bool network,bool local) {
     if (replay) assert(first.replay.playback.finished && first.replay.playback.speed==1024);
 }
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     if(argc>2 && std::string(argv[1])=="--gallery") {
         const auto directory=std::filesystem::path(argv[2]);std::filesystem::create_directories(directory);
         for(bool hidden:{false,true})for(const auto size:{Render::TerminalSize{120,40},Render::TerminalSize{80,24}}) {
@@ -590,12 +675,22 @@ int main(int argc,char** argv) {
         }
         return 0;
     }
+    const auto previous=std::filesystem::current_path();
+    const auto isolated=std::filesystem::temp_directory_path()/("termino-statistics-"+
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(isolated);std::filesystem::current_path(isolated);
+    struct Cleanup {
+        std::filesystem::path previous,directory;
+        ~Cleanup(){std::filesystem::current_path(previous);std::filesystem::remove_all(directory);}
+    } cleanup{previous,isolated};
     round_libraries_and_max_spike();allclear_and_scaled_attack_totals();
     const auto language=App::UiText::language();App::UiText::set_language(App::UiText::Language::English);
     Capture output;
-    metrics_and_frozen_times();control_counts_outside_battles();saved_times_survive_replay_speed_and_end_screen_waits();catalog_columns_categories_and_totals();
+    metrics_and_frozen_times();finished_invisible_board_is_repainted();control_counts_outside_battles();saved_times_survive_replay_speed_and_end_screen_waits();catalog_columns_categories_and_totals();
     actual_settlement_counts_large_clears_and_spins();holds_reset_and_undo();
     rendering_navigation_scrolling_and_resize();
+    graphical_results_are_complete_value_snapshots();
+    direct_statistics_commands();
     clear_table_text_stays_readable();
     actual_end_screen_cycle(false,false,false);actual_end_screen_cycle(true,false,false);
     summary_single_column_order_and_save_overlay();
@@ -607,4 +702,6 @@ int main(int argc,char** argv) {
     actual_end_screen_cycle(true,false,true);
     App::UiText::set_language(language);
     std::cerr<<"post_game_statistics_test: metrics, settlement, undo, catalog, scrolling, replay/network/local screens OK\n";
+    return 0;
 }
+} // namespace TetrTests::post_game_statistics_test

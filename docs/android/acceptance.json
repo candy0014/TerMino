@@ -1,0 +1,1767 @@
+{
+  "updated": "2026-10-22",
+  "status": "installable-preview; physical-device acceptance pending",
+  "artifact_retention": {
+    "date": "2026-10-22",
+    "status": "obsolete generated artifacts removed after verification",
+    "current_package_retained": "dist/android/TerMino-android-preview.apk",
+    "screenshots": "Current temporary offscreen and emulator crops reviewed and deleted; no screenshot gallery retained.",
+    "raw_logs": "Historical cleanup remains recorded; current UI build/test/smoke summaries and logs are retained in latest_logs.",
+    "preserved": "Structured acceptance results, source snapshots, rollback patches, personal data and the current APK with checksum/audit.",
+    "build_cache": "Android/Gradle and normal desktop build caches regenerated for this revision; APK remains the Android deliverable.",
+    "cleanup_manifest": "build-migration-backups/project-cleanup-20261022/manifest.json"
+  },
+  "package": {
+    "sha256": "1b68447a1eab8067955d4e8606f9022f1b450dd4622e0fe0d669abe78c542bea",
+    "bytes": 35812065,
+    "native_alignment": {
+      "lib/arm64-v8a/libmain.so": 16384,
+      "lib/arm64-v8a/libSDL3.so": 16384,
+      "lib/arm64-v8a/libc++_shared.so": 16384,
+      "lib/x86_64/libmain.so": 16384,
+      "lib/x86_64/libSDL3.so": 16384,
+      "lib/x86_64/libc++_shared.so": 16384
+    },
+    "min_sdk": 26,
+    "target_sdk": 35,
+    "signature": "local Android debug key (preview)",
+    "device_validation": "Separate from this static package audit",
+    "path": "dist/android/TerMino-android-preview.apk",
+    "certificate_sha256": "f2b5d14f5f6c735ff0eaa11557f6a1f26fb4a5ee8d4ad080b10d2b1d484ede3f",
+    "previous_recorded_certificate_sha256": "e59aa7f81ec39b8c963cfbf41991779c312d41bd7b15d2fad0ff0131afeda11a",
+    "compatible_with_previous_preview_signature": false,
+    "previous_preview_sha256": "918092a2cec83c783e4ad6adfaae1a728070950d445e3e702eb11c363b2c855d",
+    "in_place_upgrade": "Emulator update from the immediately preceding f2b5d14f…ede3f preview passed; older e59aa7f8…a11a certificate still requires its unavailable private key.",
+    "default_libraries": {
+      "maps.txt": {
+        "sha256": "f93b828b8b1caf997f99c9d9ed2559a2f27d7207ce992037c21ee650da94c01c",
+        "records": 24
+      },
+      "presets.txt": {
+        "sha256": "a7baf1313d99dce120433781b26947b546f2367bae599856f24f86ba8b5d179c",
+        "records": 4
+      }
+    },
+    "immediately_preceding_preview_sha256": "af0fb812f415f4ffbc087d3ace30a5e415733a122cef022ea87cb78399af9677",
+    "compatible_with_immediately_preceding_preview_signature": true
+  },
+  "toolchain": {
+    "jdk": "17.0.20.1",
+    "gradle": "8.12",
+    "agp": "8.7.3",
+    "sdk": 35,
+    "build_tools": "35.0.0",
+    "ndk": "28.2.13676358",
+    "cmake": "3.22.1",
+    "sdl": "3.4.18",
+    "freetype": "2.14.1"
+  },
+  "desktop": {
+    "host": "native Linux x86_64 / Manjaro",
+    "normal_build": "./compile.sh --frontend both; build/tetr + build/tetr_gl succeeded",
+    "full_ctest": {
+      "passed": 178,
+      "total": 178,
+      "seconds": 235.31,
+      "stage": "Full run before final room Retry availability correction"
+    },
+    "later_targeted_ctest": [
+      "mobile_controls (rail, reference, property/inline editor)",
+      "graphical_input (fractional scroll, drag threshold, stale page, render queue)",
+      "graphical_application (81.52 seconds, shared application coverage)"
+    ],
+    "offscreen_smoke": "Current build/tetr_gl OPENGL_SMOKE_OK; hidden offscreen display and isolated data; see latest_logs/desktop-smoke.log",
+    "terminal_graphics_dependencies": "Current ldd build/tetr: no SDL/OpenGL/FreeType",
+    "layout_regressions": {
+      "passed": 19,
+      "total": 19,
+      "logs": [
+        "final-frontend-tests.log",
+        "menu-tests.log",
+        "graphical-tests.log",
+        "layout-storage-tests.log"
+      ]
+    },
+    "final_input_regressions": {
+      "passed": 5,
+      "total": 5,
+      "log": "keyboard-final-tests.log",
+      "cases": [
+        "mobile_controls",
+        "graphical_application",
+        "graphical_input",
+        "graphical_ui_interaction",
+        "architecture_boundary"
+      ]
+    },
+    "left_rail_regressions": {
+      "passed": 4,
+      "total": 4,
+      "cases": [
+        "mobile_controls",
+        "graphical_input",
+        "graphical_ui_interaction",
+        "architecture_boundary"
+      ],
+      "log": "tests.log"
+    },
+    "readability_regressions": {
+      "passed": 11,
+      "total": 11,
+      "cases": [
+        "mobile_controls",
+        "graphical_scene",
+        "graphical_application",
+        "graphical_input",
+        "frontend_handling",
+        "room_replay_graphical",
+        "graphical_ui_interaction",
+        "local_versus_init",
+        "network_rooms",
+        "multiplayer_rooms",
+        "architecture_boundary"
+      ],
+      "log": "tests.log",
+      "final_followup": {
+        "passed": 4,
+        "total": 4,
+        "cases": [
+          "mobile_controls",
+          "graphical_scene",
+          "graphical_ui_interaction",
+          "architecture_boundary"
+        ],
+        "log": "final-tests.log"
+      }
+    },
+    "historical_layout_evidence_note": "Earlier named layout suites remain historical. direct_controls_20261022 records this revision: full 178/178 followed by final 5/5 after the room Retry availability correction.",
+    "small_text_scroll_regressions": {
+      "passed": 7,
+      "total": 7,
+      "cases": [
+        "frontend_ui",
+        "mobile_controls",
+        "graphical_scene",
+        "graphical_input",
+        "graphical_ui_interaction",
+        "post_game_statistics",
+        "architecture_boundary"
+      ],
+      "log": "shipping-tests.log"
+    },
+    "floating_touch_regressions": {
+      "passed": 7,
+      "total": 7,
+      "log": "shipping-tests.log"
+    },
+    "direct_controls_regressions": {
+      "passed": 5,
+      "total": 5,
+      "seconds": 83.41,
+      "cases": [
+        "graphical_application",
+        "graphical_ui_interaction",
+        "room_replay_graphical",
+        "mobile_controls",
+        "architecture_boundary"
+      ]
+    }
+  },
+  "offscreen_graphics": {
+    "hidden": true,
+    "passed": 9,
+    "total": 9,
+    "checks": [
+      {
+        "mode": "mobile-overlay",
+        "size": [
+          2340,
+          1080
+        ],
+        "passed": true
+      },
+      {
+        "mode": "mobile-layout",
+        "size": [
+          2340,
+          1080
+        ],
+        "passed": true
+      },
+      {
+        "mode": "mobile-results",
+        "size": [
+          2340,
+          1080
+        ],
+        "passed": true
+      },
+      {
+        "mode": "mobile-overlay",
+        "size": [
+          1280,
+          720
+        ],
+        "passed": true
+      },
+      {
+        "mode": "mobile-layout",
+        "size": [
+          1280,
+          720
+        ],
+        "passed": true
+      },
+      {
+        "mode": "mobile-results",
+        "size": [
+          1280,
+          720
+        ],
+        "passed": true
+      },
+      {
+        "mode": "mobile-overlay",
+        "size": [
+          1024,
+          768
+        ],
+        "passed": true
+      },
+      {
+        "mode": "mobile-layout",
+        "size": [
+          1024,
+          768
+        ],
+        "passed": true
+      },
+      {
+        "mode": "mobile-results",
+        "size": [
+          1024,
+          768
+        ],
+        "passed": true
+      }
+    ],
+    "floating_rail": "frozen scene pixels outside rail identical at all three sizes"
+  },
+  "android_runtime": {
+    "kind": "headless Android 15 / API 35 x86_64 emulator; not a physical device",
+    "serial": "emulator-5586",
+    "read_only_avd": true,
+    "display": [
+      2340,
+      1080
+    ],
+    "renderer": "Google SwiftShader GLES",
+    "installed_sha256": "af0fb812f415f4ffbc087d3ace30a5e415733a122cef022ea87cb78399af9677",
+    "installed_base_matches_deliverable": true,
+    "current_apk_checks": [
+      "Local-versus touch hard drops finish the round",
+      "Bottom statistics entry opens while rail is collapsed",
+      "Player 2 card directly selects player 2"
+    ],
+    "earlier_ui_checks_same_local_behavior": [
+      "Configured-disabled actions render gray; disabled Left does not move active piece while enabled Right does",
+      "Undo touch returns pieces from 1 to 0",
+      "Root settings item and value labels enlarged",
+      "Single-window settings Switch target changes Player 1 to Player 2 to Both",
+      "Editor rail scrolls while finger held, release retains position and activates no command",
+      "Statistics tabs, metric rows and clear cells select/highlight directly",
+      "Replay-save input rail contains Back and Confirm only"
+    ],
+    "previous_ui_apk_sha256": "8a7bc0afaf8b6fe93c4c0b306ea2d1d81b4debcc7820cdaad21074bc5e43fec7",
+    "intervening_android_ui_change": "Allow Retry for an alive room fighter, matching the existing keyboard command; no local-versus or solo behavior change",
+    "crash_buffer_bytes": 0,
+    "physical_device": "pending",
+    "screenshots": "Temporary crops reviewed and deleted",
+    "emulator_stopped": true,
+    "certificate_sha256": "f2b5d14f5f6c735ff0eaa11557f6a1f26fb4a5ee8d4ad080b10d2b1d484ede3f",
+    "signature_matches_previous_record": false
+  },
+  "data_and_publication": {
+    "desktop_personal_data": "176 files rehashed unchanged; no additions/deletions; not reset or packaged; Android uses owned emulator/private fixtures",
+    "android_test_data": "Only the owned -read-only test AVD; no physical device or user app was changed",
+    "native_windows_acceptance": "unchanged; pending",
+    "github_or_store_publication": false,
+    "signing_limitation": "Current debug certificate differs from the previous recorded certificate. Matching old key unavailable; no user app uninstalled/reset."
+  },
+  "logs": "build-migration-backups/android-implementation-20261021/ (ignored local evidence)",
+  "source_audit": {
+    "changed_source_snapshot": "passed; no personal data or build products",
+    "whole_repository": "pre-existing deleted tests/sdl_input_test.cpp remains missing; not restored by this task"
+  },
+  "fixes_20261022": {
+    "bots": [
+      {
+        "mode": 1,
+        "returncode": 0,
+        "seconds": 7.6,
+        "last": [
+          "SAMPLE 37 status=2 pieces=5 time=7.3729 room=0"
+        ]
+      },
+      {
+        "mode": 2,
+        "returncode": 0,
+        "seconds": 2.51,
+        "last": [
+          "SAMPLE 11 status=2 pieces=5 time=2.19157 room=0 "
+        ]
+      },
+      {
+        "mode": 3,
+        "returncode": 0,
+        "seconds": 2.48,
+        "last": [
+          "SAMPLE 11 status=2 pieces=5 time=2.1883 room=0 "
+        ]
+      },
+      {
+        "mode": 4,
+        "returncode": 0,
+        "seconds": 2.46,
+        "last": [
+          "SAMPLE 11 status=2 pieces=5 time=2.18006 room=0 "
+        ]
+      },
+      {
+        "mode": 5,
+        "returncode": 0,
+        "seconds": 2.46,
+        "last": [
+          "SAMPLE 11 status=2 pieces=5 time=2.17936 room=0 "
+        ]
+      },
+      {
+        "mode": 6,
+        "returncode": 0,
+        "seconds": 2.46,
+        "last": [
+          "SAMPLE 11 status=2 pieces=5 time=2.17803 room=0 "
+        ]
+      },
+      {
+        "mode": 7,
+        "returncode": 0,
+        "seconds": 2.46,
+        "last": [
+          "SAMPLE 11 status=2 pieces=5 time=2.17093 room=0 "
+        ]
+      },
+      {
+        "mode": 8,
+        "returncode": 0,
+        "seconds": 2.46,
+        "last": [
+          "SAMPLE 11 status=2 pieces=5 time=2.1818 room=0 "
+        ]
+      },
+      {
+        "mode": 9,
+        "returncode": 0,
+        "seconds": 2.47,
+        "last": [
+          "SAMPLE 11 status=2 pieces=5 time=2.18001 room=0 "
+        ]
+      },
+      {
+        "mode": 10,
+        "returncode": 0,
+        "seconds": 2.47,
+        "last": [
+          "SAMPLE 11 status=2 pieces=5 time=2.19231 room=0 "
+        ]
+      }
+    ],
+    "asynchronous_bots": [
+      {
+        "mode": 1,
+        "game": 3,
+        "handling": false,
+        "returncode": 0,
+        "seconds": 5.94,
+        "last": [
+          "SAMPLE 28 status=2 pieces=5 time=5.59689 room=0 "
+        ]
+      },
+      {
+        "mode": 9,
+        "game": 3,
+        "handling": false,
+        "returncode": 0,
+        "seconds": 2.47,
+        "last": [
+          "SAMPLE 11 status=2 pieces=5 time=2.18447 room=0 "
+        ]
+      },
+      {
+        "mode": 10,
+        "game": 3,
+        "handling": false,
+        "returncode": 0,
+        "seconds": 2.48,
+        "last": [
+          "SAMPLE 11 status=2 pieces=5 time=2.19428 room=0 "
+        ]
+      },
+      {
+        "mode": 9,
+        "game": 0,
+        "handling": true,
+        "returncode": 0,
+        "seconds": 2.28,
+        "last": [
+          "SAMPLE 10 status=2 pieces=5 time=1.97945 room=0 "
+        ]
+      }
+    ],
+    "continuous_touch_scroll": {
+      "finger_still_down_during_capture": true,
+      "before": "fae35aa9f049ca96469f1d26fe470d2f021c832560cea21e1bd6abb98d8e9e16",
+      "during": "6d34e3f78035265ced1b18c99ad94eb5ba84c0ee9260f7ad0fc4dab23f5bf8ba",
+      "after": "29d8770182940dabf47b460e09750f371fcef4d829fb95c0072aa293aa4b61d6"
+    },
+    "fractional_menu_render": "hidden checks passed, including 2340x1080 / 1280x720 / 1024x768 scale transforms",
+    "native_code_optimization": "-O2 for both ABIs, including debug APK",
+    "recovery": "before source snapshot + android-fixes.patch in latest_logs"
+  },
+  "latest_logs": "build-migration-backups/three-platform-replay-fix-20261022",
+  "previous_android_runtime": {
+    "stage": "Before the phone-layout/icon revision",
+    "apk_sha256": "7f962a250e6e945486477e49bc8a90432f58296ddfe13a5bbbd28fab00beaec8",
+    "logs": "build-migration-backups/android-fixes-20261022/ (ignored local evidence)",
+    "kind": "Android SDK emulator; not a physical device",
+    "serial": "emulator-5580",
+    "api": 35,
+    "abi": "x86_64",
+    "renderer": "GLES 3.0 / Google SwiftShader",
+    "display": [
+      2340,
+      1080
+    ],
+    "window": "-no-window -no-audio -no-boot-anim -gpu swiftshader",
+    "verified": [
+      "APK install and cold launch",
+      "desktop-style landscape menus and continuous finger-follow menu/ancestor scrolling",
+      "virtual button editor; numerical opacity edit through Android IME",
+      "layout saved and loaded after process restart",
+      "gameplay hard drop and rotation",
+      "pause and resume",
+      "Home -> Surface destroyed -> resume, same paused board/time",
+      "post-game replay-save field confirmed from fixed rail",
+      "Android DocumentsUI content URI export and restored landscape GL surface",
+      "map editor and transformed palette/field visible beside fixed rail",
+      "map paint/save produced private .tetr/maps.txt",
+      "Finger held for three seconds: before/during/after list images differ before finger release",
+      "Virtual editor references the actual gameplay board geometry; property panel initially collapsed",
+      "Reference default: circular left rotations/Hold, right movement/drops, upper Pause/Retry; existing layouts preserved",
+      "Editor property opacity 0.4 -> 0.32 accepted by the Android soft keyboard Done action",
+      "Menu inline width 10 -> 11 and username ANDROID-FIX; keyboard confirm and persisted values checked",
+      "Single-line IME_ACTION_DONE requested; text-field retap keeps editing and reopens the keyboard",
+      "Gameplay rail initially hidden; toggle reveals Settings/Exit; finished/menu rail contracts checked",
+      "while1 actual GLES gameplay advanced through 15 pieces without crashing",
+      "Native Android harness using APK libraries: all ten Bot modes each placed at least five pieces",
+      "Quick Play asynchronous search (while1, ChatGPT, ColdClear) and ChatGPT handling simulation each placed five pieces",
+      "Android default pthread stack measured 1034224 bytes; gameplay wrapper stack measured 16795632 bytes"
+    ],
+    "export": {
+      "provider": "AOSP DocumentsUI / Downloads",
+      "bytes": 4801,
+      "sha256": "875725f13a66095e261399a26661f1b1ebad2dc42d13ce482bb7301639767c1e",
+      "matches_private_saved_replay": true
+    },
+    "not_established": [
+      "physical ARM64 performance/input/audio",
+      "16 KB runtime device behavior",
+      "all document-provider import/export variations",
+      "Chinese IME composition on a phone",
+      "Android UDP/WSS mixed-client end-to-end rooms and spectators",
+      "full Android local-versus touch acceptance",
+      "battery, heat and long bot sessions"
+    ]
+  },
+  "previous_offscreen_graphics": {
+    "hidden": true,
+    "cases": "scaled menu scroll metrics, fractional row clipping and hit targets; transformed map palette/field",
+    "sizes": [
+      [
+        2340,
+        1080
+      ],
+      [
+        1280,
+        720
+      ],
+      [
+        1024,
+        768
+      ]
+    ],
+    "result": "MOBILE_PANE_OK for all sizes"
+  },
+  "layout_20261022": {
+    "full_window": true,
+    "uniform_scaling": true,
+    "editor_field": [
+      10,
+      20
+    ],
+    "property_panel": "Opposite selected button center, with identical draw/input bounds",
+    "gameplay_icons": "Drawn vectors; no action text; Pause bars and Retry return arrow",
+    "keyboard_editor_isolation": "Physical Return accepts field without reactivating underlying settings row",
+    "desktop_regressions": {
+      "passed": 19,
+      "total": 19,
+      "logs": [
+        "final-frontend-tests.log",
+        "menu-tests.log",
+        "graphical-tests.log",
+        "layout-storage-tests.log"
+      ]
+    },
+    "final_input_regressions": {
+      "passed": 5,
+      "total": 5,
+      "log": "keyboard-final-tests.log",
+      "cases": [
+        "mobile_controls",
+        "graphical_application",
+        "graphical_input",
+        "graphical_ui_interaction",
+        "architecture_boundary"
+      ]
+    },
+    "screenshots": "dist/android/screenshots-layout-20261022/index.html",
+    "screenshot_count": 7,
+    "desktop_personal_files_unchanged": 176,
+    "emulator_stopped": true,
+    "recovery": "before/ + this-turn.patch in latest_logs",
+    "previous_preview_signature_compatible": false,
+    "runtime_verification": [
+      "Final APK install, cold launch and installed base.apk SHA256 matches deliverable",
+      "Full-window, normally proportioned home/settings menus",
+      "Ten drawn gameplay icons; Pause uses two bars and Retry uses a circular return arrow with play marker",
+      "Centered empty 10x20 editor well; no live pieces, Hold, Next or statistics",
+      "Right-side MoveLeft selection shows properties on left; left-side clockwise selection shows properties on right",
+      "Dragging selected MoveLeft from right to left across midpoint automatically moves properties from left to right",
+      "Left property panel opacity 0.4 -> 0.32, confirmed by physical Return without resetting draft",
+      "Right property panel opacity 0.32 -> 0.36, confirmed by Android IME Done",
+      "Moved center and opacity saved into isolated private config; force-stop/cold launch shows same values",
+      "Only owned emulator layout restored to defaults after persistence check",
+      "Touch movement, clockwise rotation, Hold and four hard-drop placements",
+      "Pause freezes timer (crop hash unchanged); resume then Retry resets four pieces and score to zero",
+      "Map palette selection and touch strokes paint orange L and cyan I cells with square proportions"
+    ],
+    "runtime_apk_sha256": "4788340afcf37c9f6dd1770f16672eaa902d767bd0ce1a52f0e1de60df63a462",
+    "screenshot_retention": "removed after review during 2026-10-22 project cleanup; counts and verification outcomes retained"
+  },
+  "left_rail_20261022": {
+    "screen_left_pixel": 0,
+    "touch_check_x": 20,
+    "regressions": {
+      "passed": 4,
+      "total": 4,
+      "cases": [
+        "mobile_controls",
+        "graphical_input",
+        "graphical_ui_interaction",
+        "architecture_boundary"
+      ],
+      "log": "tests.log"
+    },
+    "screenshots": "dist/android/screenshots-layout-20261022/index.html",
+    "screenshot_count": 7,
+    "same_signing_certificate_as_previous_apk": true,
+    "desktop_personal_files_unchanged": 176,
+    "recovery": "before/ + this-turn.patch in latest_logs",
+    "screenshot_retention": "removed after review during 2026-10-22 project cleanup; counts and verification outcomes retained"
+  },
+  "readability_play_20261022": {
+    "updated": "2026-10-22",
+    "apk_sha256": "2e193d173b3182774d357c8184776e2372651c51831917a962645f47da78b231",
+    "content_scale": 1.15,
+    "fixed_and_virtual_button_size_unchanged": true,
+    "default_hidden_rail": [
+      "gameplay/countdown/pause",
+      "finished board",
+      "virtual-button editor"
+    ],
+    "toggle": "upper-left; fixed rail remains flush x=0",
+    "regressions": {
+      "passed": 11,
+      "total": 11,
+      "cases": [
+        "mobile_controls",
+        "graphical_scene",
+        "graphical_application",
+        "graphical_input",
+        "frontend_handling",
+        "room_replay_graphical",
+        "graphical_ui_interaction",
+        "local_versus_init",
+        "network_rooms",
+        "multiplayer_rooms",
+        "architecture_boundary"
+      ],
+      "log": "tests.log",
+      "final_followup": {
+        "passed": 4,
+        "total": 4,
+        "cases": [
+          "mobile_controls",
+          "graphical_scene",
+          "graphical_ui_interaction",
+          "architecture_boundary"
+        ],
+        "log": "final-tests.log"
+      }
+    },
+    "native_gameplay_cases": [
+      {
+        "case": [
+          "bot",
+          "1"
+        ],
+        "returncode": 0,
+        "seconds": 28.18,
+        "log": "final-native-bot-1.log",
+        "output": "BOT_OK mode=1 game=0 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "2"
+        ],
+        "returncode": 0,
+        "seconds": 4.2,
+        "log": "final-native-bot-2.log",
+        "output": "BOT_OK mode=2 game=0 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "3"
+        ],
+        "returncode": 0,
+        "seconds": 3.53,
+        "log": "final-native-bot-3.log",
+        "output": "BOT_OK mode=3 game=0 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "4"
+        ],
+        "returncode": 0,
+        "seconds": 3.19,
+        "log": "final-native-bot-4.log",
+        "output": "BOT_OK mode=4 game=0 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "5"
+        ],
+        "returncode": 0,
+        "seconds": 3.47,
+        "log": "final-native-bot-5.log",
+        "output": "BOT_OK mode=5 game=0 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "6"
+        ],
+        "returncode": 0,
+        "seconds": 3.5,
+        "log": "final-native-bot-6.log",
+        "output": "BOT_OK mode=6 game=0 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "7"
+        ],
+        "returncode": 0,
+        "seconds": 3.25,
+        "log": "final-native-bot-7.log",
+        "output": "BOT_OK mode=7 game=0 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "8"
+        ],
+        "returncode": 0,
+        "seconds": 3.41,
+        "log": "final-native-bot-8.log",
+        "output": "BOT_OK mode=8 game=0 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "9"
+        ],
+        "returncode": 0,
+        "seconds": 3.56,
+        "log": "final-native-bot-9.log",
+        "output": "BOT_OK mode=9 game=0 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "10"
+        ],
+        "returncode": 0,
+        "seconds": 4.08,
+        "log": "final-native-bot-10.log",
+        "output": "BOT_OK mode=10 game=0 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "1",
+          "3",
+          "0"
+        ],
+        "returncode": 0,
+        "seconds": 23.28,
+        "log": "final-native-bot-1-3-0.log",
+        "output": "BOT_OK mode=1 game=3 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "9",
+          "3",
+          "0"
+        ],
+        "returncode": 0,
+        "seconds": 3.13,
+        "log": "final-native-bot-9-3-0.log",
+        "output": "BOT_OK mode=9 game=3 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "10",
+          "3",
+          "0"
+        ],
+        "returncode": 0,
+        "seconds": 3.27,
+        "log": "final-native-bot-10-3-0.log",
+        "output": "BOT_OK mode=10 game=3 handling=0 pieces=5"
+      },
+      {
+        "case": [
+          "bot",
+          "9",
+          "0",
+          "1"
+        ],
+        "returncode": 0,
+        "seconds": 2.74,
+        "log": "final-native-bot-9-0-1.log",
+        "output": "BOT_OK mode=9 game=0 handling=1 pieces=5"
+      },
+      {
+        "case": [
+          "local"
+        ],
+        "returncode": 0,
+        "seconds": 11.12,
+        "log": "final-native-local.log",
+        "output": "LOCAL_FINISHED p1=13 p2=3\nLOCAL_OK independent_players=1 finished=1 rematch=1 round=2"
+      },
+      {
+        "case": [
+          "local-bots"
+        ],
+        "autoplay_width": 40,
+        "returncode": 0,
+        "seconds": 7.86,
+        "log": "final-native-local-bots.log",
+        "output": "LOCAL_BOTS_OK p1=8 p2=8"
+      }
+    ],
+    "native_online": {
+      "udp": {
+        "endpoint": "10.0.2.2:31985",
+        "results": [
+          {
+            "role": "host",
+            "exit_code": 0,
+            "log": "ROOM_JOINED role=host\nSTART_REQUEST key=28\nONLINE_SYNC role=host round=0 own=5 peer=5\nONLINE_FINISHED role=host\nSTART_REQUEST key=28\nONLINE_SYNC role=host round=1 own=1 peer=1\nONLINE_OK role=host finish=1 rematch=1\n"
+          },
+          {
+            "role": "guest",
+            "exit_code": 0,
+            "log": "ROOM_JOINED role=guest\nONLINE_SYNC role=guest round=0 own=5 peer=5\nONLINE_FINISHED role=guest\nONLINE_SYNC role=guest round=1 own=1 peer=1\nONLINE_OK role=guest finish=1 rematch=1\n"
+          }
+        ]
+      },
+      "ws": {
+        "endpoint": "ws://10.0.2.2:31986/ws",
+        "results": [
+          {
+            "role": "host",
+            "exit_code": 0,
+            "log": "ROOM_JOINED role=host\nSTART_REQUEST key=28\nONLINE_SYNC role=host round=0 own=5 peer=5\nONLINE_FINISHED role=host\nSTART_REQUEST key=28\nONLINE_SYNC role=host round=1 own=1 peer=1\nONLINE_OK role=host finish=1 rematch=1\n"
+          },
+          {
+            "role": "guest",
+            "exit_code": 0,
+            "log": "ROOM_JOINED role=guest\nONLINE_SYNC role=guest round=0 own=5 peer=5\nONLINE_FINISHED role=guest\nONLINE_SYNC role=guest round=1 own=1 peer=1\nONLINE_OK role=guest finish=1 rematch=1\n"
+          }
+        ]
+      },
+      "wss": {
+        "endpoint": "wss://10.0.2.2:31987/ws",
+        "results": [
+          {
+            "role": "host",
+            "exit_code": 0,
+            "log": "ROOM_JOINED role=host\nSTART_REQUEST key=28\nONLINE_SYNC role=host round=0 own=5 peer=5\nONLINE_FINISHED role=host\nSTART_REQUEST key=28\nONLINE_SYNC role=host round=1 own=1 peer=1\nONLINE_OK role=host finish=1 rematch=1\n"
+          },
+          {
+            "role": "guest",
+            "exit_code": 0,
+            "log": "ROOM_JOINED role=guest\nONLINE_SYNC role=guest round=0 own=5 peer=5\nONLINE_FINISHED role=guest\nONLINE_SYNC role=guest round=1 own=1 peer=1\nONLINE_OK role=guest finish=1 rematch=1\n"
+          }
+        ]
+      }
+    },
+    "wss_trust": "Isolated test CA only in harness working directory; certificate chain/hostname verification enabled; shipped root bundle unchanged",
+    "actual_gles": [
+      "Final APK adb install -r; installed base.apk SHA256 equals deliverable and previous preview certificate matches",
+      "Content and fonts enlarged about 15%; fixed rail and ten virtual gameplay button sizes unchanged",
+      "Gameplay, finished-board and virtual-button-editor rails default hidden; upper-left toggle opens; entering finished/editor resets open state",
+      "Settings, text, map and statistics retain page controls even with a retained Finished session status",
+      "Centered 10x20 empty editor well; opposite-side property panels; native home/settings/map/editor screenshots from final APK",
+      "Actual GLES ColdClear game: 16 pieces, four cleared lines; default hidden rail",
+      "Actual GLES local-versus touch fixture: P1 four drops, P2 three independent drops; native harness additionally verifies finish and rematch",
+      "Final APK native libraries: all ten bots place five pieces; Quick Play while1/ChatGPT/ColdClear and ChatGPT handling simulation pass",
+      "Native local bots while1 vs ColdClear with search width 40: eight pieces each",
+      "Android-native host/guest pairs over isolated UDP, WebSocket and verified WSS: five placements each synchronized, finish, retry, second-round placement synchronized",
+      "Actual APK UI joins GLQA via UDP room lobby, plays against Android-native WSS host: five drops each, finish, and rematch with one synchronized drop each",
+      "Ten essential native screenshots; no temporary capture galleries retained"
+    ],
+    "runtime": {
+      "crash_buffer_bytes": 0,
+      "api": "35",
+      "abi": "x86_64",
+      "release": "15",
+      "first_emulator_exit": "SwiftShader emulator exited during concurrent native/GLES workload; final validations repeated after reboot",
+      "final_memory_mib": 2048,
+      "emulator_stopped": true,
+      "owned_relay_and_gateways_stopped": true
+    },
+    "screenshots": "dist/android/screenshots-layout-20261022/index.html",
+    "screenshot_count": 10,
+    "desktop_personal_files_unchanged": 176,
+    "recovery": "before/ + this-turn.patch in latest_logs",
+    "physical_device": "pending; no physical ARM64 or native Windows claim",
+    "offscreen_graphics": {
+      "hidden": true,
+      "sizes": [
+        [
+          2340,
+          1080
+        ],
+        [
+          1280,
+          720
+        ],
+        [
+          1024,
+          768
+        ]
+      ],
+      "cases": "Content scale 1.15, clipped/reflowed menu geometry and transformed touch hits, centered empty 10x20 square-cell well, opposite-side property panels; three hidden sizes",
+      "result": "MOBILE_LAYOUT_OK for all sizes"
+    },
+    "screenshot_retention": "removed after review during 2026-10-22 project cleanup; counts and verification outcomes retained"
+  },
+  "previous_readability_android_runtime": {
+    "kind": "Android SDK emulator; not a physical device",
+    "serial": "emulator-5584",
+    "api": 35,
+    "release": "15",
+    "abi": "x86_64",
+    "renderer": "GLES 3.0 / Google SwiftShader",
+    "display": [
+      2340,
+      1080
+    ],
+    "window": "-no-window -no-audio -no-boot-anim -gpu swiftshader -no-snapshot; final restart memory 2048 MiB",
+    "installed_apk_sha256": "2e193d173b3182774d357c8184776e2372651c51831917a962645f47da78b231",
+    "crash_buffer_bytes": 0,
+    "verified": [
+      "Final APK adb install -r; installed base.apk SHA256 equals deliverable and previous preview certificate matches",
+      "Content and fonts enlarged about 15%; fixed rail and ten virtual gameplay button sizes unchanged",
+      "Gameplay, finished-board and virtual-button-editor rails default hidden; upper-left toggle opens; entering finished/editor resets open state",
+      "Settings, text, map and statistics retain page controls even with a retained Finished session status",
+      "Centered 10x20 empty editor well; opposite-side property panels; native home/settings/map/editor screenshots from final APK",
+      "Actual GLES ColdClear game: 16 pieces, four cleared lines; default hidden rail",
+      "Actual GLES local-versus touch fixture: P1 four drops, P2 three independent drops; native harness additionally verifies finish and rematch",
+      "Final APK native libraries: all ten bots place five pieces; Quick Play while1/ChatGPT/ColdClear and ChatGPT handling simulation pass",
+      "Native local bots while1 vs ColdClear with search width 40: eight pieces each",
+      "Android-native host/guest pairs over isolated UDP, WebSocket and verified WSS: five placements each synchronized, finish, retry, second-round placement synchronized",
+      "Actual APK UI joins GLQA via UDP room lobby, plays against Android-native WSS host: five drops each, finish, and rematch with one synchronized drop each",
+      "Ten essential native screenshots; no temporary capture galleries retained"
+    ],
+    "not_established": [
+      "physical ARM64 phone/tablet graphics, input, IME, performance and audio",
+      "16 KB runtime device behavior",
+      "all document-provider import/export variations",
+      "real-network mixed-platform rooms and spectator/lifecycle device acceptance",
+      "physical-device full local-versus touch/lifecycle acceptance",
+      "long bot sessions, battery and heat",
+      "native Windows graphics/input"
+    ],
+    "emulator_stopped": true,
+    "qa_environment_note": "SwiftShader emulator exited during concurrent native/GLES workload; final validations repeated after reboot; this is not evidence of sustained emulator/phone stability"
+  },
+  "small_text_scroll_20261022": {
+    "updated": "2026-10-22",
+    "apk": {
+      "path": "dist/android/TerMino-android-preview.apk",
+      "sha256": "0159e102da680d1f0f941106c35e21ac0de9025fd18e441834cf71d9ee30446b",
+      "bytes": 35741826,
+      "native_alignment": {
+        "lib/arm64-v8a/libmain.so": 16384,
+        "lib/arm64-v8a/libSDL3.so": 16384,
+        "lib/arm64-v8a/libc++_shared.so": 16384,
+        "lib/x86_64/libmain.so": 16384,
+        "lib/x86_64/libSDL3.so": 16384,
+        "lib/x86_64/libc++_shared.so": 16384
+      },
+      "min_sdk": 26,
+      "target_sdk": 35,
+      "signature": "local Android debug key (preview)",
+      "device_validation": "Separate from this static package audit",
+      "certificate_sha256": "e59aa7f81ec39b8c963cfbf41991779c312d41bd7b15d2fad0ff0131afeda11a",
+      "installed_base_apk_matches": true,
+      "previous_preview_signature_compatible": true
+    },
+    "readability": {
+      "minimum_reference_text_size": 20,
+      "content_scale": 1.15,
+      "fixed_rail_and_virtual_button_sizes_unchanged": true,
+      "game_hud_labels_and_values_spaced_separately": true
+    },
+    "scrolling": {
+      "summary": "fractional continuous vertical offset",
+      "clears": "fractional continuous vertical and horizontal offsets",
+      "release": "retains offset without whole-row snap",
+      "touch_axis": "direction locks after drag threshold",
+      "keyboard": "arrows and PgUp/PgDn reveal selected item",
+      "native_held_finger_checks": [
+        {
+          "page": "summary",
+          "crop": [
+            280,
+            490,
+            2190,
+            875
+          ],
+          "before": "4ec3ef655799afe84e684bf4d2181907114f3b51bb9909695d06647889981633",
+          "events": [
+            [
+              "DOWN",
+              1450,
+              730
+            ],
+            [
+              "MOVE",
+              1450,
+              712
+            ],
+            [
+              "MOVE",
+              1450,
+              694
+            ]
+          ],
+          "DOWN730": "4ec3ef655799afe84e684bf4d2181907114f3b51bb9909695d06647889981633",
+          "MOVE712": "d40081b4a5a347a31db2d59fa6a45e1802df00b4d467700bd6ec133237fe4bc4",
+          "MOVE694": "cb91e126d004f4ec0e2a30c4eeec7c4095df8a5b808ab4d4d27de1280592240f",
+          "held_at_end": "cb91e126d004f4ec0e2a30c4eeec7c4095df8a5b808ab4d4d27de1280592240f",
+          "after_up": "cb91e126d004f4ec0e2a30c4eeec7c4095df8a5b808ab4d4d27de1280592240f",
+          "continuous": true,
+          "no_release_snap": true
+        },
+        {
+          "page": "clears",
+          "crop": [
+            280,
+            443,
+            670,
+            748
+          ],
+          "before": "ce4faefb5c2891e4cc01d741eda5e4b8f677fdb665635634ca2a592e0ace165b",
+          "events": [
+            [
+              "DOWN",
+              550,
+              670
+            ],
+            [
+              "MOVE",
+              550,
+              652
+            ],
+            [
+              "MOVE",
+              550,
+              634
+            ]
+          ],
+          "DOWN670": "ce4faefb5c2891e4cc01d741eda5e4b8f677fdb665635634ca2a592e0ace165b",
+          "MOVE652": "7a79956788dbb113b4893ed13170283d47da3299634d39c9867104b05def88bc",
+          "MOVE634": "8b2a2c7e4882e0c72500918b4728374aa16e118221aa415608f0f56567bda5fd",
+          "held_at_end": "8b2a2c7e4882e0c72500918b4728374aa16e118221aa415608f0f56567bda5fd",
+          "after_up": "8b2a2c7e4882e0c72500918b4728374aa16e118221aa415608f0f56567bda5fd",
+          "continuous": true,
+          "no_release_snap": true
+        }
+      ]
+    },
+    "targeted_ctest": {
+      "passed": 7,
+      "total": 7,
+      "cases": [
+        "frontend_ui",
+        "mobile_controls",
+        "graphical_scene",
+        "graphical_input",
+        "graphical_ui_interaction",
+        "post_game_statistics",
+        "architecture_boundary"
+      ],
+      "log": "shipping-tests.log"
+    },
+    "offscreen_graphics": {
+      "hidden": true,
+      "sizes": [
+        [
+          2340,
+          1080
+        ],
+        [
+          1280,
+          720
+        ],
+        [
+          1024,
+          768
+        ]
+      ],
+      "results": "MOBILE_RESULTS_SCROLL_OK at all sizes",
+      "layout": "MOBILE_LAYOUT_OK at all sizes",
+      "coverage": [
+        "fractional offsets",
+        "redraw retains position",
+        "keyboard focus visibility",
+        "stale page rejection",
+        "horizontal columns",
+        "full uint64 selected counts",
+        "font floor",
+        "gameplay HUD"
+      ]
+    },
+    "desktop": {
+      "normal_build": "./compile.sh --frontend both",
+      "clients": [
+        "build/tetr",
+        "build/tetr_gl"
+      ],
+      "build_passed": true,
+      "hidden_smoke": "OPENGL_SMOKE_OK",
+      "terminal_has_no_SDL_OpenGL_FreeType_dependencies": true
+    },
+    "android_runtime": {
+      "kind": "headless Android SDK emulator, not a physical device",
+      "api": "35",
+      "release": "15",
+      "abi": "x86_64",
+      "display": "Physical size: 1080x2340",
+      "renderer": "Google SwiftShader GLES",
+      "final_apk_installed": true,
+      "crash_buffer_bytes": 0,
+      "emulator_stopped": true,
+      "stopped_pid": 528848
+    },
+    "personal_data": {
+      "unchanged": true,
+      "files": 176,
+      "added": [],
+      "removed": [],
+      "changed": []
+    },
+    "screenshots": {
+      "count": 6,
+      "directory": "dist/android/screenshots-text-scroll-20261022/",
+      "source": "actual final APK on Android emulator",
+      "temporary_hidden_captures_deleted": true
+    },
+    "coverage_limits": [
+      "physical ARM64 phone/tablet not checked",
+      "16 KB runtime device not checked",
+      "native Windows graphics/input pending",
+      "historical bot/local/network checks are associated with the previous APK; not rerun in this revision"
+    ],
+    "publication": false,
+    "evidence": "build-migration-backups/android-small-text-scroll-20261022/",
+    "screenshot_retention": "removed after review during 2026-10-22 project cleanup; counts and verification outcomes retained"
+  },
+  "previous_small_text_scroll_android_runtime": {
+    "kind": "Android SDK emulator; not a physical device",
+    "serial": "emulator-5584",
+    "api": 35,
+    "release": "15",
+    "abi": "x86_64",
+    "renderer": "GLES / Google SwiftShader",
+    "display": [
+      2340,
+      1080
+    ],
+    "window": "-no-window -no-audio -no-boot-anim -gpu swiftshader -no-snapshot; memory 2048 MiB",
+    "installed_apk_sha256": "0159e102da680d1f0f941106c35e21ac0de9025fd18e441834cf71d9ee30446b",
+    "crash_buffer_bytes": 0,
+    "verified": [
+      "Final APK adb install -r; installed base.apk SHA256 equals deliverable; previous preview certificate matches",
+      "Actual GLES settings and gameplay screenshots with minimum reference text size 20; HUD labels and values separated",
+      "Actual ColdClear 40-piece-goal game completed; results overview and clear statistics opened",
+      "Overview: two 18-pixel MOVE events while finger remains down each change content; held and after-UP content hashes equal",
+      "Clear statistics: two 18-pixel MOVE events while finger remains down each change content; held and after-UP content hashes equal",
+      "Six essential native screenshots retained; temporary hidden captures deleted"
+    ],
+    "not_established": [
+      "physical ARM64 phone/tablet graphics, input, IME, performance and audio",
+      "16 KB runtime device behavior",
+      "all document-provider import/export variations",
+      "real-network mixed-platform rooms and spectator/lifecycle device acceptance",
+      "physical-device full local-versus touch/lifecycle acceptance",
+      "long bot sessions, battery and heat",
+      "native Windows graphics/input"
+    ],
+    "emulator_stopped": true,
+    "historical_gameplay_evidence": "readability_play_20261022 and previous_readability_android_runtime; previous APK 2e193d173b3182774d357c8184776e2372651c51831917a962645f47da78b231"
+  },
+  "floating_touch_20261022": {
+    "updated": "2026-10-22",
+    "apk": {
+      "sha256": "918092a2cec83c783e4ad6adfaae1a728070950d445e3e702eb11c363b2c855d",
+      "bytes": 35772482,
+      "native_alignment": {
+        "lib/arm64-v8a/libmain.so": 16384,
+        "lib/arm64-v8a/libSDL3.so": 16384,
+        "lib/arm64-v8a/libc++_shared.so": 16384,
+        "lib/x86_64/libmain.so": 16384,
+        "lib/x86_64/libSDL3.so": 16384,
+        "lib/x86_64/libc++_shared.so": 16384
+      },
+      "min_sdk": 26,
+      "target_sdk": 35,
+      "signature": "local Android debug key (preview)",
+      "device_validation": "Separate from this static package audit",
+      "installed_base_apk_matches": true,
+      "certificate_sha256": "e59aa7f81ec39b8c963cfbf41991779c312d41bd7b15d2fad0ff0131afeda11a",
+      "previous_certificate_sha256": "e59aa7f81ec39b8c963cfbf41991779c312d41bd7b15d2fad0ff0131afeda11a",
+      "signature_compatible": true
+    },
+    "changes": {
+      "duel_layout": "full centered scene with symmetric margins; floating rail does not reserve width",
+      "zoom": "layout bounds use inverse content zoom, including narrow landscape screens",
+      "editor": "same MoveLeft button dragged right-to-left and back; panel reappears on the opposite side after release",
+      "android_hints": "desktop key legends removed; display hints adapted while IDs, values and commands remain shared"
+    },
+    "targeted_ctest": {
+      "passed": 7,
+      "total": 7,
+      "log": "shipping-tests.log"
+    },
+    "offscreen_graphics": {
+      "hidden": true,
+      "passed": 9,
+      "total": 9,
+      "checks": [
+        {
+          "mode": "mobile-overlay",
+          "size": [
+            2340,
+            1080
+          ],
+          "passed": true
+        },
+        {
+          "mode": "mobile-layout",
+          "size": [
+            2340,
+            1080
+          ],
+          "passed": true
+        },
+        {
+          "mode": "mobile-results",
+          "size": [
+            2340,
+            1080
+          ],
+          "passed": true
+        },
+        {
+          "mode": "mobile-overlay",
+          "size": [
+            1280,
+            720
+          ],
+          "passed": true
+        },
+        {
+          "mode": "mobile-layout",
+          "size": [
+            1280,
+            720
+          ],
+          "passed": true
+        },
+        {
+          "mode": "mobile-results",
+          "size": [
+            1280,
+            720
+          ],
+          "passed": true
+        },
+        {
+          "mode": "mobile-overlay",
+          "size": [
+            1024,
+            768
+          ],
+          "passed": true
+        },
+        {
+          "mode": "mobile-layout",
+          "size": [
+            1024,
+            768
+          ],
+          "passed": true
+        },
+        {
+          "mode": "mobile-results",
+          "size": [
+            1024,
+            768
+          ],
+          "passed": true
+        }
+      ],
+      "floating_rail": "frozen scene pixels outside rail identical at all three sizes"
+    },
+    "native_overlay": {
+      "visible_field_floor_spans_closed": [
+        [
+          580,
+          938,
+          1035
+        ],
+        [
+          1473,
+          1830,
+          1035
+        ]
+      ],
+      "visible_field_floor_spans_open": [
+        [
+          580,
+          938,
+          1035
+        ],
+        [
+          1473,
+          1830,
+          1035
+        ]
+      ],
+      "field_positions_and_widths_unchanged": true,
+      "whole_frame_comparison": "not used: both bots continue playing between captures",
+      "frozen_full_scene_comparison": "offscreen MOBILE_OVERLAY_OK at three sizes"
+    },
+    "native_editor_drags": [
+      {
+        "start": [
+          1567,
+          800
+        ],
+        "end": [
+          1050,
+          720
+        ],
+        "screenshot": "06-editor-moved-left.png",
+        "panel_side": "right",
+        "passed": true
+      },
+      {
+        "start": [
+          1050,
+          720
+        ],
+        "end": [
+          1570,
+          800
+        ],
+        "screenshot": "07-editor-moved-back.png",
+        "panel_side": "left",
+        "passed": true
+      }
+    ],
+    "native_screenshots": {
+      "count": 7,
+      "directory": "dist/android/screenshots-floating-touch-20261022/",
+      "source": "actual final APK; gameplay uses ColdClear and while1"
+    },
+    "android_runtime": {
+      "kind": "Android SDK emulator; not a physical device",
+      "serial": "emulator-5584",
+      "api": 35,
+      "release": "15",
+      "abi": "x86_64",
+      "display": [
+        2340,
+        1080
+      ],
+      "renderer": "Google SwiftShader GLES",
+      "hidden": true,
+      "installed_apk_sha256": "918092a2cec83c783e4ad6adfaae1a728070950d445e3e702eb11c363b2c855d",
+      "crash_buffer_bytes": 0,
+      "emulator_stopped": true,
+      "qa_environment_note": "First owned SwiftShader emulator process exited with invalid color-buffer diagnostics during host build/graphics checks. Final APK checks were repeated after restarting it and completing those checks. Long-session stability remains unestablished."
+    },
+    "desktop": {
+      "normal_build": "./compile.sh --frontend both",
+      "build_passed": true,
+      "clients": [
+        "build/tetr",
+        "build/tetr_gl"
+      ],
+      "offscreen_smoke": "OPENGL_SMOKE_OK",
+      "terminal_graphics_dependencies": false
+    },
+    "personal_data": {
+      "files": 176,
+      "unchanged": true
+    },
+    "coverage_limits": [
+      "physical ARM64 phone/tablet pending",
+      "16 KB runtime device pending",
+      "native Windows graphics/input pending",
+      "historical full bot and network checks were not rerun for this presentation revision"
+    ],
+    "temporary_hidden_captures_deleted": true,
+    "publication": false,
+    "evidence": "build-migration-backups/android-floating-touch-20261022/",
+    "screenshot_retention": "removed after review during 2026-10-22 project cleanup; counts and verification outcomes retained"
+  },
+  "previous_direct_controls_android_runtime": {
+    "kind": "Android SDK emulator; not a physical device",
+    "serial": "emulator-5584",
+    "api": 35,
+    "release": "15",
+    "abi": "x86_64",
+    "display": [
+      2340,
+      1080
+    ],
+    "renderer": "Google SwiftShader GLES",
+    "hidden": true,
+    "installed_apk_sha256": "918092a2cec83c783e4ad6adfaae1a728070950d445e3e702eb11c363b2c855d",
+    "crash_buffer_bytes": 0,
+    "emulator_stopped": true,
+    "qa_environment_note": "First owned SwiftShader emulator process exited with invalid color-buffer diagnostics during host build/graphics checks. Final APK checks were repeated after restarting it and completing those checks. Long-session stability remains unestablished.",
+    "verified": [
+      "Final APK installed; base.apk SHA256 and prior preview certificate match",
+      "Actual ColdClear/while1 local-versus frames retain field positions and widths while rail opens",
+      "Same MoveLeft button dragged right-to-left and back; sampled property panel switches right then left",
+      "Android root and bot settings no longer show desktop keyboard prompts",
+      "Seven essential final-APK native screenshots retained"
+    ],
+    "not_established": [
+      "physical ARM64 phone/tablet graphics, input, IME, performance and audio",
+      "16 KB runtime device behavior",
+      "all document-provider import/export variations",
+      "real-network mixed-platform rooms and spectator/lifecycle device acceptance",
+      "physical-device full local-versus touch/lifecycle acceptance",
+      "long bot sessions, battery and heat",
+      "native Windows graphics/input"
+    ],
+    "historical_bot_and_network_evidence": "readability_play_20261022; not rerun as a full suite in this revision"
+  },
+  "direct_controls_20261022": {
+    "scope": "Android UI only; desktop appearance and keyboard semantics retained",
+    "changes": [
+      "Android settings row height 44 -> 62 logical units, labels 18 -> 23 and values 17 -> 22; inline editors and hit targets resized together",
+      "Eleventh configurable action Undo with default button and drawn icon; existing custom layouts preserved",
+      "Disabled actions projected from shared restrictions, pause/undo helpers and player state; grey buttons reject touch and release captured fingers",
+      "Fixed rail contains current-page keyboard commands; continuous vertical scrolling replaces More pagination",
+      "Finished-board Statistics / Save replay / Export replay tools visible with collapsed rail",
+      "Android result tabs, player cards, metrics, challenge rows and clear cells/totals directly select and highlight; keyboard selection retained",
+      "Single-window settings Switch target invokes Tab; room focus controls available only when applicable"
+    ],
+    "ctest": {
+      "full": {
+        "passed": 178,
+        "total": 178,
+        "seconds": 235.31,
+        "stage": "Full run before final room Retry availability correction"
+      },
+      "final_targeted": {
+        "passed": 5,
+        "total": 5,
+        "seconds": 83.41,
+        "cases": [
+          "graphical_application",
+          "graphical_ui_interaction",
+          "room_replay_graphical",
+          "mobile_controls",
+          "architecture_boundary"
+        ]
+      }
+    },
+    "offscreen": {
+      "sizes": [
+        [
+          2340,
+          1080
+        ],
+        [
+          1280,
+          720
+        ],
+        [
+          1024,
+          768
+        ]
+      ],
+      "checks": [
+        "MOBILE_DIRECT_OK at all three sizes",
+        "Enlarged settings fractional scrolling and scaled hit bounds",
+        "Statistics page/player/metric/challenge/cell hits, clipped fractional rows and totals",
+        "Stale-page isolation and desktop statistics interaction unchanged",
+        "OPENGL_SMOKE_OK with isolated data and hidden window"
+      ],
+      "screenshots": "temporary images reviewed and removed"
+    },
+    "native": {
+      "kind": "headless Android 15 / API 35 x86_64 emulator; not a physical device",
+      "serial": "emulator-5586",
+      "read_only_avd": true,
+      "display": [
+        2340,
+        1080
+      ],
+      "renderer": "Google SwiftShader GLES",
+      "installed_sha256": "af0fb812f415f4ffbc087d3ace30a5e415733a122cef022ea87cb78399af9677",
+      "installed_base_matches_deliverable": true,
+      "current_apk_checks": [
+        "Local-versus touch hard drops finish the round",
+        "Bottom statistics entry opens while rail is collapsed",
+        "Player 2 card directly selects player 2"
+      ],
+      "earlier_ui_checks_same_local_behavior": [
+        "Configured-disabled actions render gray; disabled Left does not move active piece while enabled Right does",
+        "Undo touch returns pieces from 1 to 0",
+        "Root settings item and value labels enlarged",
+        "Single-window settings Switch target changes Player 1 to Player 2 to Both",
+        "Editor rail scrolls while finger held, release retains position and activates no command",
+        "Statistics tabs, metric rows and clear cells select/highlight directly",
+        "Replay-save input rail contains Back and Confirm only"
+      ],
+      "previous_ui_apk_sha256": "8a7bc0afaf8b6fe93c4c0b306ea2d1d81b4debcc7820cdaad21074bc5e43fec7",
+      "intervening_android_ui_change": "Allow Retry for an alive room fighter, matching the existing keyboard command; no local-versus or solo behavior change",
+      "crash_buffer_bytes": 0,
+      "physical_device": "pending",
+      "screenshots": "Temporary crops reviewed and deleted",
+      "emulator_stopped": true,
+      "certificate_sha256": "f2b5d14f5f6c735ff0eaa11557f6a1f26fb4a5ee8d4ad080b10d2b1d484ede3f",
+      "signature_matches_previous_record": false
+    },
+    "signing": {
+      "current_certificate_sha256": "f2b5d14f5f6c735ff0eaa11557f6a1f26fb4a5ee8d4ad080b10d2b1d484ede3f",
+      "previous_recorded_certificate_sha256": "e59aa7f81ec39b8c963cfbf41991779c312d41bd7b15d2fad0ff0131afeda11a",
+      "matches_previous_record": false,
+      "coverage": "Clean/emulator installation verified; in-place update from the previously recorded certificate is pending the matching private keystore",
+      "existing_user_data": "No uninstall, reset or changes to user installation/data",
+      "matching_keystore": "No matching keystore found; user confirmed no separately saved copy"
+    },
+    "source_snapshot": "build-migration-backups/android-direct-controls-20261022/before",
+    "rollback_patch": "build-migration-backups/android-direct-controls-20261022/this-turn.patch"
+  },
+  "local_versus_replay_pause_fix_20261022": {
+    "scope": "single-window local-versus replay; shared terminal/OpenGL/Android fix",
+    "reproduced_before_fix": {
+      "desktop_keyboard_peer_advanced_seconds": 0.177274,
+      "android_virtual_pause_peer_advanced_seconds": 0.185559,
+      "own_player_advanced_seconds": 0
+    },
+    "shared_fix": [
+      "one playback timeline for both streams",
+      "one serialized input reader accepts either player pause binding",
+      "shared pause/resume, speed and seek state"
+    ],
+    "linux_regression": {
+      "initial_full_ctest": {
+        "passed": 177,
+        "total": 178,
+        "seconds": 713.97,
+        "failed": "board_view_steady_8 under concurrent build load"
+      },
+      "isolated_retest": {
+        "passed": 1,
+        "total": 1,
+        "seconds": 2.7
+      },
+      "final_targeted": {
+        "passed": 6,
+        "total": 6,
+        "seconds": 1.73
+      },
+      "packaging_python_tests": {
+        "passed": 20,
+        "total": 20
+      }
+    },
+    "native_android": {
+      "maps.txt": {
+        "seed_sha256": "f93b828b8b1caf997f99c9d9ed2559a2f27d7207ce992037c21ee650da94c01c",
+        "matches_approved_default": true,
+        "existing_library_preserved_after_restart": true
+      },
+      "presets.txt": {
+        "seed_sha256": "a7baf1313d99dce120433781b26947b546f2367bae599856f24f86ba8b5d179c",
+        "matches_approved_default": true,
+        "existing_library_preserved_after_restart": true
+      },
+      "crash_buffer_bytes": 0,
+      "installed_sha256": "1b68447a1eab8067955d4e8606f9022f1b450dd4622e0fe0d669abe78c542bea",
+      "expected_sha256": "1b68447a1eab8067955d4e8606f9022f1b450dd4622e0fe0d669abe78c542bea"
+    },
+    "final_apk_pause": {
+      "paused": {
+        "left_board": true,
+        "right_board": true,
+        "left_time": true,
+        "right_time": true
+      },
+      "resumed": {
+        "left_board": true,
+        "right_board": true,
+        "left_time": true,
+        "right_time": true
+      },
+      "crash_buffer_bytes": 0
+    },
+    "default_libraries": {
+      "maps.txt": {
+        "source": ".tetr/maps.txt",
+        "sha256": "f93b828b8b1caf997f99c9d9ed2559a2f27d7207ce992037c21ee650da94c01c",
+        "bytes": 18165
+      },
+      "presets.txt": {
+        "source": ".tetr/presets.txt",
+        "sha256": "a7baf1313d99dce120433781b26947b546f2367bae599856f24f86ba8b5d179c",
+        "bytes": 792
+      }
+    },
+    "desktop_library_parse": "both archives parsed by the shared C++ reader: 24 maps, 4 presets; chess preset includes player 2 fields",
+    "existing_desktop_personal_data": {
+      "unchanged": true,
+      "files": 176
+    },
+    "windows": "MinGW GNU 16.2.0 + Wine package checks; native Windows graphics/input pending",
+    "physical_android_device": "pending",
+    "emulator_stopped": true,
+    "screenshots": "temporary verification crops reviewed and deleted",
+    "package": {
+      "sha256": "1b68447a1eab8067955d4e8606f9022f1b450dd4622e0fe0d669abe78c542bea",
+      "bytes": 35812065,
+      "native_alignment": {
+        "lib/arm64-v8a/libmain.so": 16384,
+        "lib/arm64-v8a/libSDL3.so": 16384,
+        "lib/arm64-v8a/libc++_shared.so": 16384,
+        "lib/x86_64/libmain.so": 16384,
+        "lib/x86_64/libSDL3.so": 16384,
+        "lib/x86_64/libc++_shared.so": 16384
+      },
+      "default_libraries": {
+        "maps.txt": {
+          "sha256": "f93b828b8b1caf997f99c9d9ed2559a2f27d7207ce992037c21ee650da94c01c",
+          "records": 24
+        },
+        "presets.txt": {
+          "sha256": "a7baf1313d99dce120433781b26947b546f2367bae599856f24f86ba8b5d179c",
+          "records": 4
+        }
+      },
+      "min_sdk": 26,
+      "target_sdk": 35,
+      "signature": "local Android debug key (preview)",
+      "device_validation": "Separate from this static package audit"
+    },
+    "source": {
+      "source_commit": "55aee99762a0c84e8b7df5688788d6ab81d466a9",
+      "source_dirty": true,
+      "output": "dist/TerMino-20261022-replay-fix",
+      "windows_validation": "MinGW GNU 16.2.0 build and Wine package audit passed; native Windows graphics/input pending",
+      "linux_validation": "native Linux x86_64",
+      "android_validation": "Android 15 x86_64 headless emulator; physical device pending",
+      "compiled_source_sha256": "3ac68b2d46719bc1f1ebaf3fe6eeb58512be52664438a2e11018ff20b7cbadf1"
+    },
+    "artifacts": {
+      "TerMino-Windows-x64-bundle-20261022-replay-fix.zip": {
+        "bytes": 29435702,
+        "sha256": "b0335a77490b63938467072aa70ba1cdc327d5945da9ddd37c8860085b6145e9"
+      },
+      "TerMino-Linux-x64-bundle-20261022-replay-fix.tar.gz": {
+        "bytes": 31796442,
+        "sha256": "1ca1e75477f3ae3c599fa330420aefeb0dbaedf561844effd855aa3298dbd4cd"
+      },
+      "TerMino-Android-20261022-replay-fix.apk": {
+        "bytes": 35812065,
+        "sha256": "1b68447a1eab8067955d4e8606f9022f1b450dd4622e0fe0d669abe78c542bea"
+      }
+    },
+    "desktop_packages": {
+      "packages": [
+        {
+          "platform": "Linux",
+          "architecture": "x64",
+          "frontend": "bundle",
+          "source_commit": "55aee99762a0c84e8b7df5688788d6ab81d466a9",
+          "source_dirty": true,
+          "version": "20261022-replay-fix",
+          "archive": "TerMino-Linux-x64-bundle-20261022-replay-fix.tar.gz",
+          "sha256": "1ca1e75477f3ae3c599fa330420aefeb0dbaedf561844effd855aa3298dbd4cd",
+          "files": "passed",
+          "native_acceptance": "pending physical IME/DPI/device/GPU checks",
+          "execution": {
+            "terminal": {
+              "help": "passed",
+              "launcher": "passed",
+              "game_and_replay": "passed",
+              "ft7": "passed",
+              "server": "passed"
+            },
+            "opengl": {
+              "help": "passed",
+              "launcher": "passed",
+              "hidden_opengl": "not run; graphics environment unavailable"
+            }
+          },
+          "environment": "native"
+        },
+        {
+          "platform": "Windows",
+          "architecture": "x64",
+          "frontend": "bundle",
+          "source_commit": "55aee99762a0c84e8b7df5688788d6ab81d466a9",
+          "source_dirty": true,
+          "version": "20261022-replay-fix",
+          "archive": "TerMino-Windows-x64-bundle-20261022-replay-fix.zip",
+          "sha256": "b0335a77490b63938467072aa70ba1cdc327d5945da9ddd37c8860085b6145e9",
+          "files": "passed",
+          "native_acceptance": "pending physical IME/DPI/device/GPU checks",
+          "execution": {
+            "terminal": {
+              "help": "passed",
+              "launcher": "passed",
+              "game_and_replay": "passed",
+              "ft7": "passed",
+              "server": "passed"
+            },
+            "opengl": {
+              "help": "passed",
+              "launcher": "passed",
+              "hidden_opengl": "not run; graphics environment unavailable"
+            }
+          },
+          "environment": "Wine"
+        }
+      ],
+      "cross_frontends": [],
+      "github_published": false
+    },
+    "linux_graphics_and_cross_frontend": {
+      "packages": [
+        {
+          "platform": "Linux",
+          "architecture": "x64",
+          "frontend": "bundle",
+          "source_commit": "55aee99762a0c84e8b7df5688788d6ab81d466a9",
+          "source_dirty": true,
+          "version": "20261022-replay-fix",
+          "archive": "TerMino-Linux-x64-bundle-20261022-replay-fix.tar.gz",
+          "sha256": "1ca1e75477f3ae3c599fa330420aefeb0dbaedf561844effd855aa3298dbd4cd",
+          "files": "passed",
+          "native_acceptance": "pending physical IME/DPI/device/GPU checks",
+          "execution": {
+            "terminal": {
+              "help": "passed",
+              "launcher": "passed",
+              "game_and_replay": "passed",
+              "ft7": "passed",
+              "server": "passed"
+            },
+            "opengl": {
+              "help": "passed",
+              "launcher": "passed",
+              "hidden_opengl": "passed",
+              "window_settings": "passed"
+            }
+          },
+          "environment": "native"
+        },
+        {
+          "platform": "Windows",
+          "architecture": "x64",
+          "frontend": "bundle",
+          "source_commit": "55aee99762a0c84e8b7df5688788d6ab81d466a9",
+          "source_dirty": true,
+          "version": "20261022-replay-fix",
+          "archive": "TerMino-Windows-x64-bundle-20261022-replay-fix.zip",
+          "sha256": "b0335a77490b63938467072aa70ba1cdc327d5945da9ddd37c8860085b6145e9",
+          "files": "passed",
+          "native_acceptance": "pending physical IME/DPI/device/GPU checks",
+          "execution": "not run on this host"
+        }
+      ],
+      "cross_frontends": [
+        {
+          "platform": "Linux",
+          "environment": "native",
+          "terminal_to_opengl_replay": "passed",
+          "concurrent_graphical_windows_and_crash_release": "passed"
+        }
+      ],
+      "github_published": false
+    },
+    "archive_default_libraries": {
+      "TerMino-Windows-x64-bundle-20261022-replay-fix.zip": {
+        "maps.txt": "f93b828b8b1caf997f99c9d9ed2559a2f27d7207ce992037c21ee650da94c01c",
+        "presets.txt": "a7baf1313d99dce120433781b26947b546f2367bae599856f24f86ba8b5d179c"
+      },
+      "TerMino-Linux-x64-bundle-20261022-replay-fix.tar.gz": {
+        "maps.txt": "f93b828b8b1caf997f99c9d9ed2559a2f27d7207ce992037c21ee650da94c01c",
+        "presets.txt": "a7baf1313d99dce120433781b26947b546f2367bae599856f24f86ba8b5d179c"
+      }
+    },
+    "package_auditor_startup_fix": "Wait until synchronous startup/profile initialization completes before comparing a settings owner with another graphical window."
+  }
+}

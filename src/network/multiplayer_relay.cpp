@@ -14,6 +14,7 @@ RoomMatchPhase RelayServer::match_phase(const Room& room) const {
 }
 
 void RelayServer::begin_multiplayer_match(Room& room) {
+    finish_room_replay(room,Replay::RoundEndReason::HostStopped);
     if(room.matchEpoch && (room.phase==Phase::Playing || room.phase==Phase::RoundAck)) {
         Room::ResultHistory history;history.epoch=room.matchEpoch;
         history.results=std::move(room.results);history.uploads=std::move(room.resultUploads);
@@ -189,6 +190,7 @@ void RelayServer::select_targets(Room& room,bool force) {
     for(const int slot:slots)
         send_wire(room,slot,"!target;"+std::to_string(room.matchEpoch)+";"+std::to_string(room.target[slot]));
     room.lastTargetSelection=now;
+    record_room_replay_targets(room);
 }
 
 void RelayServer::acknowledge_delivery(Room& room,int source,int sequence) {
@@ -205,6 +207,7 @@ void RelayServer::eliminate_player(Room& room,int slot) {
     if(!room.multiplayer || slot<0 || slot>=room.capacity || !room.alive[slot]) return;
     room.alive[slot]=false;
     room.killer[slot]=room.lastAttacker[slot];
+    record_room_replay_elimination(room,slot);
     const std::string notice="!knockout;"+std::to_string(room.matchEpoch)+";"+
         std::to_string(slot)+";"+std::to_string(room.lastAttacker[slot]);
     for(int peer=0;peer<room.capacity;++peer) send_wire(room,peer,notice);
@@ -216,6 +219,7 @@ void RelayServer::eliminate_player(Room& room,int slot) {
     if(remaining<2 && room.phase==Phase::Countdown) {reset_round(room);}
     else if(remaining<2 && room.phase==Phase::Playing) {
         room.winner=remaining?winner:-1;room.phase=Phase::RoundAck;room.ready={};room.startRequested=false;room.lastPublish={};room.phaseStarted=Clock::now();
+        finish_room_replay(room);
     }
     for(const auto& key:room.players) if(!key.empty()) {publish_room(clients_.at(key).room,room);break;}
 }
@@ -365,7 +369,9 @@ void RelayServer::advance_scheduled_countdown(Room& room,const std::string& name
     const auto now=Clock::now();
     if(!room.multiplayer || room.phase!=Phase::Countdown || !room.scheduledCountdown ||
        now<room.phaseStarted+std::chrono::seconds(3)) return;
+    const auto started=room.phaseStarted+std::chrono::seconds(3);
     room.phase=Phase::Playing;room.active={};room.lastPublish={};room.phaseStarted=now;
+    start_room_replay(room,started);
     publish_multiplayer_phase(room);publish_room(name,room);
 }
 
@@ -405,6 +411,11 @@ void RelayServer::handle_multiplayer_gameplay(Room& room,Client& client,int slot
     // whether the very first gameplay packet belongs to Countdown or Playing.
     advance_scheduled_countdown(room,client.room);
     const std::string& wire=envelope->second;
+    if(decode_field_visibility(wire)) {
+        if(room.entered[slot])for(int peer=0;peer<room.capacity;++peer)
+            if(peer!=slot && room.entered[peer])send_wire(room,peer,encode_player_packet({room.matchEpoch,slot,wire}));
+        return;
+    }
     if(wire.rfind("!view-v1;",0)==0 || wire.rfind("!view-v2;",0)==0) {
         const auto views=decode_board_views(wire);if(!views || !room.entered[slot])return;
         const bool changed=!room.boardViews[slot] || encode_board_views(*room.boardViews[slot])!=wire;
@@ -475,7 +486,7 @@ void RelayServer::handle_multiplayer_gameplay(Room& room,Client& client,int slot
         if(room.participating[slot]) room.active[slot]=true;
         bool all=true;
         for(int peer=0;peer<room.capacity;++peer) if(room.alive[peer] && !room.active[peer]) all=false;
-        if(all) {room.phase=Phase::Playing;room.active={};room.phaseStarted=Clock::now();publish_multiplayer_phase(room);publish_room(client.room,room);}
+        if(all) {room.phase=Phase::Playing;room.active={};room.phaseStarted=Clock::now();start_room_replay(room);publish_multiplayer_phase(room);publish_room(client.room,room);}
         return;
     }
     if(room.phase!=Phase::Playing) return;

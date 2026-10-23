@@ -14,6 +14,7 @@ struct AutoplayCarryState {
     Piece::Pose pose{};
     Runtime::RotationRecord lastRotation{};
     Piece::Type selectedPieceType=Piece::Type::none();
+    int fieldShift=0;
 };
 struct AutoplayStepResult { Rules::PlayResult signal=Rules::PlayResult::ContinueFrame; bool hardDrop=false; bool locked=false; };
 AutoplayStepResult run_handling_autoplay_step(Runtime::GameContext& context,Runtime::Playfield& field,

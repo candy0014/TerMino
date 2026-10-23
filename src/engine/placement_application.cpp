@@ -33,7 +33,8 @@ PlacementApplicationBeginResult begin_placement_application(
             attack,
             linesCleared,
             clearedGarbageLines,
-            out.state.qpBlighted
+            out.state.qpBlighted,
+            config.qpMods.legacyRules ? 1.0 : config.qpBlightedRoundingRoll
         });
         attack = doubleHole.attack;
         out.state.qpBlighted = doubleHole.blighted;

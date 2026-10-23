@@ -5,6 +5,7 @@
 #include <numeric>
 #include <vector>
 
+namespace TetrTests::bot_chatgpt_local_pattern_test {
 namespace B = Bot_chatgpt;
 
 constexpr std::array<int, 8> dx{{-1, 0, 1, -1, 1, -1, 0, 1}};
@@ -83,7 +84,7 @@ static void check(const m_tetris::TetrisMap& map) {
     assert(B::local_pattern_value(mirror, weights) == expected);
 }
 
-int main() {
+int run(int argc,char** argv) {
     const auto codes = canonical_codes();
     assert(codes.size() == 144);
     for (unsigned code = 0; code < 256; ++code) {
@@ -137,4 +138,6 @@ int main() {
         check(map);
     }
     std::cout << "144-class local patterns: encoding, reference, boundaries, symmetry and lookup passed\n";
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_local_pattern_test

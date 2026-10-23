@@ -9,6 +9,7 @@
 #include <type_traits>
 #include <vector>
 
+namespace TetrTests::time_semantics_test {
 namespace {
 
 constexpr Runtime::TimePoint tp(double value) {
@@ -67,9 +68,11 @@ void playback_uses_absolute_start_plus_duration() {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     arithmetic_is_semantic();
     periodic_thresholds_keep_legacy_behavior();
     replay_timestamp_is_elapsed_duration();
     playback_uses_absolute_start_plus_duration();
+    return 0;
 }
+} // namespace TetrTests::time_semantics_test

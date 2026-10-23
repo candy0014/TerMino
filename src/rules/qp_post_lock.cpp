@@ -25,13 +25,15 @@ bool qp_has_clear_operation(const QPClearOperation& op) {
 DoubleHoleReverseResult apply_double_hole_reverse(const DoubleHoleReverseInput& in) {
     DoubleHoleReverseResult out{in.attack, in.blighted};
     if (!in.enabled) return out;
+    const double boosted=in.attack*1.75;
+    const int rounded=static_cast<int>(boosted)+(in.roundingRoll<boosted-std::floor(boosted));
     if (in.clearedGarbageLines == 0) {
         if (in.linesCleared && out.blighted) {
             out.blighted = false;
-            out.attack = out.attack * 7 / 4 + 1;
+            out.attack = rounded + 1;
         } else out.attack = 0;
     } else {
-        if (out.blighted) out.attack = out.attack * 7 / 4;
+        if (out.blighted) out.attack = rounded;
         out.blighted = true;
     }
     return out;

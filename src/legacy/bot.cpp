@@ -104,6 +104,13 @@ namespace Bot{
 		legacyNext.reserve(next.size());
 		const auto logicalType=[&](Piece::Type type) {
 			if (!type.valid()) return -1;
+			// Event bags can contain several geometries of the same family,
+			// including an ordinary piece followed by its event counterpart.
+			// A per-family alias would let a later NEXT/HOLD overwrite the
+			// current piece. The QP rule search accepts their actual catalog IDs.
+			if(context.config.garbage.mode==Runtime::GarbageMode::QuickPlay &&
+				(context.config.quickPlay.fool!=Runtime::FoolMode::Disabled || context.config.quickPlay.continuousCancellation))
+				return type.index();
 			const auto metadata=Piece::metadata(type);
 			const bool coldclearStandard = context.config.autoplay.mode==Runtime::AutoplayMode::ColdClear &&
 				Runtime::standard_rotation_system(metadata.rotationSystem);
@@ -201,7 +208,11 @@ namespace Bot{
 					--plannedStart.position.row;
 			}
 			Engine::MovementState origin;origin.pose=plannedStart;
-            if (Engine::search_autoplay_path(field,Piece::get_definition(selectedType),origin,answer,answerRotation,
+            const auto plannedPiece=Piece::get_definition(selectedType);
+            if(Runtime::current_gravity_interval(context).is_instant() && plannedPiece.can_place(origin.pose,field))
+                Engine::apply_presentation_instant_gravity(origin,
+                    [&](Piece::Pose pose){return plannedPiece.can_place(pose,field);});
+            if (Engine::search_autoplay_path(field,plannedPiece,origin,answer,answerRotation,
                 context.config.handling,context.config.movement,Runtime::current_gravity_interval(context),false,{},
                 Engine::autoplay_spin_rules(context.config))) return selectedType;
 		}

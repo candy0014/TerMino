@@ -10,10 +10,11 @@
 #include <vector>
 #include <optional>
 #include <map>
+#include <string>
 #include "tetr/config/user_config.h"
 #include "tetr/challenges/challenges.h"
 
-namespace Frontend { class TextInputSession; }
+namespace Frontend { class TextInputSession; class FileDialogService; }
 namespace Runtime { class GameContext; struct PlayerSessionState; }
 
 namespace App {
@@ -43,6 +44,7 @@ struct ReplayResumeRequest {
 struct ReplayPreviewRequest {std::string path;bool pending=true;};
 
 struct ApplicationState {
+    std::function<void()> virtualControlsEditor;
     // Startup option; applies to live Quick Play games throughout this run.
     bool qpContinuousCancellation = false;
     // Standalone tournament owns round progression; never persisted to settings.
@@ -68,12 +70,14 @@ struct ApplicationState {
     const auto& challenge_round(const Runtime::GameContext* context) const {return context==localPlayerTwoContext?playerTwoChallengeRound:challengeRound;}
     auto& challenge_observer(const Runtime::GameContext* context) {return context==localPlayerTwoContext?playerTwoChallengePlacementObserver:challengePlacementObserver;}
     Frontend::TextInputSession* textInputSession = nullptr;
+    Frontend::FileDialogService* fileDialogs = nullptr;
     // Optional UI endpoints. The session owner invokes these on its own thread;
     // frontends may copy a view or unwind to their menu, never share mutable state.
     std::function<void()> openSettings;
     std::function<void()> roundFinished;
     std::function<void()> beforeGame,gameReady;
     int startMenuSelection=0;
+    std::string startMenuNotice;
     Runtime::GameContext* primaryContext = nullptr;
     Runtime::GameContext* localPlayerTwoContext = nullptr;
     std::recursive_mutex terminalOutputMutex;

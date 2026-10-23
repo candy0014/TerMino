@@ -25,7 +25,9 @@
 #include <iostream>
 #include <regex>
 #include <sstream>
+#include <iomanip>
 
+namespace TetrTests::quick_play_rules_test {
 namespace {
 using Runtime::ModifierMode;
 using Runtime::AllSpinMode;
@@ -66,7 +68,7 @@ void delays_and_mods() {
 }
 
 void booster() {
-    Runtime::QuickPlayConfig c;
+    Runtime::QuickPlayConfig c;c.legacyRules=true;
     Runtime::QuickPlayProgress p;
     double level=10, altitude=0;
     p.experience=20;
@@ -76,7 +78,7 @@ void booster() {
     p={}; p.experience=20; altitude=100; c.expert=ModifierMode::Enabled;
     Rules::qp_advance_booster(p,level,altitude,2,c,1);
     close(p.experience,20-110.0/12);
-    p={}; p.experience=4; level=1; altitude=0; c={};
+    p={}; p.experience=4; level=1; altitude=0; c={}; c.legacyRules=true;
     Rules::qp_advance_booster(p,level,altitude,1,c,0.2);
     close(level,2); close(p.experience,0); close(p.decayProtection,4.8);
     assert(p.upgradeFatigue==1);
@@ -116,7 +118,7 @@ void booster() {
 
 void placement_rewards() {
     Runtime::QuickPlayProgress p;
-    Runtime::QuickPlayConfig c;
+    Runtime::QuickPlayConfig c;c.legacyRules=true;
     Rules::qp_reward_placement(p,4,0,8,2,2,false,0,c);
     close(p.experience,11.125); close(p.pendingAltitude,8);
     p={}; c.expert=ModifierMode::Enabled;
@@ -124,13 +126,13 @@ void placement_rewards() {
     close(p.experience,8.05);
     p={}; Rules::qp_reward_placement(p,4,49,0,8,1,false,0,c);
     close(p.pendingAltitude,0);
-    p={}; c={}; c.volatileMode=ModifierMode::Reverse;
+    p={}; c={}; c.legacyRules=true; c.volatileMode=ModifierMode::Reverse;
     Rules::qp_reward_placement(p,4,0,0,2,2,false,0,c);
     close(p.experience,2.05);
-    p={}; c={}; c.allSpin=AllSpinMode::Reverse;
+    p={}; c={}; c.legacyRules=true; c.allSpin=AllSpinMode::Reverse;
     Rules::qp_reward_placement(p,4,800,8,0,3,false,4,c);
     close(p.experience,1.05); close(p.pendingAltitude,8);
-    p={}; c={}; c.continuousCancellation=true; p.cancellation=200;
+    p={}; c={}; c.legacyRules=true; c.continuousCancellation=true; p.cancellation=200;
     Rules::qp_reward_placement(p,1,0,0,10,0,false,0,c);
     close(p.experience,10.05*0.05);
     p={}; p.cancellation=12;
@@ -174,7 +176,7 @@ void booster_idle_demotion() {
     close(p.decayProtection,0);
     assert(p.upgradeFatigue==0);
 
-    Rules::qp_reward_placement(p,level,altitude,1,0,0,false,0,c);
+    Rules::qp_reward_placement(p,level,altitude,2,0,0,false,0,c);
     Rules::qp_advance_booster(p,level,altitude,1,c,0.1);
     assert(level==10 && p.decayProtection>0); // Newly earned XP still upgrades normally.
 
@@ -301,7 +303,7 @@ void reception_and_fatigue() {
     cfg.elapsedGameTime=Duration::from_seconds(720); state={};
     assert(Rules::advance_frame_before_presentation(state,cfg,Duration::from_seconds(0),random).permanentGarbageLines==9);
     for (const auto expert:{ModifierMode::Disabled,ModifierMode::Reverse}) {
-        cfg.qpModExpert=cfg.qpMods.expert=expert;cfg.generateOpponentPressure=false;state={};
+        cfg.qpModExpert=cfg.qpMods.expert=expert;cfg.qpMods.legacyRules=true;cfg.generateOpponentPressure=false;state={};
         for (int wave=0;wave<3;++wave) {
             const int count=expert==ModifierMode::Reverse ? std::array<int,3>{3,5,12}[wave] : std::array<int,3>{2,3,5}[wave];
             for (int step=-1;step<=count*10;++step) {
@@ -403,10 +405,12 @@ void integration_and_display() {
         return p.type==Piece::Type::from_index(21);
     }));
     session.quickPlay.progress={};
+    session.quickPlay.progress.piecesSinceRelief=74;
     context.config.quickPlay.volatileMode=ModifierMode::Reverse;
     Engine::GarbageService::add_buffer(context,player,field.field,4);
     assert(player.garbage.buffer.front().line_count()==12);
     assert(session.quickPlay.progress.receiveProtection==4);
+    assert(session.quickPlay.progress.piecesSinceRelief==0);
     const auto records=Replay::decode_operation_stream(replay.data,0,1);
     assert(records.front().payload_as<Replay::AddBufferPayload>().resolvedLines==12);
     context.config.mode.replayMode=true;
@@ -554,15 +558,159 @@ void continuous_cancellation_switch() {
     }
     assert(Replay::decode_config_prefix("{{Model,3}}",decoded,prefix));
     assert(decoded.quickPlay.continuousCancellation); // Preserve older recordings' rules.
+    assert(decoded.quickPlay.legacyRules);
+    assert(Replay::decode_config_prefix(Replay::encode_config_prefix(recorded)+"}",decoded,prefix));
+    assert(!decoded.quickPlay.legacyRules);
+}
+
+void audited_rule_regressions() {
+    Runtime::QuickPlayConfig c;c.continuousCancellation=true;
+    Runtime::QuickPlayProgress p;p.cancellation=100;
+    for(int column:{0,1})Rules::qp_record_placement(p,c,4,0,false,false,0,column,0);
+    close(p.cancellation,94); // Two columns do not yet establish a third-column change.
+    Rules::qp_record_placement(p,c,4,0,false,false,0,0,0); // Refresh LRU order.
+    assert((p.quadColumns==std::array<int,2>({0,1})));
+    Rules::qp_record_placement(p,c,4,0,false,false,0,2,0);close(p.cancellation,84);
+    Rules::qp_record_placement(p,c,4,0,false,false,0,0,0);close(p.cancellation,81);
+    Rules::qp_record_placement(p,c,4,0,false,false,0,1,0);close(p.cancellation,74);
+    p={};Rules::qp_record_placement(p,c,1,1,true,false,3,0,8);close(p.cancellation,11);
+    p={};for(int i=0;i<150;++i)Rules::qp_record_placement(p,c,0,0,false,false,3,0,0);
+    close(p.cancellation,5); // One bump at piece 75, not every 75 pieces.
+    for(auto mode:{ModifierMode::Enabled,ModifierMode::Reverse}) {
+        c.volatileMode=mode;
+        close(Rules::qp_garbage_delay(c,1,50).seconds(),mode==ModifierMode::Reverse?2.5:5);
+    }
+    c={};c.expert=ModifierMode::Reverse;p={};p.stallMultiplier=1.5;
+    close(Rules::qp_receive_attack(4,0,0,1,c,p,540),8); // 1 + .5 fatigue + .5 stall.
+    c={};p={};
+    for(int floor=1;floor<=10;++floor)assert(Rules::qp_garbage_concentrates(c,floor,p,0)==(floor<=5));
+    c.expert=ModifierMode::Enabled;p.receiveProtection=18;
+    assert(Rules::qp_garbage_concentrates(c,2,p,0));
+    assert(!Rules::qp_garbage_concentrates(c,3,p,0)); // Raw .05*3, before grace reduction.
+    UserConfig::Settings user;user.qpDoubleHole=2;
+    assert(Runtime::normalize_user_config(user,Runtime::GameMode::QuickPlay).garbage.cap==2);
+    c={};p={};double level=1,altitude=0;p.experience=4;
+    Rules::qp_advance_booster(p,level,altitude,1,c,1.0/60);assert(level==1);
+    p={};p.experience=7;p.upgradeFatigue=2;
+    Rules::qp_advance_booster(p,level,altitude,1,c,1.0/60);
+    assert(level==2 && p.upgradeFatigue==0);close(p.decayProtection,3);
+    p={};Rules::qp_reward_placement(p,1,47,4,0,0,false,0,c);close(p.pendingAltitude,4);
+    p={};Rules::qp_reward_placement(p,1,47,16,0,0,false,0,c);close(p.pendingAltitude,4);
+    c.allSpin=AllSpinMode::Reverse;p={};
+    Rules::qp_reward_placement(p,1,800,4,4,2,true,4,c);close(p.experience,0);
+    close(Rules::qp_fatigue_garbage_due(c,480.49),1);
+    close(Rules::qp_fatigue_garbage_due(c,480.5),2);
+    close(Rules::qp_fatigue_garbage_due(c,722.7),10);
+    for(int attack=1;attack<=8;++attack) {
+        const double raw=attack*1.75;
+        const auto low=Rules::apply_double_hole_reverse({true,attack,1,1,true,1});
+        const auto high=Rules::apply_double_hole_reverse({true,attack,1,1,true,0});
+        assert(low.attack==std::floor(raw) && high.attack==std::ceil(raw));
+        assert(Rules::apply_double_hole_reverse({true,attack,1,0,true,0}).attack==high.attack+1);
+    }
+    Rules::PlacementInput placement;
+    placement.mapWidth=10;placement.mapHeight=4;placement.garbageStartRow=4;
+    placement.garbageMode=Runtime::GarbageMode::QuickPlay;
+    placement.qp.doubleHole=ModifierMode::Reverse;
+    const auto filled=[](int,int){return Runtime::BoardCell::piece(1);};
+    const auto occupied=[](int,int){return true;};
+    assert(Rules::resolve_placement(placement,filled,occupied).chain.b2b==0);
+    placement.legacyQuickPlayRules=true;
+    assert(Rules::resolve_placement(placement,filled,occupied).chain.b2b>0);
+    Engine::PlacementApplicationConfig app;app.garbageMode=Runtime::GarbageMode::QuickPlay;
+    app.qpDoubleHole=ModifierMode::Reverse;app.qpBlightedRoundingRoll=0;
+    Engine::PlacementApplicationState state;state.qpBlighted=true;
+    Rules::PlacementResult clear;clear.clear.clearedLines=1;clear.clear.clearedGarbageLines=1;clear.attack.attack=1;
+    assert(Engine::begin_placement_application(state,app,clear,Piece::Type{0}).effects.attack==2);
+    app.qpMods.legacyRules=true;
+    assert(Engine::begin_placement_application(state,app,clear,Piece::Type{0}).effects.attack==1);
+}
+
+// Optional fixtures are consumed by the unchanged official engine oracle.
+void audit_fixtures() {
+    std::cout<<std::setprecision(17)<<"{\"booster\":[";
+    bool first=true;
+    for(int expert=0;expert<3;++expert)for(double level:{1.,2.,8.})
+        for(double excess:{0.,.01,3.,20.})for(double protection:{0.,2.})for(int fatigue:{0,2,4}) {
+        Runtime::QuickPlayConfig c;c.expert=static_cast<ModifierMode>(expert);
+        Runtime::QuickPlayProgress p;p.experience=4*level+excess;p.decayProtection=protection;
+        p.upgradeFatigue=fatigue;p.pendingAltitude=excess==.01?.04:excess==20?100:3;
+        const double startAltitude=excess==3?48:excess==20?50:10;
+        const auto before=p;double resultLevel=level,altitude=startAltitude;
+        Rules::qp_advance_booster(p,resultLevel,altitude,Rules::qp_floor(altitude),c,1./60);
+        if(!first)std::cout<<',';first=false;
+        std::cout<<"{\"expert\":"<<expert<<",\"level\":"<<level<<",\"xp\":"<<before.experience
+            <<",\"protection\":"<<protection<<",\"fatigue\":"<<fatigue<<",\"altitude\":"<<startAltitude
+            <<",\"pending\":"<<before.pendingAltitude<<",\"result\":["<<resultLevel<<','<<p.experience<<','
+            <<altitude<<','<<p.pendingAltitude<<','<<p.decayProtection<<','<<p.upgradeFatigue<<"]}";
+    }
+    std::cout<<"],\"awards\":[";first=true;
+    for(int mode=0;mode<4;++mode)for(double altitude:{46.,47.,48.,49.,50.,799.,800.})
+        for(int outgoing:{0,1,4,16})for(int lines:{0,1,4})for(int dug:{4,5}) {
+        Runtime::QuickPlayConfig c;
+        if(mode==1)c.expert=ModifierMode::Enabled;
+        if(mode==2)c.expert=ModifierMode::Reverse;
+        if(mode==3)c.allSpin=AllSpinMode::Reverse;
+        Runtime::QuickPlayProgress p;p.pendingAltitude=.5;
+        Rules::qp_reward_placement(p,2,altitude,outgoing,0,lines,true,dug,c);
+        if(!first)std::cout<<',';first=false;
+        std::cout<<"{\"mode\":"<<mode<<",\"altitude\":"<<altitude<<",\"outgoing\":"<<outgoing
+            <<",\"lines\":"<<lines<<",\"dug\":"<<dug<<",\"result\":["<<p.experience<<','<<p.pendingAltitude<<"]}";
+    }
+    std::cout<<"],\"center\":[";first=true;
+    for(int mode=0;mode<8;++mode)for(int floor=1;floor<=10;++floor)for(int grace:{0,18}) {
+        Runtime::QuickPlayConfig c;
+        if(mode==1 || mode==2)c.expert=static_cast<ModifierMode>(mode);
+        if(mode==3 || mode==4)c.messy=static_cast<ModifierMode>(mode-2);
+        if(mode==5)c.volatileMode=ModifierMode::Reverse;
+        if(mode==6)c.allSpin=AllSpinMode::Reverse;
+        if(mode==7)c.expert=ModifierMode::Reverse;
+        Runtime::QuickPlayProgress p;p.receiveProtection=grace;
+        if(!first)std::cout<<',';first=false;
+        std::cout<<"["<<mode<<','<<floor<<','<<grace<<','
+            <<Rules::qp_garbage_concentrates(c,floor,p,mode==7?660:0)<<']';
+    }
+    std::cout<<"],\"fatigue\":[";first=true;
+    for(bool expert:{false,true})for(int frame=28799;frame<=43900;++frame) {
+        Runtime::QuickPlayConfig c;if(expert)c.expert=ModifierMode::Reverse;
+        if(!first)std::cout<<',';first=false;
+        std::cout<<'['<<expert<<','<<frame<<','<<Rules::qp_fatigue_garbage_due(c,frame/60.)<<']';
+    }
+    std::cout<<"],\"holes\":[";first=true;
+    for(int board=0;board<5;++board) {
+        std::vector<std::string> rows(8,std::string(10,'.'));
+        constexpr int heights[]={1,5,2,0,4,3,7,6,2,1};
+        for(int x=0;x<10;++x)for(int y=8-heights[x];y<8;++y)rows[y][x]='x';
+        if(board==1 || board==2) {
+            rows[7]="gg.gggg.gg";
+            if(board==2)rows[7]=std::string(10,'x');
+        }
+        if(board==3) {rows[6]="gg.gggg.gg";rows[7]=std::string(10,'.');}
+        if(board==4)for(auto& row:rows)row=std::string(10,'.');
+        const auto scores=Rules::qp_garbage_dig_scores(10,0,8,[&](int y,int x) {
+            return rows[y][x]=='.'?Runtime::BoardCell::empty():
+                rows[y][x]=='g'?Runtime::BoardCell::garbage():Runtime::BoardCell::piece(1);
+        });
+        if(!first)std::cout<<',';first=false;
+        std::cout<<"{\"rows\":[";
+        for(int y=0;y<8;++y)std::cout<<(y?",":"")<<'"'<<rows[y]<<'"';
+        std::cout<<"],\"scores\":[";
+        for(int x=0;x<10;++x)std::cout<<(x?",":"")<<scores[x];
+        std::cout<<"]}";
+    }
+    std::cout<<"]}\n";
 }
 }
 
-int main() {
+int run(int argc,char** argv) {
+    if(argc==2 && std::string(argv[1])=="--audit-fixtures") {audit_fixtures();return 0;}
     for (double t:{0.0,1.0,4.999,6.0,9.999,11.0})
         assert(!Runtime::periodic_invisible_flash(Duration::from_seconds(t),Duration::from_seconds(5),Duration::from_seconds(1)));
     for (double t:{5.0,5.15,5.5,5.999,10.0,10.999})
         assert(Runtime::periodic_invisible_flash(Duration::from_seconds(t),Duration::from_seconds(5),Duration::from_seconds(1)));
-    booster_idle_demotion(); delays_and_mods(); booster(); placement_rewards(); attack_and_chain();
+    audited_rule_regressions();booster_idle_demotion(); delays_and_mods(); booster(); placement_rewards(); attack_and_chain();
     reception_and_fatigue(); hole_policy(); integration_and_display(); initial_floor_state(); continuous_cancellation_switch();
     std::cout << "quick play rules: OK\n";
+    return 0;
 }
+} // namespace TetrTests::quick_play_rules_test

@@ -28,6 +28,12 @@ Runtime::Duration current_elapsed(
     return elapsed;
 }
 
+Runtime::Duration shared_elapsed(const SharedPlaybackState& playback,
+    Runtime::TimePoint now) noexcept {
+    return playback.elapsed + (playback.paused ? Runtime::Duration{}
+        : (now-playback.anchor)*playback.speed);
+}
+
 void commit_elapsed(
     Runtime::GameContext& context,
     Runtime::TimePoint now) noexcept {
@@ -85,6 +91,13 @@ void complete_playback_resume(
     playback.resuming=false;
     playback.rebuilding=false;
     playback.rebuildComplete=true;
+    if (playback.shared) {
+        std::lock_guard<std::recursive_mutex> lock(playback.shared->mutex);
+        playback.shared->elapsed=playback.elapsed;
+        playback.shared->anchor=now-playback.sharedClockOffset;
+        playback.shared->paused=playback.paused;
+        playback.shared->speed=playback.speed;
+    }
 }
 
 void start_playback(Runtime::GameContext& context, Runtime::TimePoint now) {
@@ -115,6 +128,18 @@ void start_playback(Runtime::GameContext& context, Runtime::TimePoint now) {
     playback.forwardKeyDown=false;
 }
 
+void share_playback_clock(Runtime::GameContext& first, Runtime::GameContext& second) {
+    auto& a=session(first).playback;
+    auto& b=session(second).playback;
+    auto shared=std::make_shared<SharedPlaybackState>();
+    shared->elapsed=a.elapsed;shared->anchor=a.anchor;
+    shared->speed=a.speed;shared->paused=a.paused;
+    const auto native=std::chrono::steady_clock::now();
+    a.sharedClockOffset={};
+    b.sharedClockOffset=second.services.clock.at(native)-first.services.clock.at(native);
+    a.shared=shared;b.shared=std::move(shared);
+}
+
 void finish_playback(Runtime::GameContext& context, Runtime::TimePoint now) {
     auto& playback=session(context).playback;
     playback.finished=true;
@@ -129,6 +154,12 @@ Runtime::Duration playback_elapsed(
     Runtime::TimePoint now) noexcept {
     const auto* state=context.replay_component();
     if (!state) return {};
+    const auto& playback=state->playback;
+    if (playback.shared && !playback.finished) {
+        std::lock_guard<std::recursive_mutex> lock(playback.shared->mutex);
+        const auto elapsed=shared_elapsed(*playback.shared,now-playback.sharedClockOffset);
+        return playback.duration>Runtime::Duration{} ? std::min(elapsed,playback.duration) : elapsed;
+    }
     return current_elapsed(state->playback,now);
 }
 
@@ -166,7 +197,7 @@ Runtime::Duration playback_progress_elapsed(
     auto* state=context.replay_component();
     if (!state) return {};
     if (state->playback.finished) return state->playback.duration;
-    const Runtime::Duration scheduled=current_elapsed(state->playback,now);
+    const Runtime::Duration scheduled=playback_elapsed(context,now);
     const bool backlogged=!state->operations.empty()&&
         state->operations.front().timestamp<=scheduled;
     // Do not extrapolate a second UI clock: it can both lead the board after an
@@ -186,11 +217,19 @@ Runtime::Duration playback_duration(const Runtime::GameContext& context) noexcep
 
 double playback_speed(const Runtime::GameContext& context) noexcept {
     const auto* state=context.replay_component();
+    if (state && state->playback.shared) {
+        std::lock_guard<std::recursive_mutex> lock(state->playback.shared->mutex);
+        return state->playback.shared->speed;
+    }
     return state ? state->playback.speed : 1.0;
 }
 
 bool playback_paused(const Runtime::GameContext& context) noexcept {
     const auto* state=context.replay_component();
+    if (state && state->playback.shared) {
+        std::lock_guard<std::recursive_mutex> lock(state->playback.shared->mutex);
+        return state->playback.shared->paused;
+    }
     return state && state->playback.paused;
 }
 
@@ -240,6 +279,15 @@ void set_playback_speed(
     Runtime::TimePoint now,
     double speed) {
     auto& playback=session(context).playback;
+    if (playback.shared) {
+        std::lock_guard<std::recursive_mutex> lock(playback.shared->mutex);
+        auto& shared=*playback.shared;
+        shared.elapsed=shared_elapsed(shared,now-playback.sharedClockOffset);
+        shared.anchor=now-playback.sharedClockOffset;
+        shared.speed=valid_speed(speed);
+        context.config.timeMultiplier=shared.speed;
+        return;
+    }
     commit_elapsed(context,now);
     playback.speed=valid_speed(speed);
     context.config.timeMultiplier=playback.speed;
@@ -249,6 +297,14 @@ void toggle_playback_pause(
     Runtime::GameContext& context,
     Runtime::TimePoint now) {
     auto& playback=session(context).playback;
+    if (playback.shared) {
+        std::lock_guard<std::recursive_mutex> lock(playback.shared->mutex);
+        auto& shared=*playback.shared;
+        shared.elapsed=shared_elapsed(shared,now-playback.sharedClockOffset);
+        shared.anchor=now-playback.sharedClockOffset;
+        shared.paused=!shared.paused;
+        return;
+    }
     commit_elapsed(context,now);
     playback.paused=!playback.paused;
 }

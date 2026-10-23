@@ -6,7 +6,8 @@
 #include <string>
 #include <utility>
 
-int main() {
+namespace TetrTests::settings_schema_test {
+int run(int argc,char** argv) {
     const auto& schema = UserConfig::setting_schema();
     assert(!schema.empty());
 
@@ -28,6 +29,16 @@ int main() {
 
     UserConfig::Settings settings;
     assert(settings.continueInputUnfocused==0);
+    for(const auto id:{UserConfig::SettingId::EffectsIntensity,UserConfig::SettingId::FieldShake,
+        UserConfig::SettingId::ParticleIntensity,UserConfig::SettingId::LandingEffect,
+        UserConfig::SettingId::LineClearEffect,UserConfig::SettingId::HardDropTrail,UserConfig::SettingId::BoardBounciness}) {
+        const auto& effect=UserConfig::setting_descriptor(id);
+        assert(effect.section==UserConfig::Section::Others && effect.range.minimum==0 && effect.range.maximum==200);
+    }
+    settings.fieldShake=133;settings.particleIntensity=0;settings.boardBounciness=170;
+    UserConfig::reset_settings(settings);assert(settings.fieldShake==133 && settings.particleIntensity==0 && settings.boardBounciness==170);
+    UserConfig::reset_section(settings,UserConfig::Section::Others);
+    assert(settings.fieldShake==35 && settings.particleIntensity==35 && settings.boardBounciness==100);
     const auto& background=UserConfig::setting_descriptor(UserConfig::SettingId::ContinueInputUnfocused);
     assert(background.section==UserConfig::Section::Others && background.choice==UserConfig::ChoiceKind::Boolean);
     assert(UserConfig::assign_setting_text(settings,background,"1"));
@@ -92,3 +103,4 @@ int main() {
 
     return 0;
 }
+} // namespace TetrTests::settings_schema_test

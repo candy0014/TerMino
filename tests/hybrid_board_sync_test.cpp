@@ -9,6 +9,7 @@
 #include <iostream>
 #include <memory>
 
+namespace TetrTests::hybrid_board_sync_test {
 struct Fixture {
     std::unique_ptr<Runtime::SessionState> session=std::make_unique<Runtime::SessionState>();
     Runtime::RuntimeServices services;
@@ -25,7 +26,7 @@ Network::FramePacket motion(std::uint64_t sequence,std::uint64_t frame,std::uint
         Network::PieceMotionKind::Translate,0,columns,0,result};
     const auto packet=Network::decode_frame_packet(Network::encode_piece_motion(move),10,20); assert(packet); return *packet;
 }
-int main() {
+int run(int argc,char** argv) {
     // Binary envelopes must be bounded and reject a damaged batch atomically.
     const std::vector<std::string> streamEvents{"!probe",std::string("\0;TES1",6),""};
     const auto streamWire=Network::encode_event_stream(streamEvents);assert(streamWire);
@@ -246,4 +247,6 @@ int main() {
     const auto rotation=decode_piece_motion(encode_piece_motion(rotating));
     assert(rotation && rotation->kind==PieceMotionKind::Rotate && rotation->rotations==1 && rotation->result==rotating.result);
     std::cerr << "hybrid_board_sync_test: OK; snapshot=" << state.size() << " bytes; compressed checkpoint=" << packed.size() << " bytes; motion=" << lightweight.size() << " bytes\n";
+    return 0;
 }
+} // namespace TetrTests::hybrid_board_sync_test

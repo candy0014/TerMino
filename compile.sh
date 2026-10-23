@@ -29,7 +29,7 @@ if [[ -f build/CMakeCache.txt ]]; then
 fi
 
 build_tests=OFF
-frontend=terminal
+frontend=both
 while (( $# )); do
     case "$1" in
         --test) build_tests=ON; shift ;;
@@ -37,10 +37,11 @@ while (( $# )); do
         *) printf 'Usage: %s [--test] [--frontend terminal|opengl|both]\n' "$0" >&2; exit 2 ;;
     esac
 done
+build_directory=build
 case "$frontend" in
-    terminal) build_directory=build; terminal=ON; graphical=OFF ;;
-    opengl) build_directory=build-opengl; terminal=OFF; graphical=ON ;;
-    both) build_directory=build-both; terminal=ON; graphical=ON ;;
+    terminal) terminal=ON; graphical=OFF ;;
+    opengl) terminal=OFF; graphical=ON ;;
+    both) terminal=ON; graphical=ON ;;
     *) printf 'Unknown frontend: %s\n' "$frontend" >&2; exit 2 ;;
 esac
 

@@ -20,6 +20,7 @@
 #include <set>
 #include <sstream>
 
+namespace TetrTests::challenges_test {
 namespace {
 using namespace Challenges;
 using Id=UserConfig::SettingId;
@@ -153,8 +154,10 @@ void local_replay_restore() {
     assert(one.replayPath=="one.rep" && two.replayPath=="two.rep" && !one.challengeReplay && !two.challengeReplay && app.singlePlayerOwner==0);
 }
 }
-int main() {
+int run(int argc,char** argv) {
     directory=std::filesystem::temp_directory_path()/("termino_challenges_"+std::to_string(Challenges::utc_now_milliseconds()));std::filesystem::create_directories(directory);
     constraints_and_adjustment();valuation();history();app_and_presentation();local_replay_restore();std::filesystem::remove_all(directory);
     std::cerr<<"challenge constraints, minimal rollback, valuation, persistence, retention, replay association and results passed\n";
+    return 0;
 }
+} // namespace TetrTests::challenges_test

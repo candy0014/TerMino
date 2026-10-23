@@ -30,7 +30,8 @@ std::vector<CellChange> apply_gravity_collapse(
     int width,
     const std::vector<Rules::RowMove>& moves,
     const CellValue& cellValue,
-    const CopyRow& copyRow);
+    const CopyRow& copyRow,
+    bool collectChanges = true);
 
 struct TimedSolidDecayResult {
     std::vector<CellChange> changes;
@@ -42,7 +43,8 @@ TimedSolidDecayResult decay_timed_solid_garbage(
     int firstRow,
     int endRow,
     const CellValue& cellValue,
-    const SetCell& setCell);
+    const SetCell& setCell,
+    bool collectChanges = true);
 
 } // namespace Engine
 

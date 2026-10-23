@@ -4,13 +4,14 @@
 #include <iomanip>
 #include <iostream>
 #include <random>
+namespace TetrTests::bot_chatgpt_fast_terrain_test {
 namespace B=Bot_chatgpt;namespace A=B::Analysis;
 m_tetris::TetrisMap make_map(const std::vector<unsigned>&rows) {
     m_tetris::TetrisMap map(10,40);
     for(int y=0;y<int(rows.size());++y){map.row[y]=rows[y];for(int x=0;x<10;++x)if(rows[y]&(1u<<x)){map.top[x]=y+1;map.roof=y+1;++map.count;}}
     return map;
 }
-int main(int argc,char**) {
+int run(int argc,char** argv) {
     A::PlainEngine owner;assert(owner.prepare(10,40));B::Evaluation base;B::FastTerrainEvaluation fast;
     base.init(owner.context().get());fast.init(owner.context().get());
     const m_tetris::TetrisMap empty(10,40);B::Landing landing(owner.context()->generate('O')->drop(empty));
@@ -35,4 +36,6 @@ int main(int argc,char**) {
         for(int i=0;i<512;++i){const auto a=A::native_pass(plain,root);const auto b=A::native_pass(candidate,root);assert(a.target==b.target&&a.change_hold==b.change_hold&&a.status.value==b.status.value);}
     }
     std::cout<<"fast terrain exact random boards="<<checked<<";512-pass native controls passed\n";
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_fast_terrain_test

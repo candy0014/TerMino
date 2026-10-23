@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <vector>
 
+namespace TetrTests::core_geometry_test {
 namespace {
 
 bool legacy_can_place(const Piece::Definition& piece,int row,int col,int rotation,const Runtime::Playfield& field) {
@@ -177,10 +178,11 @@ void test_collision_and_rotation_equivalence() {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     test_playfield();
     test_piece_tables();
     test_hidden_row_boundary();
     test_collision_and_rotation_equivalence();
     return 0;
 }
+} // namespace TetrTests::core_geometry_test

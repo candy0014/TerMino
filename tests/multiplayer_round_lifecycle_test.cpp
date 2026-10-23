@@ -78,9 +78,13 @@ struct Player {
             if(network.countdownDeadline) scheduledStart=std::chrono::duration_cast<std::chrono::microseconds>(
                 network.countdownDeadline->time_since_epoch()).count();
             const bool playing=session->gameStartTime.has_value();
-            if(playing && session->player.presentation.activePose && !started) {
+            if(playing && session->player.presentation.activePose && !started && key==user.keyCodes[3]) {
                 actualStart=std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now().time_since_epoch()).count();started=true;
+                // A visible pose precedes preparePiece's release debounce.
+                // Finish this first hard-drop sample as released before the
+                // test thread can inject its press into the initialized piece.
+                return false;
             }
             if(session->player.gameplay.scoring.placedBlocks>0) moved=true;
             if(session->roomScene.finished) {

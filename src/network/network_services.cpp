@@ -3,6 +3,7 @@
 #include "tetr/runtime/game_context.h"
 #include "tetr/config/user_config.h"
 #include "tetr/network/frame_packet.h"
+#include "tetr/network/room_replay.h"
 
 #include <stdexcept>
 #include <algorithm>
@@ -37,6 +38,7 @@ void disconnect_online(NetworkServices& services) {
     services.connection = ConnectionState::Disconnected;
     services.connectionMessage = "Disconnected";
     services.onlineInbox.clear();
+    services.replays.reset();
     reset_multiplayer_state(services);services.multiplayerRoom=false;services.startMatchQueued=services.startFromMenu=false;
     services.queuedMatchControl.reset();
     services.pieceTurns = {}; services.boardSync = {};
@@ -58,6 +60,7 @@ void send_online(NetworkServices& services, const std::string& message) {
 void initialize_network_services(Runtime::GameContext& context, const std::string& serverIp, int protocolVersion) {
     auto& network = network_services(context);
     try {
+        prepare_room_replay_storage();
         const bool useWebSocket = WebSocketSocket::recognizes(serverIp);
         const auto address = useWebSocket ? UdpAddress{} : UdpSocket::resolve_address(serverIp, 3000);
         // Reuse the endpoint for a reconnect to the same server. Its occupied
@@ -88,6 +91,8 @@ void initialize_network_services(Runtime::GameContext& context, const std::strin
         network.connectionToken.clear();
         for (int i = 0; i < 20; ++i)
             network.connectionToken += static_cast<char>(context.services.random() % 26 + 'a');
+        if(context.user_settings_component() && context.user_settings().persistenceEnabled)
+            initialize_room_replay_identity(network,UserConfig::profile_identity(context.user_settings()));
         if (useWebSocket && !network.webSocket) network.webSocket = std::make_unique<WebSocketSocket>(serverIp);
         if (!useWebSocket && !network.socket) {
             network.socket = std::make_unique<UdpSocket>();
@@ -266,8 +271,11 @@ void poll_connection(NetworkServices& services, std::chrono::milliseconds wait,s
             } else if (wire.rfind("!config-error;",0)==0) {
                 services.roomMessage=wire.substr(14); ++services.roomRevision;
                 services.roomConfig={}; services.onlineInbox.clear(); services.onlineInbox.push_back("end2");
+            } else if (handle_room_replay_message(services,wire)) {
             } else if (handle_room_config_message(services,wire)) {
             } else if (handle_multiplayer_message(services,wire)) {
+            } else if (const auto visibility=decode_field_visibility(wire);visibility && !services.multiplayerRoom) {
+                services.peerFieldVisibility[-1]=*visibility;
             } else if (!services.multiplayerRoom && services.connection == ConnectionState::Connected && !services.room.name.empty() &&
                        (wire.rfind("!", 0) != 0 || is_gameplay_extension(wire))) {
                 if (wire==encode_server_lobby_signal(ServerLobbySignal::ConfigExchangeReady) && services.roomConfig.applied)
@@ -296,6 +304,7 @@ void poll_connection(NetworkServices& services, std::chrono::milliseconds wait,s
         }
         poll_room_config_transfer(services);
         poll_multiplayer_transfer(services);
+        poll_room_replay_transfer(services);
         if((services.startMatchQueued || services.queuedMatchControl) && !services.pendingRoomRequest) {
             const auto operation=services.queuedMatchControl.value_or(RoomOperation::StartMatch);
             services.startMatchQueued=false;services.queuedMatchControl.reset();

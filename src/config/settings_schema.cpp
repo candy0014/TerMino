@@ -167,7 +167,7 @@ const std::vector<SettingDescriptor>& setting_schema() {
         INT_SETTING(DasPrecharge, Handling, "DAS Precharge", "DAS Precharge", dasPrecharge, Boolean, 0, 1, true),
 
         INT_SETTING(FieldWidth, Game, "Width", "Width", fieldWidth, None, 4, 100, false),
-        INT_SETTING(FieldHeight, Game, "Height", "Height", fieldHeight, None, 2, 100, false),
+        INT_SETTING(FieldHeight, Game, "Height", "Height", fieldHeight, None, 0, 100, false),
         INT_SETTING(NextCount, Game, "Num of Next", "Num of Next", nextCount, None, 0, 100, false),
         INT_SETTING(HoldEnabled, Game, "Open Hold", "Open Hold", holdEnabled, Boolean, 0, 1, true),
         INT_SETTING(FieldInvisible, Game, "Invisible", "Invisible", fieldInvisible, Invisibility, 0, 2, true),
@@ -249,6 +249,13 @@ const std::vector<SettingDescriptor>& setting_schema() {
         INT_SETTING(UiLanguage, Others, "UI Language", "Interface language", uiLanguage, Language, 0, 1, false),
         INT_SETTING(ShowSpawnPosition, Others, "Show Spawn Position", "Show spawn position", showSpawnPosition, Boolean, 0, 1, true),
         INT_SETTING(ContinueInputUnfocused, Others, "Continue Input Unfocused", "Continue input when unfocused", continueInputUnfocused, Boolean, 0, 1, true),
+        INT_SETTING(EffectsIntensity, Others, "Effects Intensity", "Effects intensity (%)", effectsIntensity, None, 0, 200, false),
+        INT_SETTING(BoardBounciness, Others, "Board Bounciness", "Board bounciness (%)", boardBounciness, None, 0, 200, false),
+        INT_SETTING(FieldShake, Others, "Field Shake", "Field shake (%)", fieldShake, None, 0, 200, false),
+        INT_SETTING(ParticleIntensity, Others, "Particle Intensity", "Particles (%)", particleIntensity, None, 0, 200, false),
+        INT_SETTING(LandingEffect, Others, "Landing Effect", "Landing impact (%)", landingEffect, None, 0, 200, false),
+        INT_SETTING(LineClearEffect, Others, "Line Clear Effect", "Line clear glow (%)", lineClearEffect, None, 0, 200, false),
+        INT_SETTING(HardDropTrail, Others, "Hard Drop Trail", "Hard drop trail (%)", hardDropTrail, None, 0, 200, false),
         INT_SETTING(GravityProgression, Game, "Gravity Progression", "Gravity progression", gravityProgression, GravityProgression, 0, 3, true),
         INT_SETTING(GravityLevelLines, Game, "Gravity Level Lines", "Lines per level", gravityLevelLines, None, 1, 1000000, false),
         REAL_SETTING(GravityAcceleration, Game, "Gravity Acceleration", "Acceleration factor", gravityAcceleration, 0.01, 100.0),
@@ -517,12 +524,21 @@ void reset_settings(Settings& settings, bool playerTwo) {
     if(multiplayer) defaults.gameMode=static_cast<int>(Runtime::GameMode::Multiplayer);
     defaults.serverIp=serverIp; defaults.username=username;
     defaults.persistencePath = settings.persistencePath;
+    defaults.persistencePlayer=settings.persistencePlayer;defaults.persistencePlatform=settings.persistencePlatform;
+    defaults.persistenceEnabled = settings.persistenceEnabled;
     defaults.keybindingPath = settings.keybindingPath;
     defaults.obscuredColors = settings.obscuredColors;
     defaults.squareStyle = settings.squareStyle;
     defaults.uiLanguage = settings.uiLanguage;
     defaults.showSpawnPosition = settings.showSpawnPosition;
     defaults.continueInputUnfocused = settings.continueInputUnfocused;
+    defaults.effectsIntensity = settings.effectsIntensity;
+    defaults.fieldShake = settings.fieldShake;
+    defaults.particleIntensity = settings.particleIntensity;
+    defaults.landingEffect = settings.landingEffect;
+    defaults.lineClearEffect = settings.lineClearEffect;
+    defaults.hardDropTrail = settings.hardDropTrail;
+    defaults.boardBounciness = settings.boardBounciness;
     defaults.keyCodes = settings.keyCodes;
     defaults.additionalKeyCodes = settings.additionalKeyCodes;
     // Global/Player reset preserves the complete movement-handling category.

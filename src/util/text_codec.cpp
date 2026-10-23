@@ -1,6 +1,22 @@
 #include "tetr/util/text_codec.h"
+#ifdef __ANDROID__
+#include "../../third_party/fast_float/fast_float.h"
+#endif
 
 namespace Util::Text {
+
+std::optional<double> parse_finite_real(std::string_view text) noexcept {
+    if (text.empty()) return std::nullopt;
+    double value = 0.0;
+#ifdef __ANDROID__
+    const auto result = fast_float::from_chars(text.data(), text.data() + text.size(), value);
+#else
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+#endif
+    if (result.ec != std::errc{} || result.ptr != text.data() + text.size() ||
+        !std::isfinite(value)) return std::nullopt;
+    return value;
+}
 
 std::vector<std::string_view> split(std::string_view text, char delimiter) {
     std::vector<std::string_view> result;

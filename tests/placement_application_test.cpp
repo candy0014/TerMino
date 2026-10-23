@@ -8,6 +8,7 @@
 #include <random>
 #include <vector>
 
+namespace TetrTests::placement_application_test {
 namespace {
 
 using Engine::PlacementApplicationBeginResult;
@@ -195,7 +196,7 @@ Rules::QPClearOperation random_operation(std::mt19937& rng) {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     std::mt19937 rng(0x51A6E5u);
 
     for (int iteration = 0; iteration < 100000; ++iteration) {
@@ -341,3 +342,4 @@ int main() {
     std::cout << "placement application regression: OK\n";
     return 0;
 }
+} // namespace TetrTests::placement_application_test

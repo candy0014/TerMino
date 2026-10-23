@@ -9,8 +9,8 @@ namespace Engine {
 MovementController::MovementController(
     MovementState& state,
     CanPlace canPlace,
-    TryRotate tryRotate)
-    : state_(state), canPlace_(std::move(canPlace)), tryRotate_(std::move(tryRotate)) {}
+    TryRotate tryRotate, ContactObserver observer)
+    : state_(state), canPlace_(std::move(canPlace)), tryRotate_(std::move(tryRotate)), observer_(std::move(observer)) {}
 
 bool MovementController::grounded() const {
     return !canPlace_(state_.pose.translated(1, 0));
@@ -93,7 +93,10 @@ MovementEffect MovementController::moveHorizontal(
     HorizontalDropMode dropMode) {
     MovementEffect effect;
     const bool wasGrounded = grounded();
-    if (!canPlace_(state_.pose.translated(0, direction))) return effect;
+    if (!canPlace_(state_.pose.translated(0, direction))) {
+        if(direction && observer_)observer_(MovementContact::Wall,direction,now);
+        return effect;
+    }
     state_.pose.position.col += direction;
     state_.lastRotation = Runtime::RotationRecord::none();
     applyGroundedReset(wasGrounded, now, lockResetLimit);
@@ -121,6 +124,7 @@ MovementEffect MovementController::moveHorizontalToWall(
         }
         effect.changed = true;
     }
+    if(observer_)observer_(MovementContact::Wall,delta,now);
     if (!effect.changed) return effect;
     state_.lastRotation = Runtime::RotationRecord::none();
     // One instantaneous input consumes one reset, regardless of distance.
@@ -143,6 +147,7 @@ MovementEffect MovementController::rotate(
 
     state_.pose = candidate;
     state_.lastRotation = Runtime::RotationRecord::from_kick(kickIndex);
+    if(delta && observer_)observer_(MovementContact::Rotation,delta,now);
     if (countLockReset) applyGroundedReset(wasGrounded, now, lockResetLimit);
     effect.changed = true;
     return effect;

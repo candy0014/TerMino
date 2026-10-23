@@ -4,6 +4,7 @@
 #include <initializer_list>
 #include <iostream>
 
+namespace TetrTests::bot_chatgpt_terrain_test {
 namespace B = Bot_chatgpt;
 
 m_tetris::TetrisMap rows(std::initializer_list<unsigned> values) {
@@ -48,7 +49,7 @@ m_tetris::TetrisMap mirror(const m_tetris::TetrisMap& source) {
     return map;
 }
 
-int main() {
+int run(int argc,char** argv) {
     // Same one-cell ceiling and hole count. A cell under a ledge opening into
     // empty space can be repaired from the side; one surrounded by solid
     // neighbours first needs its covering row removed. The second fixture
@@ -98,4 +99,6 @@ int main() {
         assert(B::terrain_value(features) == B::terrain_value(map));
     }
     std::cout << "terrain geometry: shallow repair, sealed cover, single channel, symmetry and height passed\n";
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_terrain_test

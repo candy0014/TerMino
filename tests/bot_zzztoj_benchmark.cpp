@@ -21,6 +21,7 @@
 #include <string_view>
 #include <vector>
 
+namespace TetrTests::bot_zzztoj_benchmark {
 namespace {
 
 struct BoardMetrics {
@@ -104,7 +105,7 @@ void print_field(const Runtime::Playfield& field) {
 
 } // namespace
 
-int main(int argc, char** argv) {
+int run(int argc,char** argv) {
     const int target = argc > 1 ? std::stoi(argv[1]) : 300;
     const int searchWidth = argc > 2 ? std::stoi(argv[2]) : 300;
     const unsigned seed = argc > 3 ? static_cast<unsigned>(std::stoul(argv[3])) : 20260918u;
@@ -260,3 +261,4 @@ int main(int argc, char** argv) {
               << " qualityFailed=" << qualityFailed << '\n';
     return placed == target && !qualityFailed ? 0 : 1;
 }
+} // namespace TetrTests::bot_zzztoj_benchmark

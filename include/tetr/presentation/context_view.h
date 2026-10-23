@@ -8,6 +8,6 @@ namespace Presentation {
 Runtime::Duration board_elapsed(const Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player);
 BoardView capture_board_view(const Runtime::GameContext& context,
-    const Runtime::PlayerSessionState& player);
+    const Runtime::PlayerSessionState& player,int hiddenRows=kBoardViewHiddenRows);
 }
 #endif

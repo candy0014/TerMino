@@ -1,4 +1,5 @@
 #include "tetr/config/user_config.h"
+#include "tetr/util/runtime_directory_lock.h"
 #include "tetr/util/text_codec.h"
 #include "tetr/input/action.h"
 
@@ -86,11 +87,21 @@ void load_player_two_keybindings(Settings& settings, const std::string& path) {
 }
 
 bool save_keybindings(Settings& settings) {
-    std::ofstream output(std::filesystem::u8path(settings.keybindingPath), std::ios::trunc);
+    if(!settings.persistenceEnabled)return true;
+    if(std::filesystem::u8path(settings.persistencePath).extension()==".json")return save(settings);
+    const auto path=std::filesystem::u8path(settings.keybindingPath);
+    Util::FileWriteLock writeLock(path);if(!writeLock.acquired())return false;
+    auto temporary=path;temporary+=".tmp";
+    std::ofstream output(temporary, std::ios::trunc);
     if (!output) return false;
     for (std::size_t index = 0; index < Settings::kControlCount; ++index)
         output << control_keys_text(settings, index) << '\n';
-    return static_cast<bool>(output);
+    output.close();if(!output)return false;
+#ifdef _WIN32
+    return MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
+#else
+    std::error_code error;std::filesystem::rename(temporary,path,error);return !error;
+#endif
 }
 
 std::vector<int> control_keys(const Settings& settings, std::size_t control) {

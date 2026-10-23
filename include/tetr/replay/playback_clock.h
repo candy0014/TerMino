@@ -25,6 +25,9 @@ void complete_playback_resume(
     Runtime::GameContext& context,
     Runtime::TimePoint now);
 void start_playback(Runtime::GameContext& context, Runtime::TimePoint now);
+// Called after both local streams start, before their decoding workers launch.
+// Both contexts retain their own rule/board time while sharing viewer controls.
+void share_playback_clock(Runtime::GameContext& first, Runtime::GameContext& second);
 // A mode goal may end playback before trailing recorded markers are consumed.
 // Latch the completed timeline without discarding events needed for Undo/seek.
 void finish_playback(Runtime::GameContext& context, Runtime::TimePoint now);

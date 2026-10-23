@@ -29,6 +29,9 @@ if(MSVC)
     add_compile_options(/utf-8 /EHsc)
 endif()
 
+if(ANDROID)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
 find_package(Threads REQUIRED)
 include(cmake/PortableBuild.cmake)
 include(cmake/WebSocketDependencies.cmake)
@@ -71,13 +74,14 @@ target_include_directories(tetr_headers INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/in
 
 
 add_library(tetr_util STATIC
+    src/util/worker_thread.cpp
     src/util/runtime_directory_lock.cpp
     src/util/numeric.cpp
     src/util/text_codec.cpp
     src/util/terminal_text.cpp
     src/util/deterministic_random.cpp
 )
-target_link_libraries(tetr_util PUBLIC tetr_headers)
+target_link_libraries(tetr_util PUBLIC tetr_headers Threads::Threads)
 
 add_library(tetr_runtime STATIC
     src/runtime/piece_catalog_data.cpp
@@ -90,6 +94,9 @@ add_library(tetr_runtime STATIC
     src/runtime/dynamic_rules.cpp
 )
 target_link_libraries(tetr_runtime PUBLIC tetr_headers tetr_util Threads::Threads)
+
+add_library(tetr_replay_archive STATIC src/replay/multiplayer_codec.cpp)
+target_link_libraries(tetr_replay_archive PUBLIC tetr_headers)
 
 add_library(tetr_rules STATIC
     src/rules/lock_analysis.cpp
@@ -113,6 +120,7 @@ target_link_libraries(tetr_rules PUBLIC tetr_headers PRIVATE tetr_util tetr_runt
 
 add_library(tetr_presentation STATIC
     src/presentation/ui_surface.cpp
+    src/presentation/virtual_controls.cpp
     src/presentation/text_field.cpp
     src/presentation/visibility.cpp
     src/presentation/board_view.cpp
@@ -121,34 +129,20 @@ target_link_libraries(tetr_presentation PUBLIC tetr_headers tetr_runtime)
 
 # These tests build without terminal input, console output, Replay or a GPU.
 include(CTest)
+include(cmake/TestSuites.cmake)
 if(BUILD_TESTING)
     enable_testing()
-    add_executable(frontend_snapshot_test tests/frontend_snapshot_test.cpp)
+    tetr_test_module(frontend_snapshot_test tetr_core_tests tests/frontend_snapshot_test.cpp)
     target_link_libraries(frontend_snapshot_test PRIVATE tetr_presentation)
-    add_test(NAME frontend_snapshot COMMAND frontend_snapshot_test)
-    if(MSVC)
-        target_compile_options(frontend_snapshot_test PRIVATE /UNDEBUG)
-    else()
-        target_compile_options(frontend_snapshot_test PRIVATE -UNDEBUG)
-    endif()
+    add_test(NAME frontend_snapshot COMMAND tetr_core_tests frontend_snapshot_test)
     set_tests_properties(frontend_snapshot PROPERTIES TIMEOUT 10)
-    add_executable(frontend_ui_test tests/frontend_ui_test.cpp)
+    tetr_test_module(frontend_ui_test tetr_core_tests tests/frontend_ui_test.cpp)
     target_link_libraries(frontend_ui_test PRIVATE tetr_presentation Threads::Threads)
-    add_test(NAME frontend_ui COMMAND frontend_ui_test)
-    if(MSVC)
-        target_compile_options(frontend_ui_test PRIVATE /UNDEBUG)
-    else()
-        target_compile_options(frontend_ui_test PRIVATE -UNDEBUG)
-    endif()
+    add_test(NAME frontend_ui COMMAND tetr_core_tests frontend_ui_test)
     set_tests_properties(frontend_ui PROPERTIES TIMEOUT 10)
-    add_executable(runtime_directory_lock_test tests/runtime_directory_lock_test.cpp)
-    target_link_libraries(runtime_directory_lock_test PRIVATE tetr_util)
-    add_test(NAME runtime_directory_lock COMMAND runtime_directory_lock_test)
-    if(MSVC)
-        target_compile_options(runtime_directory_lock_test PRIVATE /UNDEBUG)
-    else()
-        target_compile_options(runtime_directory_lock_test PRIVATE -UNDEBUG)
-    endif()
+    tetr_test_module(runtime_directory_lock_test tetr_core_tests tests/runtime_directory_lock_test.cpp)
+    target_link_libraries(runtime_directory_lock_test PRIVATE tetr_util Threads::Threads)
+    add_test(NAME runtime_directory_lock COMMAND tetr_core_tests runtime_directory_lock_test)
     set_tests_properties(runtime_directory_lock PROPERTIES TIMEOUT 15)
 endif()
 
@@ -174,8 +168,10 @@ if(TETR_BUILD_TERMINAL OR TETR_BUILD_OPENGL OR TETR_BUILD_SERVER)
         src/network/round_statistics.cpp
         src/network/room_config_protocol.cpp
         src/network/room_config_channel.cpp
+        src/network/room_replay.cpp
+        src/network/room_replay_server.cpp
     )
-    target_link_libraries(tetr_network PUBLIC tetr_headers tetr_runtime PRIVATE tetr_util tetr_rules)
+    target_link_libraries(tetr_network PUBLIC tetr_headers tetr_runtime tetr_replay_archive PRIVATE tetr_util tetr_rules)
     target_link_libraries(tetr_network PRIVATE CURL::libcurl)
     if(TETR_STATIC_DNS_ENABLED)
         target_sources(tetr_network PRIVATE src/network/portable_dns.cpp)
@@ -199,14 +195,14 @@ endif()
 if(NOT TETR_BUILD_TERMINAL AND NOT TETR_BUILD_OPENGL)
     if(BUILD_TESTING)
         foreach(name core_geometry core_rules)
-            add_executable(${name}_test tests/${name}_test.cpp)
-            target_link_libraries(${name}_test PRIVATE tetr_rules tetr_runtime)
-            if(MSVC)
-                target_compile_options(${name}_test PRIVATE /UNDEBUG)
+            if(name STREQUAL "core_geometry")
+                set(_suite tetr_core_tests)
             else()
-                target_compile_options(${name}_test PRIVATE -UNDEBUG)
+                set(_suite tetr_rules_tests)
             endif()
-            add_test(NAME ${name} COMMAND ${name}_test)
+            tetr_test_module(${name}_test ${_suite} tests/${name}_test.cpp)
+            target_link_libraries(${name}_test PRIVATE tetr_rules tetr_runtime)
+            add_test(NAME ${name} COMMAND ${_suite} ${name}_test)
         endforeach()
     endif()
     foreach(frontend_target tetr_terminal tetr_input tetr_render tetr_app tetr_bot_legacy)
@@ -214,6 +210,7 @@ if(NOT TETR_BUILD_TERMINAL AND NOT TETR_BUILD_OPENGL)
             message(FATAL_ERROR "Headless/server build leaked a frontend target: ${frontend_target}")
         endif()
     endforeach()
+    tetr_finalize_test_suites()
     return()
 endif()
 
@@ -226,6 +223,8 @@ target_link_libraries(tetr_terminal PUBLIC tetr_headers PRIVATE tetr_util tetr_p
 add_library(tetr_config STATIC
     src/config/settings_schema.cpp
     src/config/user_config_file.cpp
+    src/config/config_store.cpp
+    src/config/virtual_controls.cpp
     src/config/keybinding_config.cpp
     src/config/presets.cpp
     src/config/normalization.cpp
@@ -237,7 +236,17 @@ add_library(tetr_config STATIC
     src/config/challenge_catalog.cpp
     src/config/challenge_catalog_extended.cpp
 )
-target_link_libraries(tetr_config PUBLIC tetr_headers tetr_runtime)
+target_link_libraries(tetr_config PUBLIC tetr_headers tetr_runtime tetr_util tetr_presentation)
+if(BUILD_TESTING)
+    tetr_test_module(virtual_controls_test tetr_core_tests tests/virtual_controls_test.cpp)
+    target_link_libraries(virtual_controls_test PRIVATE tetr_config)
+    add_test(NAME virtual_controls COMMAND tetr_core_tests virtual_controls_test)
+    set_tests_properties(virtual_controls PROPERTIES TIMEOUT 15)
+    tetr_test_module(shared_storage_test tetr_core_tests tests/shared_storage_test.cpp)
+    target_link_libraries(shared_storage_test PRIVATE tetr_config Threads::Threads)
+    add_test(NAME shared_storage COMMAND tetr_core_tests shared_storage_test)
+    set_tests_properties(shared_storage PROPERTIES TIMEOUT 30)
+endif()
 
 add_library(tetr_input STATIC
     src/input/services.cpp
@@ -249,7 +258,7 @@ target_link_libraries(tetr_input PUBLIC tetr_headers Threads::Threads)
 target_link_libraries(tetr_terminal PRIVATE tetr_input)
 
 add_library(tetr_presentation_context STATIC src/presentation/context_view.cpp)
-target_link_libraries(tetr_presentation_context PUBLIC tetr_presentation tetr_runtime PRIVATE tetr_replay)
+target_link_libraries(tetr_presentation_context PUBLIC tetr_presentation tetr_runtime PRIVATE tetr_replay tetr_rules tetr_network)
 
 add_library(tetr_bot_zzztoj_upstream STATIC
     zzztoj_standalone/upstream/src/ai_zzz.cpp
@@ -534,7 +543,7 @@ add_library(tetr_replay STATIC
     src/replay/tetrio_inputs.cpp
     src/replay/tetrio_recorder.cpp
 )
-target_link_libraries(tetr_replay PUBLIC tetr_headers tetr_runtime tetr_util PRIVATE tetr_rules)
+target_link_libraries(tetr_replay PUBLIC tetr_headers tetr_runtime tetr_util tetr_replay_archive PRIVATE tetr_rules)
 
 add_library(tetr_engine_core STATIC
     src/engine/movement_input_state.cpp
@@ -647,6 +656,8 @@ add_library(tetr_app STATIC
     src/app/start_menu.cpp
     src/app/start_screen_navigation.cpp
     src/app/replay_playback.cpp
+    src/app/online_replay.cpp
+    src/app/room_replay_playback.cpp
     src/app/post_game_interaction.cpp
     src/app/post_game_statistics.cpp
     src/app/single_player_challenges.cpp
@@ -666,7 +677,9 @@ endif()
 if(TETR_BUILD_OPENGL)
     include(cmake/OpenGLFrontend.cmake)
 endif()
-include(cmake/ClientDistribution.cmake)
+if(NOT ANDROID)
+    include(cmake/ClientDistribution.cmake)
+endif()
 
 if(TETR_PORTABLE_BUILD)
     if(TETR_BUILD_TERMINAL)
@@ -683,73 +696,73 @@ if(BUILD_TESTING AND TETR_BUILD_TERMINAL)
     # A bundled dependency may have included CTest with its tests disabled.
     # Explicitly enable the parent project's tests regardless of that guard.
     enable_testing()
-    add_executable(bit_ops_test tests/bit_ops_test.cpp)
+    tetr_test_module(bit_ops_test tetr_core_tests tests/bit_ops_test.cpp)
     target_link_libraries(bit_ops_test PRIVATE tetr_headers)
-    add_test(NAME bit_ops COMMAND bit_ops_test)
+    add_test(NAME bit_ops COMMAND tetr_core_tests bit_ops_test)
 
-    add_executable(opener_phase_test tests/opener_phase_test.cpp)
+    tetr_test_module(opener_phase_test tetr_core_tests tests/opener_phase_test.cpp)
     target_link_libraries(opener_phase_test PRIVATE tetr_headers)
-    add_test(NAME opener_phase COMMAND opener_phase_test)
+    add_test(NAME opener_phase COMMAND tetr_core_tests opener_phase_test)
 
 
-    add_executable(core_geometry_test tests/core_geometry_test.cpp)
+    tetr_test_module(core_geometry_test tetr_core_tests tests/core_geometry_test.cpp)
     target_link_libraries(core_geometry_test PRIVATE tetr_runtime)
-    add_test(NAME core_geometry COMMAND core_geometry_test)
+    add_test(NAME core_geometry COMMAND tetr_core_tests core_geometry_test)
 
-    add_executable(core_rules_test tests/core_rules_test.cpp)
+    tetr_test_module(core_rules_test tetr_rules_tests tests/core_rules_test.cpp)
     target_link_libraries(core_rules_test PRIVATE tetr_rules)
-    add_test(NAME core_rules COMMAND core_rules_test)
+    add_test(NAME core_rules COMMAND tetr_rules_tests core_rules_test)
 
-    add_executable(attack_rules_test tests/attack_rules_test.cpp)
+    tetr_test_module(attack_rules_test tetr_application_tests tests/attack_rules_test.cpp)
     target_link_libraries(attack_rules_test PRIVATE tetr_app)
-    add_test(NAME attack_rules COMMAND attack_rules_test)
+    add_test(NAME attack_rules COMMAND tetr_application_tests attack_rules_test)
 
-    add_executable(garbage_shape_test tests/garbage_shape_test.cpp)
+    tetr_test_module(garbage_shape_test tetr_application_tests tests/garbage_shape_test.cpp)
     target_link_libraries(garbage_shape_test PRIVATE tetr_app)
-    add_test(NAME garbage_shape COMMAND garbage_shape_test)
+    add_test(NAME garbage_shape COMMAND tetr_application_tests garbage_shape_test)
 
-    add_executable(game_terminal_test tests/game_terminal_test.cpp)
+    tetr_test_module(game_terminal_test tetr_application_tests tests/game_terminal_test.cpp)
     target_link_libraries(game_terminal_test PRIVATE tetr_app)
-    add_test(NAME game_terminal COMMAND game_terminal_test)
+    add_test(NAME game_terminal COMMAND tetr_application_tests game_terminal_test)
     set_tests_properties(game_terminal PROPERTIES TIMEOUT 10)
 
-    add_executable(spawn_marker_test tests/spawn_marker_test.cpp)
+    tetr_test_module(spawn_marker_test tetr_application_tests tests/spawn_marker_test.cpp)
     target_link_libraries(spawn_marker_test PRIVATE tetr_app)
-    add_test(NAME spawn_marker COMMAND spawn_marker_test)
+    add_test(NAME spawn_marker COMMAND tetr_application_tests spawn_marker_test)
     set_tests_properties(spawn_marker PROPERTIES TIMEOUT 10)
 
-    add_executable(spin_bonuses_test tests/spin_bonuses_test.cpp)
+    tetr_test_module(spin_bonuses_test tetr_rules_tests tests/spin_bonuses_test.cpp)
     target_link_libraries(spin_bonuses_test PRIVATE tetr_rules tetr_config tetr_replay)
-    add_test(NAME spin_bonuses COMMAND spin_bonuses_test)
+    add_test(NAME spin_bonuses COMMAND tetr_rules_tests spin_bonuses_test)
 
-    add_executable(rotation_systems_test tests/rotation_systems_test.cpp)
+    tetr_test_module(rotation_systems_test tetr_rules_tests tests/rotation_systems_test.cpp)
     target_link_libraries(rotation_systems_test PRIVATE tetr_rules tetr_config tetr_replay tetr_engine)
-    add_test(NAME rotation_systems COMMAND rotation_systems_test)
+    add_test(NAME rotation_systems COMMAND tetr_rules_tests rotation_systems_test)
 
-    add_executable(bag_randomizer_test tests/bag_randomizer_test.cpp)
+    tetr_test_module(bag_randomizer_test tetr_rules_tests tests/bag_randomizer_test.cpp)
     target_link_libraries(bag_randomizer_test PRIVATE tetr_rules tetr_config tetr_replay tetr_engine)
-    add_test(NAME bag_randomizer COMMAND bag_randomizer_test)
+    add_test(NAME bag_randomizer COMMAND tetr_rules_tests bag_randomizer_test)
 
-    add_executable(spike_test tests/spike_test.cpp)
+    tetr_test_module(spike_test tetr_rules_tests tests/spike_test.cpp)
     target_link_libraries(spike_test PRIVATE tetr_rules tetr_runtime)
-    add_test(NAME spike COMMAND spike_test)
+    add_test(NAME spike COMMAND tetr_rules_tests spike_test)
 
-    add_executable(post_lock_rules_test tests/post_lock_rules_test.cpp)
+    tetr_test_module(post_lock_rules_test tetr_rules_tests tests/post_lock_rules_test.cpp)
     target_link_libraries(post_lock_rules_test PRIVATE tetr_rules tetr_engine)
-    add_test(NAME post_lock_rules COMMAND post_lock_rules_test)
-    add_executable(quick_play_rules_test tests/quick_play_rules_test.cpp)
+    add_test(NAME post_lock_rules COMMAND tetr_rules_tests post_lock_rules_test)
+    tetr_test_module(quick_play_rules_test tetr_rules_tests tests/quick_play_rules_test.cpp)
     target_link_libraries(quick_play_rules_test PRIVATE tetr_rules tetr_engine tetr_render tetr_replay tetr_config)
-    add_test(NAME quick_play_rules COMMAND quick_play_rules_test)
-    add_executable(snowball_test tests/snowball_test.cpp)
+    add_test(NAME quick_play_rules COMMAND tetr_rules_tests quick_play_rules_test)
+    tetr_test_module(snowball_test tetr_rules_tests tests/snowball_test.cpp)
     target_link_libraries(snowball_test PRIVATE tetr_config tetr_engine tetr_render tetr_replay)
-    add_test(NAME snowball COMMAND snowball_test)
+    add_test(NAME snowball COMMAND tetr_rules_tests snowball_test)
 
-    add_executable(undo_test tests/undo_test.cpp)
+    tetr_test_module(undo_test tetr_application_tests tests/undo_test.cpp)
     target_link_libraries(undo_test PRIVATE tetr_app)
-    add_test(NAME undo COMMAND undo_test)
-    add_executable(pause_test tests/pause_test.cpp)
+    add_test(NAME undo COMMAND tetr_application_tests undo_test)
+    tetr_test_module(pause_test tetr_application_tests tests/pause_test.cpp)
     target_link_libraries(pause_test PRIVATE tetr_app)
-    add_test(NAME pause COMMAND pause_test)
+    add_test(NAME pause COMMAND tetr_application_tests pause_test)
     set_tests_properties(pause PROPERTIES TIMEOUT 10)
     set_tests_properties(undo PROPERTIES TIMEOUT 15)
     add_test(NAME quick_play_cli COMMAND ${CMAKE_COMMAND}
@@ -758,33 +771,33 @@ if(BUILD_TESTING AND TETR_BUILD_TERMINAL)
         -DSOURCE_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/quick_play_cli_test.cmake)
 
-    add_executable(garbage_system_test tests/garbage_system_test.cpp)
+    tetr_test_module(garbage_system_test tetr_rules_tests tests/garbage_system_test.cpp)
     target_link_libraries(garbage_system_test PRIVATE tetr_rules tetr_engine)
-    add_test(NAME garbage_system COMMAND garbage_system_test)
+    add_test(NAME garbage_system COMMAND tetr_rules_tests garbage_system_test)
 
-    add_executable(placement_application_test tests/placement_application_test.cpp)
+    tetr_test_module(placement_application_test tetr_rules_tests tests/placement_application_test.cpp)
     target_link_libraries(placement_application_test PRIVATE tetr_rules tetr_engine_core)
-    add_test(NAME placement_application COMMAND placement_application_test)
+    add_test(NAME placement_application COMMAND tetr_rules_tests placement_application_test)
 
-    add_executable(movement_controller_test tests/movement_controller_test.cpp)
+    tetr_test_module(movement_controller_test tetr_engine_tests tests/movement_controller_test.cpp)
     target_link_libraries(movement_controller_test PRIVATE tetr_engine)
-    add_test(NAME movement_controller COMMAND movement_controller_test)
+    add_test(NAME movement_controller COMMAND tetr_engine_tests movement_controller_test)
 
-    add_executable(movement_presentation_test tests/movement_presentation_test.cpp)
+    tetr_test_module(movement_presentation_test tetr_engine_tests tests/movement_presentation_test.cpp)
     target_link_libraries(movement_presentation_test PRIVATE tetr_engine_presentation tetr_replay)
-    add_test(NAME movement_presentation COMMAND movement_presentation_test)
+    add_test(NAME movement_presentation COMMAND tetr_engine_tests movement_presentation_test)
 
-    add_executable(tetrio_inputs_test tests/tetrio_inputs_test.cpp)
+    tetr_test_module(tetrio_inputs_test tetr_engine_tests tests/tetrio_inputs_test.cpp)
     target_link_libraries(tetrio_inputs_test PRIVATE tetr_replay tetr_engine_presentation)
-    add_test(NAME tetrio_inputs COMMAND tetrio_inputs_test)
+    add_test(NAME tetrio_inputs COMMAND tetr_engine_tests tetrio_inputs_test)
 
-    add_executable(tetrio_random_test tests/tetrio_random_test.cpp)
+    tetr_test_module(tetrio_random_test tetr_rules_tests tests/tetrio_random_test.cpp)
     target_link_libraries(tetrio_random_test PRIVATE tetr_headers)
-    add_test(NAME tetrio_random COMMAND tetrio_random_test)
+    add_test(NAME tetrio_random COMMAND tetr_rules_tests tetrio_random_test)
 
-    add_executable(tetrio_round_test tests/tetrio_round_test.cpp)
+    tetr_test_module(tetrio_round_test tetr_application_tests tests/tetrio_round_test.cpp)
     target_link_libraries(tetrio_round_test PRIVATE tetr_app)
-    add_test(NAME tetrio_round COMMAND tetrio_round_test ${CMAKE_CURRENT_BINARY_DIR}/tetrio_round_fixture)
+    add_test(NAME tetrio_round COMMAND tetr_application_tests tetrio_round_test ${CMAKE_CURRENT_BINARY_DIR}/tetrio_round_fixture)
     set_tests_properties(tetrio_round PROPERTIES ENVIRONMENT
         "TETR_TEST_CLOCK_SCALE=100;TETR_TEST_MAX_PIECES=1;TETR_TEST_MAX_SECONDS=0.01;TETR_TEST_MAX_GARBAGE_CLEARED=1")
     add_test(NAME tetrio_ft7_cli COMMAND ${CMAKE_COMMAND}
@@ -792,223 +805,235 @@ if(BUILD_TESTING AND TETR_BUILD_TERMINAL)
         -DEXISTING_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/tetrio_ft7_cli_test.cmake)
 
-    add_executable(line_clear_presentation_test tests/line_clear_presentation_test.cpp)
+    tetr_test_module(line_clear_presentation_test tetr_engine_tests tests/line_clear_presentation_test.cpp)
     target_link_libraries(line_clear_presentation_test PRIVATE tetr_engine_presentation tetr_replay)
-    add_test(NAME line_clear_presentation COMMAND line_clear_presentation_test)
+    add_test(NAME line_clear_presentation COMMAND tetr_engine_tests line_clear_presentation_test)
 
-    add_executable(frame_update_test tests/frame_update_test.cpp)
+    tetr_test_module(frame_update_test tetr_engine_tests tests/frame_update_test.cpp)
     target_link_libraries(frame_update_test PRIVATE tetr_rules tetr_engine)
-    add_test(NAME frame_update COMMAND frame_update_test)
+    add_test(NAME frame_update COMMAND tetr_engine_tests frame_update_test)
 
-    add_executable(periodic_and_input_test tests/periodic_and_input_test.cpp)
+    tetr_test_module(periodic_and_input_test tetr_engine_tests tests/periodic_and_input_test.cpp)
     target_link_libraries(periodic_and_input_test PRIVATE tetr_engine)
-    add_test(NAME periodic_and_input COMMAND periodic_and_input_test)
+    add_test(NAME periodic_and_input COMMAND tetr_engine_tests periodic_and_input_test)
 
-    add_executable(player_input_equivalence_test tests/player_input_equivalence_test.cpp)
+    tetr_test_module(player_input_equivalence_test tetr_engine_tests tests/player_input_equivalence_test.cpp)
     target_link_libraries(player_input_equivalence_test PRIVATE tetr_engine)
-    add_test(NAME player_input_equivalence COMMAND player_input_equivalence_test)
+    add_test(NAME player_input_equivalence COMMAND tetr_engine_tests player_input_equivalence_test)
 
-    add_executable(gameplay_input_buffer_test tests/gameplay_input_buffer_test.cpp)
+    tetr_test_module(gameplay_input_buffer_test tetr_engine_tests tests/gameplay_input_buffer_test.cpp)
     target_link_libraries(gameplay_input_buffer_test PRIVATE tetr_engine)
-    add_test(NAME gameplay_input_buffer COMMAND gameplay_input_buffer_test)
+    add_test(NAME gameplay_input_buffer COMMAND tetr_engine_tests gameplay_input_buffer_test)
 
-    add_executable(handling_controls_test tests/handling_controls_test.cpp)
+    tetr_test_module(handling_controls_test tetr_application_tests tests/handling_controls_test.cpp)
     target_link_libraries(handling_controls_test PRIVATE tetr_app)
-    add_test(NAME handling_controls COMMAND handling_controls_test)
-    add_executable(forced_handling_test tests/forced_handling_test.cpp)
+    add_test(NAME handling_controls COMMAND tetr_application_tests handling_controls_test)
+    tetr_test_module(forced_handling_test tetr_application_tests tests/forced_handling_test.cpp)
     target_link_libraries(forced_handling_test PRIVATE tetr_app)
-    add_test(NAME forced_handling COMMAND forced_handling_test)
+    add_test(NAME forced_handling COMMAND tetr_application_tests forced_handling_test)
     set_tests_properties(handling_controls PROPERTIES TIMEOUT 10)
 
-    add_executable(das_precharge_test tests/das_precharge_test.cpp)
+    tetr_test_module(das_precharge_test tetr_application_tests tests/das_precharge_test.cpp)
     target_link_libraries(das_precharge_test PRIVATE tetr_app)
-    add_test(NAME das_precharge COMMAND das_precharge_test)
+    add_test(NAME das_precharge COMMAND tetr_application_tests das_precharge_test)
     set_tests_properties(das_precharge PROPERTIES TIMEOUT 15 ENVIRONMENT
         "TETR_TEST_CLOCK_SCALE=20;TETR_TEST_BATCH=1;TETR_TEST_MAX_PIECES=1")
 
-    add_executable(util_equivalence_test tests/util_equivalence_test.cpp)
+    tetr_test_module(util_equivalence_test tetr_core_tests tests/util_equivalence_test.cpp)
     target_link_libraries(util_equivalence_test PRIVATE tetr_util)
-    add_test(NAME util_equivalence COMMAND util_equivalence_test)
+    add_test(NAME util_equivalence COMMAND tetr_core_tests util_equivalence_test)
 
-    add_executable(user_config_test tests/user_config_test.cpp)
+    tetr_test_module(user_config_test tetr_application_tests tests/user_config_test.cpp)
     target_link_libraries(user_config_test PRIVATE tetr_config)
-    add_test(NAME user_config COMMAND user_config_test)
+    add_test(NAME user_config COMMAND tetr_application_tests user_config_test)
+    tetr_test_module(client_config_test tetr_application_tests tests/client_config_test.cpp)
+    target_link_libraries(client_config_test PRIVATE tetr_app Threads::Threads)
+    add_test(NAME client_config COMMAND tetr_application_tests client_config_test)
+    set_tests_properties(client_config PROPERTIES TIMEOUT 30)
 
-    add_executable(settings_schema_test tests/settings_schema_test.cpp)
+    tetr_test_module(settings_schema_test tetr_application_tests tests/settings_schema_test.cpp)
     target_link_libraries(settings_schema_test PRIVATE tetr_config)
-    add_test(NAME settings_schema COMMAND settings_schema_test)
+    add_test(NAME settings_schema COMMAND tetr_application_tests settings_schema_test)
 
-    add_executable(runtime_config_test tests/runtime_config_test.cpp)
+    tetr_test_module(runtime_config_test tetr_core_tests tests/runtime_config_test.cpp)
     target_link_libraries(runtime_config_test PRIVATE tetr_runtime)
-    add_test(NAME runtime_config COMMAND runtime_config_test)
+    add_test(NAME runtime_config COMMAND tetr_core_tests runtime_config_test)
 
-    add_executable(game_context_test tests/game_context_test.cpp)
+    tetr_test_module(game_context_test tetr_engine_tests tests/game_context_test.cpp)
     target_link_libraries(game_context_test PRIVATE tetr_engine tetr_runtime)
-    add_test(NAME game_context COMMAND game_context_test)
+    add_test(NAME game_context COMMAND tetr_engine_tests game_context_test)
 
-    add_executable(garbage_context_test tests/garbage_context_test.cpp)
+    tetr_test_module(garbage_context_test tetr_engine_tests tests/garbage_context_test.cpp)
     target_link_libraries(garbage_context_test PRIVATE tetr_engine tetr_runtime)
-    add_test(NAME garbage_context COMMAND garbage_context_test)
+    add_test(NAME garbage_context COMMAND tetr_engine_tests garbage_context_test)
 
-    add_executable(garbage_rise_test tests/garbage_rise_test.cpp)
+    tetr_test_module(garbage_rise_test tetr_engine_tests tests/garbage_rise_test.cpp)
     target_link_libraries(garbage_rise_test PRIVATE tetr_engine tetr_runtime)
-    add_test(NAME garbage_rise COMMAND garbage_rise_test)
+    add_test(NAME garbage_rise COMMAND tetr_engine_tests garbage_rise_test)
     set_tests_properties(garbage_rise PROPERTIES TIMEOUT 20)
 
-    add_executable(qp_pressure_test tests/qp_pressure_test.cpp)
+    tetr_test_module(qp_pressure_test tetr_engine_tests tests/qp_pressure_test.cpp)
     target_link_libraries(qp_pressure_test PRIVATE tetr_engine tetr_runtime)
-    add_test(NAME qp_pressure COMMAND qp_pressure_test)
+    add_test(NAME qp_pressure COMMAND tetr_engine_tests qp_pressure_test)
     set_tests_properties(qp_pressure PROPERTIES TIMEOUT 20)
 
-    add_executable(next_preview_render_test tests/next_preview_render_test.cpp)
+    tetr_test_module(next_preview_render_test tetr_engine_tests tests/next_preview_render_test.cpp)
     target_link_libraries(next_preview_render_test PRIVATE tetr_engine tetr_runtime)
-    add_test(NAME next_preview_render COMMAND next_preview_render_test)
-    add_executable(replay_garbage_timing_test tests/replay_garbage_timing_test.cpp)
+    add_test(NAME next_preview_render COMMAND tetr_engine_tests next_preview_render_test)
+    tetr_test_module(replay_garbage_timing_test tetr_engine_tests tests/replay_garbage_timing_test.cpp)
     target_link_libraries(replay_garbage_timing_test PRIVATE tetr_engine tetr_runtime)
-    add_test(NAME replay_garbage_timing COMMAND replay_garbage_timing_test)
+    add_test(NAME replay_garbage_timing COMMAND tetr_engine_tests replay_garbage_timing_test)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.tetr/replay/windup-test.txt")
-        add_test(NAME windup_saved_replay COMMAND replay_garbage_timing_test
+        add_test(NAME windup_saved_replay COMMAND tetr_engine_tests replay_garbage_timing_test
             "${CMAKE_CURRENT_SOURCE_DIR}/.tetr/replay/windup-test.txt")
         set_tests_properties(windup_saved_replay PROPERTIES TIMEOUT 20)
     endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.tetr/replay/bug.txt")
-        add_test(NAME quick_play_bot_saved_replay COMMAND replay_garbage_timing_test
+        add_test(NAME quick_play_bot_saved_replay COMMAND tetr_engine_tests replay_garbage_timing_test
             "${CMAKE_CURRENT_SOURCE_DIR}/.tetr/replay/bug.txt")
         set_tests_properties(quick_play_bot_saved_replay PROPERTIES TIMEOUT 30)
     endif()
 
-    add_executable(legacy_bot_boundary_test tests/legacy_bot_boundary_test.cpp)
+    tetr_test_module(legacy_bot_boundary_test tetr_bot_tests tests/legacy_bot_boundary_test.cpp)
     target_link_libraries(legacy_bot_boundary_test PRIVATE tetr_runtime tetr_bot_legacy)
-    add_test(NAME legacy_bot_boundary COMMAND legacy_bot_boundary_test)
+    add_test(NAME legacy_bot_boundary COMMAND tetr_bot_tests legacy_bot_boundary_test)
 
-    add_executable(bot_typed_boundary_test tests/bot_typed_boundary_test.cpp)
+    tetr_test_module(bot_typed_boundary_test tetr_bot_tests tests/bot_typed_boundary_test.cpp)
     target_link_libraries(bot_typed_boundary_test PRIVATE tetr_runtime tetr_bot_legacy tetr_engine_presentation)
-    add_test(NAME bot_typed_boundary COMMAND bot_typed_boundary_test)
+    add_test(NAME bot_typed_boundary COMMAND tetr_bot_tests bot_typed_boundary_test)
 
-    add_executable(bot_strategy_isolation_test tests/bot_strategy_isolation_test.cpp)
+    tetr_test_module(bot_strategy_isolation_test tetr_bot_tests tests/bot_strategy_isolation_test.cpp)
     target_link_libraries(bot_strategy_isolation_test PRIVATE tetr_runtime tetr_bot_legacy)
-    add_test(NAME bot_strategy_isolation COMMAND bot_strategy_isolation_test)
+    add_test(NAME bot_strategy_isolation COMMAND tetr_bot_tests bot_strategy_isolation_test)
 
-    add_executable(bot_zzztoj_test tests/bot_zzztoj_test.cpp)
+    tetr_test_module(bot_zzztoj_test tetr_bot_tests tests/bot_zzztoj_test.cpp)
     target_link_libraries(bot_zzztoj_test PRIVATE tetr_runtime tetr_bot_legacy)
-    add_test(NAME bot_zzztoj COMMAND bot_zzztoj_test)
-    add_executable(bot_quick_play_mods_test tests/bot_quick_play_mods_test.cpp)
+    add_test(NAME bot_zzztoj COMMAND tetr_bot_tests bot_zzztoj_test)
+    tetr_test_module(bot_quick_play_mods_test tetr_bot_tests tests/bot_quick_play_mods_test.cpp)
     target_link_libraries(bot_quick_play_mods_test PRIVATE tetr_bot_legacy tetr_bot_quick_play tetr_config tetr_engine)
-    add_test(NAME bot_quick_play_mods COMMAND bot_quick_play_mods_test)
+    tetr_test_module(bot_quick_play_altitude_benchmark tetr_bot_tests tests/bot_quick_play_altitude_benchmark.cpp)
+    target_link_libraries(bot_quick_play_altitude_benchmark PRIVATE tetr_app tetr_bot_legacy tetr_bot_quick_play tetr_config tetr_engine)
+    add_test(NAME bot_quick_play_mods COMMAND tetr_bot_tests bot_quick_play_mods_test)
+    add_test(NAME bot_chatgpt_capabilities COMMAND tetr_bot_tests bot_quick_play_mods_test --capability-regression)
+    set_tests_properties(bot_chatgpt_capabilities PROPERTIES TIMEOUT 120)
+    add_test(NAME bot_chatgpt_mod_pairs COMMAND tetr_bot_tests bot_quick_play_mods_test --capability-pairs)
+    add_test(NAME bot_chatgpt_spin_objective COMMAND tetr_bot_tests bot_quick_play_mods_test --spin-objective)
+    set_tests_properties(bot_chatgpt_mod_pairs PROPERTIES TIMEOUT 180)
     set_tests_properties(bot_quick_play_mods PROPERTIES TIMEOUT 120)
-    add_test(NAME bot_quick_play_attack COMMAND bot_quick_play_mods_test --attack-benchmark 100 123 0 300)
-    add_test(NAME bot_quick_play_attack_seed COMMAND bot_quick_play_mods_test --attack-benchmark 100 20261014 0 300)
-    add_test(NAME bot_quick_play_attack_pressure COMMAND bot_quick_play_mods_test --attack-benchmark 160 20261013 1 300)
-    add_test(NAME bot_quick_play_attack_small COMMAND bot_quick_play_mods_test --attack-benchmark 150 123 0 12)
+    add_test(NAME bot_quick_play_attack COMMAND tetr_bot_tests bot_quick_play_mods_test --attack-benchmark 100 123 0 300)
+    add_test(NAME bot_quick_play_attack_seed COMMAND tetr_bot_tests bot_quick_play_mods_test --attack-benchmark 100 20261014 0 300)
+    add_test(NAME bot_quick_play_attack_pressure COMMAND tetr_bot_tests bot_quick_play_mods_test --attack-benchmark 160 20261013 1 300)
+    add_test(NAME bot_quick_play_attack_small COMMAND tetr_bot_tests bot_quick_play_mods_test --attack-benchmark 150 123 0 12)
+    add_test(NAME bot_quick_play_mod_attack COMMAND tetr_bot_tests bot_quick_play_mods_test --mod-benchmark 100)
     set_tests_properties(bot_quick_play_attack bot_quick_play_attack_seed
-        bot_quick_play_attack_pressure bot_quick_play_attack_small PROPERTIES TIMEOUT 300)
+        bot_quick_play_attack_pressure bot_quick_play_attack_small bot_quick_play_mod_attack PROPERTIES TIMEOUT 300)
     if(MSVC)
         # The unchanged 160-piece, width-300 trajectory exercises all bots;
         # the scalar MSVC build takes longer on hosted Windows runners.
         set_tests_properties(bot_quick_play_attack_pressure PROPERTIES TIMEOUT 900)
     endif()
 
-    add_executable(bot_coldclear_test tests/bot_coldclear_test.cpp)
+    tetr_test_module(bot_coldclear_test tetr_bot_tests tests/bot_coldclear_test.cpp)
     target_link_libraries(bot_coldclear_test PRIVATE tetr_bot_coldclear tetr_bot_legacy tetr_rules)
     target_compile_definitions(bot_coldclear_test PRIVATE
         COLDCLEAR_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/coldclear_terrain.csv")
-    add_test(NAME bot_coldclear COMMAND bot_coldclear_test)
+    add_test(NAME bot_coldclear COMMAND tetr_bot_tests bot_coldclear_test)
     set_tests_properties(bot_coldclear PROPERTIES TIMEOUT 120)
 
-    add_executable(bot_chatgpt_test tests/bot_chatgpt_test.cpp)
+    tetr_test_module(bot_chatgpt_test tetr_bot_search_tests tests/bot_chatgpt_test.cpp)
     target_include_directories(bot_chatgpt_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt COMMAND bot_chatgpt_test)
+    add_test(NAME bot_chatgpt COMMAND tetr_bot_search_tests bot_chatgpt_test)
     set_tests_properties(bot_chatgpt PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_key_piece_test tests/bot_chatgpt_key_piece_test.cpp)
+    tetr_test_module(bot_chatgpt_key_piece_test tetr_bot_search_tests tests/bot_chatgpt_key_piece_test.cpp)
     target_include_directories(bot_chatgpt_key_piece_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_key_piece_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_key_piece COMMAND bot_chatgpt_key_piece_test)
-    add_executable(bot_chatgpt_reachable_holes_test tests/bot_chatgpt_reachable_holes_test.cpp)
+    add_test(NAME bot_chatgpt_key_piece COMMAND tetr_bot_search_tests bot_chatgpt_key_piece_test)
+    tetr_test_module(bot_chatgpt_reachable_holes_test tetr_bot_search_tests tests/bot_chatgpt_reachable_holes_test.cpp)
     target_include_directories(bot_chatgpt_reachable_holes_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_reachable_holes_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_reachable_holes COMMAND bot_chatgpt_reachable_holes_test)
-    add_executable(bot_chatgpt_known_bag_test tests/bot_chatgpt_known_bag_test.cpp)
+    add_test(NAME bot_chatgpt_reachable_holes COMMAND tetr_bot_search_tests bot_chatgpt_reachable_holes_test)
+    tetr_test_program(bot_chatgpt_known_bag_test tests/bot_chatgpt_known_bag_test.cpp)
     target_link_libraries(bot_chatgpt_known_bag_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
     if(TETR_CHATGPT_KNOWN_BAG)
         target_compile_definitions(bot_chatgpt_known_bag_test PRIVATE TETR_CHATGPT_KNOWN_BAG=1)
     endif()
     add_test(NAME bot_chatgpt_known_bag COMMAND bot_chatgpt_known_bag_test)
     set_tests_properties(bot_chatgpt_known_bag PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_o_roof_test tests/bot_chatgpt_o_roof_test.cpp)
+    tetr_test_module(bot_chatgpt_o_roof_test tetr_bot_search_tests tests/bot_chatgpt_o_roof_test.cpp)
     target_include_directories(bot_chatgpt_o_roof_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_o_roof_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_o_roof COMMAND bot_chatgpt_o_roof_test)
+    add_test(NAME bot_chatgpt_o_roof COMMAND tetr_bot_search_tests bot_chatgpt_o_roof_test)
     set_tests_properties(bot_chatgpt_o_roof PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_moch_multi_step_test tests/bot_chatgpt_moch_multi_step_test.cpp)
+    tetr_test_module(bot_chatgpt_moch_multi_step_test tetr_bot_search_tests tests/bot_chatgpt_moch_multi_step_test.cpp)
     target_include_directories(bot_chatgpt_moch_multi_step_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_moch_multi_step_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_moch_multi_step COMMAND bot_chatgpt_moch_multi_step_test)
+    add_test(NAME bot_chatgpt_moch_multi_step COMMAND tetr_bot_search_tests bot_chatgpt_moch_multi_step_test)
     set_tests_properties(bot_chatgpt_moch_multi_step PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_rise_horizon_test tests/bot_chatgpt_rise_horizon_test.cpp)
+    tetr_test_module(bot_chatgpt_rise_horizon_test tetr_bot_search_tests tests/bot_chatgpt_rise_horizon_test.cpp)
     target_include_directories(bot_chatgpt_rise_horizon_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_rise_horizon_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_rise_horizon COMMAND bot_chatgpt_rise_horizon_test)
+    add_test(NAME bot_chatgpt_rise_horizon COMMAND tetr_bot_search_tests bot_chatgpt_rise_horizon_test)
     set_tests_properties(bot_chatgpt_rise_horizon PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_transposition_test tests/bot_chatgpt_transposition_test.cpp)
+    tetr_test_program(bot_chatgpt_transposition_test tests/bot_chatgpt_transposition_test.cpp)
     target_include_directories(bot_chatgpt_transposition_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_transposition_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
     add_test(NAME bot_chatgpt_transposition COMMAND bot_chatgpt_transposition_test)
     set_tests_properties(bot_chatgpt_transposition PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_garbage_rollout_test tests/bot_chatgpt_garbage_rollout_test.cpp)
+    tetr_test_program(bot_chatgpt_garbage_rollout_test tests/bot_chatgpt_garbage_rollout_test.cpp)
     target_include_directories(bot_chatgpt_garbage_rollout_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_garbage_rollout_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
     add_test(NAME bot_chatgpt_garbage_rollout COMMAND bot_chatgpt_garbage_rollout_test)
     set_tests_properties(bot_chatgpt_garbage_rollout PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_root_coverage_test tests/bot_chatgpt_root_coverage_test.cpp)
+    tetr_test_program(bot_chatgpt_root_coverage_test tests/bot_chatgpt_root_coverage_test.cpp)
     target_include_directories(bot_chatgpt_root_coverage_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_root_coverage_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
     add_test(NAME bot_chatgpt_root_coverage COMMAND bot_chatgpt_root_coverage_test)
     set_tests_properties(bot_chatgpt_root_coverage PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_settled_risk_test tests/bot_chatgpt_settled_risk_test.cpp)
+    tetr_test_module(bot_chatgpt_settled_risk_test tetr_bot_search_tests tests/bot_chatgpt_settled_risk_test.cpp)
     target_include_directories(bot_chatgpt_settled_risk_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_settled_risk_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_settled_risk COMMAND bot_chatgpt_settled_risk_test)
+    add_test(NAME bot_chatgpt_settled_risk COMMAND tetr_bot_search_tests bot_chatgpt_settled_risk_test)
     set_tests_properties(bot_chatgpt_settled_risk PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_fast_terrain_test tests/bot_chatgpt_fast_terrain_test.cpp)
+    tetr_test_module(bot_chatgpt_fast_terrain_test tetr_bot_search_tests tests/bot_chatgpt_fast_terrain_test.cpp)
     target_include_directories(bot_chatgpt_fast_terrain_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_fast_terrain_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_fast_terrain COMMAND bot_chatgpt_fast_terrain_test)
+    add_test(NAME bot_chatgpt_fast_terrain COMMAND tetr_bot_search_tests bot_chatgpt_fast_terrain_test)
     set_tests_properties(bot_chatgpt_fast_terrain PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_terrain_test tests/bot_chatgpt_terrain_test.cpp)
+    tetr_test_module(bot_chatgpt_terrain_test tetr_bot_search_tests tests/bot_chatgpt_terrain_test.cpp)
     target_include_directories(bot_chatgpt_terrain_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_terrain_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_terrain COMMAND bot_chatgpt_terrain_test)
+    add_test(NAME bot_chatgpt_terrain COMMAND tetr_bot_search_tests bot_chatgpt_terrain_test)
     set_tests_properties(bot_chatgpt_terrain PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_terrain_evaluation_test tests/bot_chatgpt_terrain_evaluation_test.cpp)
+    tetr_test_module(bot_chatgpt_terrain_evaluation_test tetr_bot_search_tests tests/bot_chatgpt_terrain_evaluation_test.cpp)
     target_include_directories(bot_chatgpt_terrain_evaluation_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_terrain_evaluation_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_terrain_evaluation COMMAND bot_chatgpt_terrain_evaluation_test)
+    add_test(NAME bot_chatgpt_terrain_evaluation COMMAND tetr_bot_search_tests bot_chatgpt_terrain_evaluation_test)
     set_tests_properties(bot_chatgpt_terrain_evaluation PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_terrain_bridge_test tests/bot_chatgpt_terrain_bridge_test.cpp)
+    tetr_test_module(bot_chatgpt_terrain_bridge_test tetr_bot_search_tests tests/bot_chatgpt_terrain_bridge_test.cpp)
     target_include_directories(bot_chatgpt_terrain_bridge_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_terrain_bridge_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_terrain_bridge COMMAND bot_chatgpt_terrain_bridge_test)
+    add_test(NAME bot_chatgpt_terrain_bridge COMMAND tetr_bot_search_tests bot_chatgpt_terrain_bridge_test)
     set_tests_properties(bot_chatgpt_terrain_bridge PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_learned_terrain_test tests/bot_chatgpt_learned_terrain_test.cpp)
+    tetr_test_module(bot_chatgpt_learned_terrain_test tetr_bot_search_tests tests/bot_chatgpt_learned_terrain_test.cpp)
     target_include_directories(bot_chatgpt_learned_terrain_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_learned_terrain_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_learned_terrain COMMAND bot_chatgpt_learned_terrain_test)
+    add_test(NAME bot_chatgpt_learned_terrain COMMAND tetr_bot_search_tests bot_chatgpt_learned_terrain_test)
     set_tests_properties(bot_chatgpt_learned_terrain PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_local_pattern_test tests/bot_chatgpt_local_pattern_test.cpp)
+    tetr_test_module(bot_chatgpt_local_pattern_test tetr_bot_search_tests tests/bot_chatgpt_local_pattern_test.cpp)
     target_include_directories(bot_chatgpt_local_pattern_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_local_pattern_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_local_pattern COMMAND bot_chatgpt_local_pattern_test)
+    add_test(NAME bot_chatgpt_local_pattern COMMAND tetr_bot_search_tests bot_chatgpt_local_pattern_test)
     set_tests_properties(bot_chatgpt_local_pattern PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_local_pattern_evaluation_test tests/bot_chatgpt_local_pattern_evaluation_test.cpp)
+    tetr_test_module(bot_chatgpt_local_pattern_evaluation_test tetr_bot_search_tests tests/bot_chatgpt_local_pattern_evaluation_test.cpp)
     target_include_directories(bot_chatgpt_local_pattern_evaluation_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_local_pattern_evaluation_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_local_pattern_evaluation COMMAND bot_chatgpt_local_pattern_evaluation_test)
+    add_test(NAME bot_chatgpt_local_pattern_evaluation COMMAND tetr_bot_search_tests bot_chatgpt_local_pattern_evaluation_test)
     set_tests_properties(bot_chatgpt_local_pattern_evaluation PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_time_b2b_evaluation_test tests/bot_chatgpt_time_b2b_evaluation_test.cpp)
+    tetr_test_module(bot_chatgpt_time_b2b_evaluation_test tetr_bot_search_tests tests/bot_chatgpt_time_b2b_evaluation_test.cpp)
     target_include_directories(bot_chatgpt_time_b2b_evaluation_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_time_b2b_evaluation_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_time_b2b_evaluation COMMAND bot_chatgpt_time_b2b_evaluation_test)
+    add_test(NAME bot_chatgpt_time_b2b_evaluation COMMAND tetr_bot_search_tests bot_chatgpt_time_b2b_evaluation_test)
     set_tests_properties(bot_chatgpt_time_b2b_evaluation PROPERTIES TIMEOUT 30)
     add_executable(bot_chatgpt_root_probe EXCLUDE_FROM_ALL src/bot/chatgpt/root_probe.cpp)
     target_include_directories(bot_chatgpt_root_probe PRIVATE zzztoj_standalone/src)
@@ -1019,212 +1044,217 @@ if(BUILD_TESTING AND TETR_BUILD_TERMINAL)
     add_executable(bot_chatgpt_native_probe EXCLUDE_FROM_ALL src/bot/chatgpt/analysis/native_probe.cpp)
     target_include_directories(bot_chatgpt_native_probe PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_native_probe PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_executable(bot_chatgpt_native_test tests/bot_chatgpt_native_test.cpp)
+    tetr_test_module(bot_chatgpt_native_test tetr_bot_search_tests tests/bot_chatgpt_native_test.cpp)
     target_include_directories(bot_chatgpt_native_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_native_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_native COMMAND bot_chatgpt_native_test)
+    add_test(NAME bot_chatgpt_native COMMAND tetr_bot_search_tests bot_chatgpt_native_test)
     set_tests_properties(bot_chatgpt_native PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_hold_context_test tests/bot_chatgpt_hold_context_test.cpp)
+    tetr_test_module(bot_chatgpt_hold_context_test tetr_bot_search_tests tests/bot_chatgpt_hold_context_test.cpp)
     target_include_directories(bot_chatgpt_hold_context_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_hold_context_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_hold_context COMMAND bot_chatgpt_hold_context_test)
+    add_test(NAME bot_chatgpt_hold_context COMMAND tetr_bot_search_tests bot_chatgpt_hold_context_test)
     set_tests_properties(bot_chatgpt_hold_context PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_rise_context_test tests/bot_chatgpt_rise_context_test.cpp)
-    add_executable(bot_chatgpt_coverage_test tests/bot_chatgpt_coverage_test.cpp)
+    tetr_test_module(bot_chatgpt_rise_context_test tetr_bot_search_tests tests/bot_chatgpt_rise_context_test.cpp)
+    tetr_test_module(bot_chatgpt_coverage_test tetr_bot_search_tests tests/bot_chatgpt_coverage_test.cpp)
     target_include_directories(bot_chatgpt_coverage_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_coverage_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_coverage COMMAND bot_chatgpt_coverage_test)
+    add_test(NAME bot_chatgpt_coverage COMMAND tetr_bot_search_tests bot_chatgpt_coverage_test)
     set_tests_properties(bot_chatgpt_coverage PROPERTIES TIMEOUT 60)
     target_include_directories(bot_chatgpt_rise_context_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_rise_context_test PRIVATE tetr_bot_legacy tetr_rules tetr_engine_core tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_rise_context COMMAND bot_chatgpt_rise_context_test)
+    add_test(NAME bot_chatgpt_rise_context COMMAND tetr_bot_search_tests bot_chatgpt_rise_context_test)
     set_tests_properties(bot_chatgpt_rise_context PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_quota_test tests/bot_chatgpt_quota_test.cpp)
+    tetr_test_module(bot_chatgpt_quota_test tetr_bot_search_tests tests/bot_chatgpt_quota_test.cpp)
     target_include_directories(bot_chatgpt_quota_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_quota_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_quota COMMAND bot_chatgpt_quota_test)
+    add_test(NAME bot_chatgpt_quota COMMAND tetr_bot_search_tests bot_chatgpt_quota_test)
     set_tests_properties(bot_chatgpt_quota PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_beam_quota_test tests/bot_chatgpt_beam_quota_test.cpp)
+    tetr_test_program(bot_chatgpt_beam_quota_test tests/bot_chatgpt_beam_quota_test.cpp)
     target_include_directories(bot_chatgpt_beam_quota_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_beam_quota_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
     add_test(NAME bot_chatgpt_beam_quota COMMAND bot_chatgpt_beam_quota_test)
     set_tests_properties(bot_chatgpt_beam_quota PROPERTIES TIMEOUT 30)
-    add_executable(bot_chatgpt_spin_test tests/bot_chatgpt_spin_test.cpp)
+    tetr_test_module(bot_chatgpt_spin_test tetr_bot_search_tests tests/bot_chatgpt_spin_test.cpp)
     target_include_directories(bot_chatgpt_spin_test PRIVATE zzztoj_standalone/src)
     target_link_libraries(bot_chatgpt_spin_test PRIVATE tetr_bot_legacy tetr_rules tetr_bot_zzztoj_upstream)
-    add_test(NAME bot_chatgpt_spin COMMAND bot_chatgpt_spin_test)
+    add_test(NAME bot_chatgpt_spin COMMAND tetr_bot_search_tests bot_chatgpt_spin_test)
     set_tests_properties(bot_chatgpt_spin PROPERTIES TIMEOUT 30)
 
-    add_executable(bot_zzztoj_benchmark tests/bot_zzztoj_benchmark.cpp)
+    tetr_test_module(bot_zzztoj_benchmark tetr_bot_tests tests/bot_zzztoj_benchmark.cpp)
     target_link_libraries(bot_zzztoj_benchmark
         PRIVATE tetr_engine_core tetr_rules tetr_runtime tetr_bot_legacy)
     add_test(NAME bot_zzztoj_opening_quality
-        COMMAND bot_zzztoj_benchmark 7 300 20260918 3)
+        COMMAND tetr_bot_tests bot_zzztoj_benchmark 7 300 20260918 3)
     add_test(NAME bot_zzztoj_survival
-        COMMAND bot_zzztoj_benchmark 300 300 20260919 18 botris)
+        COMMAND tetr_bot_tests bot_zzztoj_benchmark 300 300 20260919 18 botris)
     foreach(zzztoj_variant IN ITEMS toj dig qq c2)
         add_test(NAME "bot_zzztoj_${zzztoj_variant}_survival"
-            COMMAND bot_zzztoj_benchmark 100 300 20260919 -1 "${zzztoj_variant}")
+            COMMAND tetr_bot_tests bot_zzztoj_benchmark 100 300 20260919 -1 "${zzztoj_variant}")
         set_tests_properties("bot_zzztoj_${zzztoj_variant}_survival"
             PROPERTIES TIMEOUT 30)
     endforeach()
     set_tests_properties(bot_zzztoj_opening_quality PROPERTIES TIMEOUT 10)
     set_tests_properties(bot_zzztoj_survival PROPERTIES TIMEOUT 30)
 
-    add_executable(init_context_test tests/init_context_test.cpp)
+    tetr_test_module(init_context_test tetr_application_tests tests/init_context_test.cpp)
     target_link_libraries(init_context_test PRIVATE tetr_app tetr_engine tetr_runtime)
-    add_test(NAME init_context COMMAND init_context_test)
+    add_test(NAME init_context COMMAND tetr_application_tests init_context_test)
 
-    add_executable(local_versus_init_test tests/local_versus_init_test.cpp)
+    tetr_test_module(local_versus_init_test tetr_application_tests tests/local_versus_init_test.cpp)
     target_link_libraries(local_versus_init_test PRIVATE tetr_app tetr_engine tetr_runtime tetr_network)
-    add_test(NAME local_versus_init COMMAND local_versus_init_test)
+    add_test(NAME local_versus_init COMMAND tetr_application_tests local_versus_init_test)
 
-    add_executable(clutch_test tests/clutch_test.cpp)
+    tetr_test_module(clutch_test tetr_application_tests tests/clutch_test.cpp)
     target_link_libraries(clutch_test PRIVATE tetr_engine tetr_runtime)
-    add_test(NAME clutch COMMAND clutch_test)
+    add_test(NAME clutch COMMAND tetr_application_tests clutch_test)
 
-    add_executable(render_layer_test tests/render_layer_test.cpp)
+    tetr_test_module(render_layer_test tetr_engine_tests tests/render_layer_test.cpp)
     target_link_libraries(render_layer_test PRIVATE tetr_render tetr_runtime)
-    add_test(NAME render_layer COMMAND render_layer_test)
+    add_test(NAME render_layer COMMAND tetr_engine_tests render_layer_test)
 
 
-    add_executable(player_session_state_test tests/player_session_state_test.cpp)
+    tetr_test_module(player_session_state_test tetr_core_tests tests/player_session_state_test.cpp)
     target_link_libraries(player_session_state_test PRIVATE tetr_runtime)
-    add_test(NAME player_session_state COMMAND player_session_state_test)
+    add_test(NAME player_session_state COMMAND tetr_core_tests player_session_state_test)
 
-    add_executable(piece_queue_equivalence_test tests/piece_queue_equivalence_test.cpp)
+    tetr_test_module(piece_queue_equivalence_test tetr_rules_tests tests/piece_queue_equivalence_test.cpp)
     target_link_libraries(piece_queue_equivalence_test PRIVATE tetr_engine_core tetr_runtime)
-    add_test(NAME piece_queue_equivalence COMMAND piece_queue_equivalence_test)
+    add_test(NAME piece_queue_equivalence COMMAND tetr_rules_tests piece_queue_equivalence_test)
 
-    add_executable(bot_bag_remainder_test tests/bot_bag_remainder_test.cpp)
+    tetr_test_module(bot_bag_remainder_test tetr_bot_tests tests/bot_bag_remainder_test.cpp)
     target_link_libraries(bot_bag_remainder_test PRIVATE tetr_engine_core tetr_runtime)
-    add_test(NAME bot_bag_remainder COMMAND bot_bag_remainder_test)
+    add_test(NAME bot_bag_remainder COMMAND tetr_bot_tests bot_bag_remainder_test)
 
-    add_executable(board_state_codec_test tests/board_state_codec_test.cpp)
+    tetr_test_module(board_state_codec_test tetr_network_tests tests/board_state_codec_test.cpp)
     target_link_libraries(board_state_codec_test PRIVATE tetr_network tetr_runtime)
-    add_test(NAME board_state_codec COMMAND board_state_codec_test)
+    add_test(NAME board_state_codec COMMAND tetr_network_tests board_state_codec_test)
 
-    add_executable(board_state_receive_codec_test tests/board_state_receive_codec_test.cpp)
+    tetr_test_module(board_state_receive_codec_test tetr_network_tests tests/board_state_receive_codec_test.cpp)
     target_link_libraries(board_state_receive_codec_test PRIVATE tetr_network tetr_runtime tetr_rules)
-    add_test(NAME board_state_receive_codec COMMAND board_state_receive_codec_test)
+    add_test(NAME board_state_receive_codec COMMAND tetr_network_tests board_state_receive_codec_test)
 
-    add_executable(strong_types_test tests/strong_types_test.cpp)
+    tetr_test_module(strong_types_test tetr_core_tests tests/strong_types_test.cpp)
     target_link_libraries(strong_types_test PRIVATE tetr_headers)
-    add_test(NAME strong_types COMMAND strong_types_test)
+    add_test(NAME strong_types COMMAND tetr_core_tests strong_types_test)
 
-    add_executable(input_semantics_test tests/input_semantics_test.cpp)
+    tetr_test_module(input_semantics_test tetr_engine_tests tests/input_semantics_test.cpp)
     target_link_libraries(input_semantics_test PRIVATE tetr_engine)
-    add_test(NAME input_semantics COMMAND input_semantics_test)
+    add_test(NAME input_semantics COMMAND tetr_engine_tests input_semantics_test)
     if(WIN32)
-        add_executable(windows_console_focus_test tests/windows_console_focus_test.cpp)
+        tetr_test_program(windows_console_focus_test tests/windows_console_focus_test.cpp)
         target_link_libraries(windows_console_focus_test PRIVATE tetr_headers Threads::Threads)
         add_test(NAME windows_console_focus COMMAND windows_console_focus_test)
-        add_executable(windows_multiplayer_latency_benchmark tests/windows_multiplayer_latency_benchmark.cpp)
+        tetr_test_program(windows_multiplayer_latency_benchmark tests/windows_multiplayer_latency_benchmark.cpp)
         target_link_libraries(windows_multiplayer_latency_benchmark PRIVATE tetr_app tetr_network)
     endif()
 
-    add_executable(time_semantics_test tests/time_semantics_test.cpp)
+    tetr_test_module(time_semantics_test tetr_engine_tests tests/time_semantics_test.cpp)
     target_link_libraries(time_semantics_test PRIVATE tetr_engine)
-    add_test(NAME time_semantics COMMAND time_semantics_test)
+    add_test(NAME time_semantics COMMAND tetr_engine_tests time_semantics_test)
 
-    add_executable(serialization_boundary_test tests/serialization_boundary_test.cpp)
+    tetr_test_module(serialization_boundary_test tetr_application_tests tests/serialization_boundary_test.cpp)
     target_link_libraries(serialization_boundary_test PRIVATE tetr_engine tetr_network tetr_runtime tetr_rules)
-    add_test(NAME serialization_boundary COMMAND serialization_boundary_test)
+    add_test(NAME serialization_boundary COMMAND tetr_application_tests serialization_boundary_test)
 
-    add_executable(multiplayer_frame_boundary_test tests/multiplayer_frame_boundary_test.cpp)
+    tetr_test_module(multiplayer_frame_boundary_test tetr_engine_tests tests/multiplayer_frame_boundary_test.cpp)
     target_link_libraries(multiplayer_frame_boundary_test PRIVATE tetr_engine tetr_network tetr_runtime tetr_rules)
-    add_test(NAME multiplayer_frame_boundary COMMAND multiplayer_frame_boundary_test)
+    add_test(NAME multiplayer_frame_boundary COMMAND tetr_engine_tests multiplayer_frame_boundary_test)
 
-    add_executable(multiplayer_lobby_protocol_test tests/multiplayer_lobby_protocol_test.cpp)
+    tetr_test_module(multiplayer_lobby_protocol_test tetr_network_tests tests/multiplayer_lobby_protocol_test.cpp)
     target_link_libraries(multiplayer_lobby_protocol_test PRIVATE tetr_network tetr_runtime)
-    add_test(NAME multiplayer_lobby_protocol COMMAND multiplayer_lobby_protocol_test)
+    add_test(NAME multiplayer_lobby_protocol COMMAND tetr_network_tests multiplayer_lobby_protocol_test)
 
-    add_executable(network_wait_test tests/network_wait_test.cpp)
+    tetr_test_module(network_wait_test tetr_network_tests tests/network_wait_test.cpp)
     target_link_libraries(network_wait_test PRIVATE tetr_network)
-    add_test(NAME network_wait COMMAND network_wait_test)
-    add_executable(hybrid_board_sync_test tests/hybrid_board_sync_test.cpp)
+    add_test(NAME network_wait COMMAND tetr_network_tests network_wait_test)
+    tetr_test_module(hybrid_board_sync_test tetr_network_tests tests/hybrid_board_sync_test.cpp)
     target_link_libraries(hybrid_board_sync_test PRIVATE tetr_engine tetr_network tetr_runtime)
-    add_test(NAME hybrid_board_sync COMMAND hybrid_board_sync_test)
+    add_test(NAME hybrid_board_sync COMMAND tetr_network_tests hybrid_board_sync_test)
 
-    add_executable(network_rooms_test tests/network_rooms_test.cpp)
+    tetr_test_module(network_rooms_test tetr_network_tests tests/network_rooms_test.cpp)
     target_link_libraries(network_rooms_test PRIVATE tetr_network tetr_runtime)
-    add_test(NAME network_rooms COMMAND network_rooms_test)
-    add_executable(room_kick_test tests/room_kick_test.cpp)
+    add_test(NAME network_rooms COMMAND tetr_network_tests network_rooms_test)
+    tetr_test_module(room_kick_test tetr_network_tests tests/room_kick_test.cpp)
     target_link_libraries(room_kick_test PRIVATE tetr_app tetr_network)
-    add_test(NAME room_kick COMMAND room_kick_test)
+    add_test(NAME room_kick COMMAND tetr_network_tests room_kick_test)
     set_tests_properties(room_kick PROPERTIES TIMEOUT 35 RESOURCE_LOCK udp_server_3007)
-    add_executable(room_names_test tests/room_names_test.cpp)
+    tetr_test_module(room_names_test tetr_network_tests tests/room_names_test.cpp)
     target_link_libraries(room_names_test PRIVATE tetr_network tetr_runtime)
-    add_test(NAME room_names COMMAND room_names_test)
+    add_test(NAME room_names COMMAND tetr_network_tests room_names_test)
     set_tests_properties(room_names PROPERTIES TIMEOUT 30 RESOURCE_LOCK udp_server_3018)
     add_executable(multiplayer_bot_gallery tools/multiplayer_bot_gallery.cpp)
     target_link_libraries(multiplayer_bot_gallery PRIVATE tetr_app tetr_network tetr_bot_legacy Threads::Threads)
-    add_executable(multiplayer_rooms_test tests/multiplayer_rooms_test.cpp)
+    tetr_test_module(multiplayer_rooms_test tetr_network_tests tests/multiplayer_rooms_test.cpp)
     target_link_libraries(multiplayer_rooms_test PRIVATE tetr_app tetr_network)
-    add_test(NAME multiplayer_rooms COMMAND multiplayer_rooms_test)
-    add_executable(multiplayer_scene_test tests/multiplayer_scene_test.cpp)
+    add_test(NAME multiplayer_rooms COMMAND tetr_network_tests multiplayer_rooms_test)
+    tetr_test_module(multiplayer_scene_test tetr_network_tests tests/multiplayer_scene_test.cpp)
     target_link_libraries(multiplayer_scene_test PRIVATE tetr_app tetr_network)
-    add_test(NAME multiplayer_scene COMMAND multiplayer_scene_test)
-    add_executable(room_preparation_test tests/room_preparation_test.cpp)
+    add_test(NAME multiplayer_scene COMMAND tetr_network_tests multiplayer_scene_test)
+    tetr_test_module(room_preparation_test tetr_network_tests tests/room_preparation_test.cpp)
     target_link_libraries(room_preparation_test PRIVATE tetr_app tetr_network)
-    add_test(NAME room_preparation COMMAND room_preparation_test)
+    add_test(NAME room_preparation COMMAND tetr_network_tests room_preparation_test)
     set_tests_properties(room_preparation PROPERTIES TIMEOUT 30 RESOURCE_LOCK udp3034)
-    add_executable(room_config_burst_test tests/room_config_burst_test.cpp)
+    tetr_test_module(room_config_burst_test tetr_network_tests tests/room_config_burst_test.cpp)
     target_link_libraries(room_config_burst_test PRIVATE tetr_network)
-    add_test(NAME room_config_burst COMMAND room_config_burst_test)
+    add_test(NAME room_config_burst COMMAND tetr_network_tests room_config_burst_test)
     set_tests_properties(room_config_burst PROPERTIES TIMEOUT 15 RESOURCE_LOCK udp3038)
-    add_executable(room_late_spectator_test tests/room_late_spectator_test.cpp)
+    tetr_test_module(room_late_spectator_test tetr_network_tests tests/room_late_spectator_test.cpp)
     target_link_libraries(room_late_spectator_test PRIVATE tetr_app tetr_network)
-    add_test(NAME room_late_spectator COMMAND room_late_spectator_test)
+    add_test(NAME room_late_spectator COMMAND tetr_network_tests room_late_spectator_test)
     set_tests_properties(room_late_spectator PROPERTIES TIMEOUT 30 RESOURCE_LOCK udp_server_3035)
     if(UNIX)
-        add_executable(room_start_spectator_test tests/room_start_spectator_test.cpp)
+        tetr_test_module(room_start_spectator_test tetr_network_tests tests/room_start_spectator_test.cpp)
         target_link_libraries(room_start_spectator_test PRIVATE tetr_app tetr_network)
-        add_test(NAME room_start_spectator COMMAND room_start_spectator_test)
-        add_test(NAME room_start_spectator_8 COMMAND room_start_spectator_test --local 8 1)
+        add_test(NAME room_start_spectator COMMAND tetr_network_tests room_start_spectator_test)
+        add_test(NAME room_start_spectator_8 COMMAND tetr_network_tests room_start_spectator_test --local 8 1)
         set_tests_properties(room_start_spectator room_start_spectator_8 PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3040)
     endif()
-    add_executable(multiplayer_geometry_test tests/multiplayer_geometry_test.cpp)
+    tetr_test_module(multiplayer_geometry_test tetr_network_tests tests/multiplayer_geometry_test.cpp)
     target_link_libraries(multiplayer_geometry_test PRIVATE tetr_app tetr_network)
-    add_test(NAME multiplayer_geometry COMMAND multiplayer_geometry_test)
-    add_executable(adaptive_board_view_test tests/adaptive_board_view_test.cpp)
+    add_test(NAME multiplayer_geometry COMMAND tetr_network_tests multiplayer_geometry_test)
+    tetr_test_program(adaptive_board_view_test tests/adaptive_board_view_test.cpp)
     target_link_libraries(adaptive_board_view_test PRIVATE tetr_app tetr_network)
     add_test(NAME adaptive_board_view COMMAND adaptive_board_view_test)
     set_tests_properties(adaptive_board_view PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3026)
-    add_executable(board_view_stagger_test tests/board_view_stagger_test.cpp)
+    tetr_test_module(board_view_stagger_test tetr_network_tests tests/board_view_stagger_test.cpp)
     target_link_libraries(board_view_stagger_test PRIVATE tetr_app tetr_network)
-    add_test(NAME board_view_stagger COMMAND board_view_stagger_test)
+    add_test(NAME board_view_stagger COMMAND tetr_network_tests board_view_stagger_test)
     set_tests_properties(board_view_stagger PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3027)
-    add_test(NAME board_view_stagger_32 COMMAND board_view_stagger_test 32)
+    add_test(NAME board_view_stagger_32 COMMAND tetr_network_tests board_view_stagger_test 32)
     set_tests_properties(board_view_stagger_32 PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3027)
-    add_test(NAME board_view_steady_8 COMMAND board_view_stagger_test 8 --steady)
+    add_test(NAME board_view_steady_8 COMMAND tetr_network_tests board_view_stagger_test 8 --steady)
     set_tests_properties(board_view_steady_8 PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3027)
 
-    add_executable(multiplayer_round_lifecycle_test tests/multiplayer_round_lifecycle_test.cpp)
+    tetr_test_program(multiplayer_round_lifecycle_test tests/multiplayer_round_lifecycle_test.cpp)
     target_link_libraries(multiplayer_round_lifecycle_test PRIVATE tetr_app tetr_network)
     add_test(NAME multiplayer_round_lifecycle COMMAND multiplayer_round_lifecycle_test)
     set_tests_properties(multiplayer_round_lifecycle PROPERTIES RESOURCE_LOCK udp_server_3017)
     set_tests_properties(multiplayer_round_lifecycle PROPERTIES TIMEOUT 45 ENVIRONMENT "TETR_TEST_CLOCK_SCALE=10")
     set_tests_properties(multiplayer_rooms PROPERTIES TIMEOUT 45 RESOURCE_LOCK udp_server_3005)
-    add_executable(multiplayer_config_test tests/multiplayer_config_test.cpp)
+    tetr_test_module(multiplayer_config_test tetr_network_tests tests/multiplayer_config_test.cpp)
     target_link_libraries(multiplayer_config_test PRIVATE tetr_config tetr_network)
-    add_test(NAME multiplayer_config COMMAND multiplayer_config_test)
-    add_executable(room_host_config_test tests/room_host_config_test.cpp)
+    add_test(NAME multiplayer_config COMMAND tetr_network_tests multiplayer_config_test)
+    tetr_test_program(room_host_config_test tests/room_host_config_test.cpp)
     target_link_libraries(room_host_config_test PRIVATE tetr_app tetr_network)
     add_test(NAME room_host_config COMMAND room_host_config_test)
     set_tests_properties(network_rooms PROPERTIES TIMEOUT 30 RESOURCE_LOCK udp_server_3002)
-    add_executable(network_connection_test tests/network_connection_test.cpp)
+    tetr_test_module(network_connection_test tetr_network_tests tests/network_connection_test.cpp)
     target_link_libraries(network_connection_test PRIVATE tetr_network tetr_runtime)
-    add_test(NAME network_connection COMMAND network_connection_test)
+    add_test(NAME network_connection COMMAND tetr_network_tests network_connection_test)
     set_tests_properties(network_connection PROPERTIES TIMEOUT 35 RESOURCE_LOCK udp_server_3000)
     if(WIN32)
         # Windows' select() timer granularity makes the relay pump slower.
         set_tests_properties(network_connection PROPERTIES TIMEOUT 45)
     endif()
-    add_executable(network_websocket_test tests/network_websocket_test.cpp)
+    tetr_test_program(network_websocket_test tests/network_websocket_test.cpp)
     target_link_libraries(network_websocket_test PRIVATE tetr_network tetr_runtime)
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME tunnel_watchdog COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/tunnel_watchdog_test.py)
+            set_tests_properties(tunnel_watchdog PROPERTIES TIMEOUT 15)
+        endif()
         execute_process(COMMAND ${Python3_EXECUTABLE} -c "import websockets"
             RESULT_VARIABLE _tetr_has_websockets OUTPUT_QUIET ERROR_QUIET)
         if(_tetr_has_websockets EQUAL 0)
@@ -1238,55 +1268,58 @@ if(BUILD_TESTING AND TETR_BUILD_TERMINAL)
                 $<TARGET_FILE:multiplayer_round_lifecycle_test>)
             set_tests_properties(multiplayer_countdown_websocket PROPERTIES TIMEOUT 50
                 ENVIRONMENT "TETR_TEST_CLOCK_SCALE=10" RESOURCE_LOCK udp_server_3017)
+            add_test(NAME room_replays_websocket COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/room_replays_websocket_test.py $<TARGET_FILE:tetr_network_tests>)
+            set_tests_properties(room_replays_websocket PROPERTIES TIMEOUT 110 RESOURCE_LOCK udp_server_3045)
         else()
             message(STATUS "WebSocket integration test requires deploy/websocket-requirements.txt")
         endif()
     endif()
 
-    add_executable(config_boundary_test tests/config_boundary_test.cpp)
+    tetr_test_module(config_boundary_test tetr_application_tests tests/config_boundary_test.cpp)
     target_link_libraries(config_boundary_test PRIVATE tetr_engine tetr_runtime tetr_config)
-    add_test(NAME config_boundary COMMAND config_boundary_test)
+    add_test(NAME config_boundary COMMAND tetr_application_tests config_boundary_test)
 
-    add_executable(piece_catalog_test tests/piece_catalog_test.cpp)
+    tetr_test_module(piece_catalog_test tetr_core_tests tests/piece_catalog_test.cpp)
     target_link_libraries(piece_catalog_test PRIVATE tetr_runtime)
-    add_test(NAME piece_catalog COMMAND piece_catalog_test)
+    add_test(NAME piece_catalog COMMAND tetr_core_tests piece_catalog_test)
 
-    add_executable(startup_catalog_test tests/startup_catalog_test.cpp)
+    tetr_test_module(startup_catalog_test tetr_core_tests tests/startup_catalog_test.cpp)
     target_link_libraries(startup_catalog_test PRIVATE tetr_runtime)
-    add_test(NAME startup_catalog COMMAND startup_catalog_test)
+    add_test(NAME startup_catalog COMMAND tetr_core_tests startup_catalog_test)
 
-    add_executable(bot_selection_test tests/bot_selection_test.cpp)
+    tetr_test_module(bot_selection_test tetr_bot_tests tests/bot_selection_test.cpp)
     target_link_libraries(bot_selection_test PRIVATE tetr_app tetr_config tetr_runtime)
-    add_test(NAME bot_selection COMMAND bot_selection_test)
+    add_test(NAME bot_selection COMMAND tetr_bot_tests bot_selection_test)
 
-    add_executable(disabled_movement_test tests/disabled_movement_test.cpp)
+    tetr_test_module(disabled_movement_test tetr_application_tests tests/disabled_movement_test.cpp)
     target_link_libraries(disabled_movement_test PRIVATE tetr_app tetr_bot_legacy)
-    add_test(NAME disabled_movement COMMAND disabled_movement_test)
+    add_test(NAME disabled_movement COMMAND tetr_application_tests disabled_movement_test)
     set_tests_properties(disabled_movement PROPERTIES TIMEOUT 60)
 
-    add_executable(simulation_time_test tests/simulation_time_test.cpp)
+    tetr_test_module(simulation_time_test tetr_application_tests tests/simulation_time_test.cpp)
     target_link_libraries(simulation_time_test PRIVATE tetr_engine tetr_config)
-    add_test(NAME simulation_time COMMAND simulation_time_test)
+    add_test(NAME simulation_time COMMAND tetr_application_tests simulation_time_test)
     set_tests_properties(simulation_time PROPERTIES TIMEOUT 20)
 
-    add_executable(turn_replay_test tests/turn_replay_test.cpp)
+    tetr_test_module(turn_replay_test tetr_application_tests tests/turn_replay_test.cpp)
     target_link_libraries(turn_replay_test PRIVATE tetr_engine tetr_config)
-    add_test(NAME turn_replay COMMAND turn_replay_test)
+    add_test(NAME turn_replay COMMAND tetr_application_tests turn_replay_test)
     set_tests_properties(turn_replay PROPERTIES TIMEOUT 20)
 
-    add_executable(settings_menu_test tests/settings_menu_test.cpp)
+    tetr_test_module(settings_menu_test tetr_application_tests tests/settings_menu_test.cpp)
     target_link_libraries(settings_menu_test PRIVATE tetr_app tetr_config)
-    add_test(NAME settings_menu COMMAND settings_menu_test)
-    add_executable(map_editor_test tests/map_editor_test.cpp)
+    add_test(NAME settings_menu COMMAND tetr_application_tests settings_menu_test)
+    tetr_test_module(map_editor_test tetr_application_tests tests/map_editor_test.cpp)
     target_link_libraries(map_editor_test PRIVATE tetr_app)
-    add_test(NAME map_editor COMMAND map_editor_test)
+    add_test(NAME map_editor COMMAND tetr_application_tests map_editor_test)
     set_tests_properties(map_editor PROPERTIES TIMEOUT 30)
-    add_executable(game_goals_test tests/game_goals_test.cpp)
+    tetr_test_module(game_goals_test tetr_application_tests tests/game_goals_test.cpp)
     target_link_libraries(game_goals_test PRIVATE tetr_app)
-    add_test(NAME game_goals COMMAND game_goals_test)
-    add_executable(field_visibility_test tests/field_visibility_test.cpp)
+    add_test(NAME game_goals COMMAND tetr_application_tests game_goals_test)
+    tetr_test_module(field_visibility_test tetr_application_tests tests/field_visibility_test.cpp)
     target_link_libraries(field_visibility_test PRIVATE tetr_app)
-    add_test(NAME field_visibility COMMAND field_visibility_test)
+    add_test(NAME field_visibility COMMAND tetr_application_tests field_visibility_test)
     set_tests_properties(game_goals PROPERTIES TIMEOUT 20)
     # Includes held-key and cancellation scripts for every preset action.
     # Confirmation holds and rendering make the complete Windows UI suite slower.
@@ -1295,49 +1328,49 @@ if(BUILD_TESTING AND TETR_BUILD_TERMINAL)
     else()
         set_tests_properties(settings_menu PROPERTIES TIMEOUT 60)
     endif()
-    add_executable(settings_targets_test tests/settings_targets_test.cpp)
+    tetr_test_module(settings_targets_test tetr_application_tests tests/settings_targets_test.cpp)
     target_link_libraries(settings_targets_test PRIVATE tetr_app)
-    add_test(NAME settings_targets COMMAND settings_targets_test)
-    add_executable(autoplay_handling_test tests/autoplay_handling_test.cpp)
+    add_test(NAME settings_targets COMMAND tetr_application_tests settings_targets_test)
+    tetr_test_module(autoplay_handling_test tetr_application_tests tests/autoplay_handling_test.cpp)
     target_link_libraries(autoplay_handling_test PRIVATE tetr_app tetr_bot_legacy)
-    add_test(NAME autoplay_handling COMMAND autoplay_handling_test)
+    add_test(NAME autoplay_handling COMMAND tetr_application_tests autoplay_handling_test)
     set_tests_properties(autoplay_handling PROPERTIES TIMEOUT 15)
-    add_executable(autoplay_network_test tests/autoplay_network_test.cpp)
+    tetr_test_module(autoplay_network_test tetr_application_tests tests/autoplay_network_test.cpp)
     target_link_libraries(autoplay_network_test PRIVATE tetr_app tetr_network)
-    add_test(NAME autoplay_network COMMAND autoplay_network_test)
+    add_test(NAME autoplay_network COMMAND tetr_application_tests autoplay_network_test)
     set_tests_properties(autoplay_network PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3038)
-    add_executable(autoplay_parameters_test tests/autoplay_parameters_test.cpp)
+    tetr_test_module(autoplay_parameters_test tetr_application_tests tests/autoplay_parameters_test.cpp)
     target_link_libraries(autoplay_parameters_test PRIVATE tetr_app tetr_bot_legacy)
-    add_test(NAME autoplay_parameters COMMAND autoplay_parameters_test)
+    add_test(NAME autoplay_parameters COMMAND tetr_application_tests autoplay_parameters_test)
     set_tests_properties(autoplay_parameters PROPERTIES TIMEOUT 180)
 
-    add_executable(autoplay_timing_test tests/autoplay_timing_test.cpp)
+    tetr_test_program(autoplay_timing_test tests/autoplay_timing_test.cpp)
     target_link_libraries(autoplay_timing_test PRIVATE tetr_app tetr_bot_legacy)
     add_test(NAME autoplay_timing COMMAND autoplay_timing_test)
     # This suite checks real-time cadence; concurrent Bot benchmarks can
     # delay scheduler wakeups beyond its deliberately tight timing bounds.
     set_tests_properties(autoplay_timing PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
-    add_executable(presets_test tests/presets_test.cpp)
+    tetr_test_module(presets_test tetr_application_tests tests/presets_test.cpp)
     target_link_libraries(presets_test PRIVATE tetr_app)
-    add_test(NAME presets COMMAND presets_test)
+    add_test(NAME presets COMMAND tetr_application_tests presets_test)
     set_tests_properties(presets PROPERTIES TIMEOUT 10)
-    add_executable(settings_presentation_test tests/settings_presentation_test.cpp)
+    tetr_test_module(settings_presentation_test tetr_application_tests tests/settings_presentation_test.cpp)
     target_link_libraries(settings_presentation_test PRIVATE tetr_app)
-    add_test(NAME settings_presentation COMMAND settings_presentation_test)
+    add_test(NAME settings_presentation COMMAND tetr_application_tests settings_presentation_test)
 
-    add_executable(start_screen_navigation_test tests/start_screen_navigation_test.cpp)
+    tetr_test_module(start_screen_navigation_test tetr_application_tests tests/start_screen_navigation_test.cpp)
     target_link_libraries(start_screen_navigation_test PRIVATE tetr_app)
-    add_test(NAME start_screen_navigation COMMAND start_screen_navigation_test)
+    add_test(NAME start_screen_navigation COMMAND tetr_application_tests start_screen_navigation_test)
     set_tests_properties(start_screen_navigation PROPERTIES TIMEOUT 10)
-    add_executable(hold_rules_test tests/hold_rules_test.cpp)
+    tetr_test_module(hold_rules_test tetr_application_tests tests/hold_rules_test.cpp)
     target_link_libraries(hold_rules_test PRIVATE tetr_app)
-    add_test(NAME hold_rules COMMAND hold_rules_test)
+    add_test(NAME hold_rules COMMAND tetr_application_tests hold_rules_test)
     set_tests_properties(hold_rules PROPERTIES TIMEOUT 20)
-    add_executable(post_game_statistics_test tests/post_game_statistics_test.cpp)
-    add_executable(challenges_test tests/challenges_test.cpp)
-    add_executable(challenge_prefix_test tests/challenge_prefix_test.cpp)
-    add_executable(challenge_modes_test tests/challenge_modes_test.cpp)
-    add_executable(challenge_catalog_test tests/challenge_catalog_test.cpp)
+    tetr_test_module(post_game_statistics_test tetr_application_tests tests/post_game_statistics_test.cpp)
+    tetr_test_module(challenges_test tetr_application_tests tests/challenges_test.cpp)
+    tetr_test_module(challenge_prefix_test tetr_application_tests tests/challenge_prefix_test.cpp)
+    tetr_test_module(challenge_modes_test tetr_application_tests tests/challenge_modes_test.cpp)
+    tetr_test_program(challenge_catalog_test tests/challenge_catalog_test.cpp)
     target_link_libraries(challenge_catalog_test PRIVATE tetr_app tetr_bot_legacy)
     add_test(NAME challenge_catalog COMMAND challenge_catalog_test)
     if(Python3_Interpreter_FOUND)
@@ -1347,36 +1380,40 @@ if(BUILD_TESTING AND TETR_BUILD_TERMINAL)
     endif()
     set_tests_properties(challenge_catalog PROPERTIES TIMEOUT 60)
     target_link_libraries(challenge_modes_test PRIVATE tetr_app tetr_bot_legacy)
-    add_test(NAME challenge_modes COMMAND challenge_modes_test)
+    add_test(NAME challenge_modes COMMAND tetr_application_tests challenge_modes_test)
     set_tests_properties(challenge_modes PROPERTIES TIMEOUT 20)
     target_link_libraries(challenge_prefix_test PRIVATE tetr_app)
-    add_test(NAME challenge_prefix COMMAND challenge_prefix_test)
+    add_test(NAME challenge_prefix COMMAND tetr_application_tests challenge_prefix_test)
     set_tests_properties(challenge_prefix PROPERTIES TIMEOUT 20)
-    add_executable(challenge_replay_test tests/challenge_replay_test.cpp)
+    tetr_test_module(challenge_replay_test tetr_application_tests tests/challenge_replay_test.cpp)
     target_link_libraries(challenge_replay_test PRIVATE tetr_app)
-    add_test(NAME challenge_replay COMMAND challenge_replay_test)
+    add_test(NAME challenge_replay COMMAND tetr_application_tests challenge_replay_test)
     set_tests_properties(challenge_replay PROPERTIES TIMEOUT 20)
     target_link_libraries(challenges_test PRIVATE tetr_app)
-    add_test(NAME challenges COMMAND challenges_test)
+    add_test(NAME challenges COMMAND tetr_application_tests challenges_test)
     set_tests_properties(challenges PROPERTIES TIMEOUT 20)
     target_link_libraries(post_game_statistics_test PRIVATE tetr_app)
-    add_test(NAME post_game_statistics COMMAND post_game_statistics_test)
+    add_test(NAME post_game_statistics COMMAND tetr_application_tests post_game_statistics_test)
     set_tests_properties(post_game_statistics PROPERTIES TIMEOUT 20)
-    add_executable(room_results_view_test tests/room_results_view_test.cpp)
+    tetr_test_module(room_results_view_test tetr_network_tests tests/room_results_view_test.cpp)
+    tetr_test_module(room_replays_test tetr_network_tests tests/room_replays_test.cpp)
+    target_link_libraries(room_replays_test PRIVATE tetr_app tetr_network)
+    add_test(NAME room_replays COMMAND tetr_network_tests room_replays_test)
+    set_tests_properties(room_replays PROPERTIES TIMEOUT 120 RESOURCE_LOCK udp_server_3045)
     target_link_libraries(room_results_view_test PRIVATE tetr_app tetr_network)
-    add_test(NAME room_results_view COMMAND room_results_view_test)
+    add_test(NAME room_results_view COMMAND tetr_network_tests room_results_view_test)
     set_tests_properties(room_results_view PROPERTIES TIMEOUT 10)
-    add_executable(ui_style_gallery_test tests/ui_style_gallery_test.cpp)
+    tetr_test_module(ui_style_gallery_test tetr_application_tests tests/ui_style_gallery_test.cpp)
     target_link_libraries(ui_style_gallery_test PRIVATE tetr_app tetr_network)
-    add_test(NAME ui_style_gallery COMMAND ui_style_gallery_test)
+    add_test(NAME ui_style_gallery COMMAND tetr_application_tests ui_style_gallery_test)
     set_tests_properties(ui_style_gallery PROPERTIES TIMEOUT 20)
 
-    add_executable(recent_replays_test tests/recent_replays_test.cpp)
+    tetr_test_module(recent_replays_test tetr_application_tests tests/recent_replays_test.cpp)
     target_link_libraries(recent_replays_test PRIVATE tetr_replay Threads::Threads)
-    add_test(NAME recent_replays COMMAND recent_replays_test)
-    add_executable(timing_garbage_rules_test tests/timing_garbage_rules_test.cpp)
+    add_test(NAME recent_replays COMMAND tetr_application_tests recent_replays_test)
+    tetr_test_module(timing_garbage_rules_test tetr_application_tests tests/timing_garbage_rules_test.cpp)
     target_link_libraries(timing_garbage_rules_test PRIVATE tetr_app)
-    add_test(NAME timing_garbage_rules COMMAND timing_garbage_rules_test)
+    add_test(NAME timing_garbage_rules COMMAND tetr_application_tests timing_garbage_rules_test)
     set_tests_properties(timing_garbage_rules PROPERTIES TIMEOUT 20)
 
     add_test(
@@ -1384,160 +1421,11 @@ if(BUILD_TESTING AND TETR_BUILD_TERMINAL)
         COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/architecture_boundary_test.cmake)
 
-    # The regression suite intentionally uses assert(). Release builds define
-    # NDEBUG by default, so explicitly re-enable assertions for test targets.
-    set(TETR_TEST_TARGETS
-        recent_replays_test
-        challenge_replay_test
-        challenges_test
-        challenge_prefix_test
-        challenge_modes_test
-        challenge_catalog_test
-        game_goals_test
-        field_visibility_test
-        map_editor_test
-        spawn_marker_test
-        game_terminal_test
-        bit_ops_test
-        pause_test
-        timing_garbage_rules_test
-        network_connection_test
-        network_rooms_test
-        room_kick_test
-        room_names_test
-        multiplayer_rooms_test
-        multiplayer_scene_test
-        room_preparation_test
-        room_config_burst_test
-        room_late_spectator_test
-        multiplayer_geometry_test
-        adaptive_board_view_test
-        board_view_stagger_test
-        multiplayer_round_lifecycle_test
-        multiplayer_config_test
-        room_host_config_test
-        hybrid_board_sync_test
-        network_websocket_test
-        turn_replay_test
-        settings_menu_test
-        settings_targets_test
-        presets_test
-        autoplay_timing_test
-        autoplay_handling_test
-        autoplay_network_test
-        autoplay_parameters_test
-        settings_presentation_test
-        start_screen_navigation_test
-        hold_rules_test
-        post_game_statistics_test
-        room_results_view_test
-        ui_style_gallery_test
-        bot_chatgpt_test
-        bot_chatgpt_known_bag_test
-        bot_chatgpt_key_piece_test
-        bot_chatgpt_reachable_holes_test
-        bot_chatgpt_o_roof_test
-        bot_chatgpt_moch_multi_step_test
-        bot_chatgpt_rise_horizon_test
-        bot_chatgpt_transposition_test
-        bot_chatgpt_garbage_rollout_test
-        bot_chatgpt_root_coverage_test
-        bot_chatgpt_settled_risk_test
-        bot_chatgpt_fast_terrain_test
-        bot_chatgpt_terrain_test
-        bot_chatgpt_terrain_evaluation_test
-        bot_chatgpt_terrain_bridge_test
-        bot_chatgpt_learned_terrain_test
-        bot_chatgpt_local_pattern_test
-        bot_chatgpt_local_pattern_evaluation_test
-        bot_chatgpt_time_b2b_evaluation_test
-        bot_chatgpt_spin_test
-        bot_chatgpt_native_test
-        bot_chatgpt_hold_context_test
-        bot_chatgpt_rise_context_test
-        bot_chatgpt_coverage_test
-        bot_chatgpt_quota_test
-        bot_chatgpt_beam_quota_test
-        simulation_time_test
-        opener_phase_test
-        core_geometry_test
-        core_rules_test
-        attack_rules_test
-        garbage_shape_test
-        spin_bonuses_test
-        rotation_systems_test
-        bag_randomizer_test
-        spike_test
-        post_lock_rules_test
-        quick_play_rules_test
-        snowball_test
-        garbage_system_test
-        placement_application_test
-        movement_controller_test
-        movement_presentation_test
-        tetrio_inputs_test
-        tetrio_random_test
-        tetrio_round_test
-        line_clear_presentation_test
-        frame_update_test
-        periodic_and_input_test
-        player_input_equivalence_test
-        gameplay_input_buffer_test
-        handling_controls_test
-        forced_handling_test
-        das_precharge_test
-        util_equivalence_test
-        user_config_test
-        settings_schema_test
-        runtime_config_test
-        game_context_test
-        garbage_context_test
-        garbage_rise_test
-        qp_pressure_test
-        next_preview_render_test
-        replay_garbage_timing_test
-        legacy_bot_boundary_test
-        bot_typed_boundary_test
-        bot_strategy_isolation_test
-        bot_zzztoj_test
-        bot_quick_play_mods_test
-        bot_coldclear_test
-        bot_zzztoj_benchmark
-        init_context_test
-        local_versus_init_test
-        clutch_test
-        render_layer_test
-        board_state_codec_test
-        board_state_receive_codec_test
-        player_session_state_test
-        piece_queue_equivalence_test
-        bot_bag_remainder_test
-        strong_types_test
-        input_semantics_test
-        time_semantics_test
-        serialization_boundary_test
-        multiplayer_frame_boundary_test
-        multiplayer_lobby_protocol_test
-        network_wait_test
-        config_boundary_test
-        piece_catalog_test
-        startup_catalog_test
-        bot_selection_test
-        disabled_movement_test
-    )
-    if(WIN32)
-        list(APPEND TETR_TEST_TARGETS windows_console_focus_test windows_multiplayer_latency_benchmark)
-    endif()
-    if(UNIX)
-        list(APPEND TETR_TEST_TARGETS room_start_spectator_test)
-    endif()
-    foreach(test_target IN LISTS TETR_TEST_TARGETS)
-        if(MSVC)
-            target_compile_options(${test_target} PRIVATE /UNDEBUG)
-        else()
-            target_compile_options(${test_target} PRIVATE -UNDEBUG)
-        endif()
-    endforeach()
+
+endif()
+
+if(BUILD_TESTING)
+    tetr_finalize_test_suites()
 endif()
 
 # Keep an asInvoker manifest with every toolchain so executable names such as

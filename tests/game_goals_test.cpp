@@ -18,6 +18,7 @@
 #include <memory>
 #include <sstream>
 
+namespace TetrTests::game_goals_test {
 namespace {
 using namespace Runtime;
 using Id=UserConfig::SettingId;
@@ -165,4 +166,6 @@ void loop_and_progress() {
     std::cout.rdbuf(previous);
 }
 }
-int main() {settings_and_maps();completion_and_replay();loop_and_progress();}
+int run(int argc,char** argv) {settings_and_maps();completion_and_replay();loop_and_progress();    return 0;
+}
+} // namespace TetrTests::game_goals_test

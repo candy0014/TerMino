@@ -22,7 +22,9 @@ def run(prefix, url="udp", samples=200, case="all", observation="stream", binary
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 45, 140, 0, 0))
     native_prefix = "Z:" + str(prefix).replace("/", "\\")
-    binary = pathlib.Path(binary).resolve() if binary else ROOT / "build-portable-windows-wine/windows_multiplayer_latency_benchmark.exe"
+    legacy_binary = ROOT / "build-portable-windows-wine/windows_multiplayer_latency_benchmark.exe"
+    suite_binary = legacy_binary.parent / "tests" / legacy_binary.name
+    binary = pathlib.Path(binary).resolve() if binary else suite_binary if suite_binary.is_file() else legacy_binary
     args = [str(ROOT / "build-wine-tools/run-wine.sh"),
             str(binary),
             native_prefix, url, str(samples), case, "inherit", observation]

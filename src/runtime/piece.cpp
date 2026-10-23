@@ -1,6 +1,7 @@
 #include "tetr/runtime/piece.h"
 
 #include "piece_catalog_data.h"
+#include "piece_event_geometry.h"
 
 #include <stdexcept>
 #include <algorithm>
@@ -81,6 +82,28 @@ std::vector<CatalogEntry> build_catalog() {
             entry.metadata.colorId = profile.colors[family];
             result.push_back(std::move(entry));
         }
+    }
+    // Append canonical event matrices; never change geometry behind an existing
+    // map/replay/network piece identifier.
+    for(int legacy=21;legacy<173;++legacy) {
+        if(!event_rotation_system(result[legacy].metadata.rotationSystem))continue;
+        CatalogEntry entry=result[legacy];
+        entry.type=Type::from_index(static_cast<int>(result.size()));
+        entry.metadata.tetrioRotation=true;
+        for(const auto& correction:EventGeometry::corrections)if(correction.legacy==legacy) {
+            for(int r=0;r<4;++r) {
+                entry.shapes[r]=result[correction.source].shapes[correction.rotations[r]];
+                for(auto& cell:entry.shapes[r]) {
+                    cell[0]+=correction.translations[r][0];cell[1]+=correction.translations[r][1];
+                }
+            }
+        }
+        const auto minimum=[](const Shape& shape,int axis) {
+            int value=shape.front()[axis];for(const auto& cell:shape)value=std::min(value,cell[axis]);return value;
+        };
+        for(int axis=0;axis<2;++axis)
+            entry.metadata.previewOffset[axis]=minimum(result[legacy].shapes[0],axis)-minimum(entry.shapes[0],axis);
+        result.push_back(std::move(entry));
     }
     return result;
 }
@@ -209,27 +232,30 @@ Shape preview_cells(Type type) {
         return minimum;
     };
     const int shift = minimumRow(entry.shapes[0]) - minimumRow(cells);
-    for (auto& cell:cells) cell[0] += shift;
+    for (auto& cell:cells) {
+        cell[0] += shift+entry.metadata.previewOffset[0];cell[1]+=entry.metadata.previewOffset[1];
+    }
     return cells;
 }
 
-std::vector<Type> april_fools_piece_types() {
+std::vector<Type> april_fools_piece_types(bool legacy) {
     std::vector<Type> result;
     for (const auto& entry : catalog()) {
-        if (entry.metadata.rotationSystem == Runtime::RotationSystem::AprilFools2026) result.push_back(entry.type);
+        if (entry.metadata.rotationSystem == Runtime::RotationSystem::AprilFools2026 &&
+            entry.metadata.tetrioRotation!=legacy) result.push_back(entry.type);
     }
     return result;
 }
 
-Type april_fools_piece(int familyIndex) {
+Type april_fools_piece(int familyIndex, bool legacy) {
     for (const auto& entry : catalog()) {
         if (entry.metadata.rotationSystem == Runtime::RotationSystem::AprilFools2026 &&
-            entry.metadata.familyIndex == familyIndex) return entry.type;
+            entry.metadata.familyIndex == familyIndex && entry.metadata.tetrioRotation!=legacy) return entry.type;
     }
     throw std::out_of_range("April Fools piece family outside catalog");
 }
 
-std::vector<Type> types_for_rotation_system(Runtime::RotationSystem system, bool legacy, int foolFloorLimit) {
+std::vector<Type> types_for_rotation_system(Runtime::RotationSystem system, bool legacy, int foolFloorLimit, bool legacyEvents) {
     std::vector<Type> result;
     const int foolFamilyLimit=std::clamp(foolFloorLimit,1,10)*standard_tetromino_count();
     if (system == Runtime::RotationSystem::AprilFools2026) {
@@ -238,10 +264,19 @@ std::vector<Type> types_for_rotation_system(Runtime::RotationSystem system, bool
     for (const auto& entry : catalog()) {
         if (entry.metadata.rotationSystem == system &&
             (system != Runtime::RotationSystem::AprilFools2026 || entry.metadata.familyIndex < foolFamilyLimit) &&
+            (!event_rotation_system(system) || entry.metadata.tetrioRotation!=legacyEvents) &&
             (!Runtime::standard_rotation_system(system) || entry.metadata.tetrioRotation != legacy))
             result.push_back(entry.type);
     }
     return result;
+}
+
+Type canonical_event_piece(Type type) {
+    // The three appended event ranges follow the immutable legacy ranges.
+    const int id=type.index();
+    if(id>=21 && id<39)return Type::from_index(229+id-21);
+    if(id>=43 && id<173)return Type::from_index(247+id-43);
+    return type;
 }
 
 } // namespace Piece

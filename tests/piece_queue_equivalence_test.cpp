@@ -1,6 +1,7 @@
 #include "tetr/compat/legacy_encoding.h"
 #include "tetr/engine/piece_queue.h"
 #include "tetr/runtime/game_context.h"
+#include "tetr/runtime/piece.h"
 #include "tetr/runtime/player_session_state.h"
 #include "tetr/runtime/runtime_services.h"
 #include "tetr/runtime/session_state.h"
@@ -13,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+namespace TetrTests::piece_queue_equivalence_test {
 namespace {
 struct LegacyPieceState {
     std::deque<std::pair<int,bool>> bag;
@@ -55,7 +57,7 @@ void legacy_add_bag(LegacyPieceState& s,bool randomPieces,int fool,int floor){
 }
 }
 
-int main(){
+int run(int argc,char** argv){
     {
         Runtime::PlayerSessionState player;
         bool threw=false;
@@ -71,6 +73,7 @@ int main(){
         Runtime::RuntimeServices services;
         Runtime::GameContext context(session,services);
         context.config.legacyRandomizerRules=true;
+        context.config.legacyEventGeometry=tc%2!=0;
         auto& player=session.player;
         auto& modern=player.pieces;
         LegacyPieceState legacy;
@@ -78,7 +81,8 @@ int main(){
         const int count=1+gen()%12;
         for(int i=0;i<count;i++){
             const int v=gen()%173;
-            modern.allowedPieces.push_back(Piece::Type{v});
+            const auto type=Piece::Type::from_index(v);
+            modern.allowedPieces.push_back(context.config.legacyEventGeometry?type:Piece::canonical_event_piece(type));
             legacy.allowed.push_back(v);
         }
         const unsigned seed=gen();
@@ -101,7 +105,8 @@ int main(){
         }
         assert(modern.bag.size()==legacy.bag.size());
         for(std::size_t i=0;i<modern.bag.size();++i){
-            assert(Compat::to_legacy(modern.bag[i].type)==legacy.bag[i].first);
+            const auto original=Piece::Type::from_index(legacy.bag[i].first);
+            assert(modern.bag[i].type==(context.config.legacyEventGeometry?original:Piece::canonical_event_piece(original)));
             assert(modern.bag[i].startsNewBag==legacy.bag[i].second);
         }
         assert(modern.bagCount==legacy.bagCount);
@@ -112,3 +117,4 @@ int main(){
     }
     return 0;
 }
+} // namespace TetrTests::piece_queue_equivalence_test

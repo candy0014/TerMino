@@ -19,6 +19,7 @@
 #include <iostream>
 #include <sstream>
 
+namespace TetrTests::qp_pressure_test {
 namespace {
 struct Capture {
     std::ostringstream stream;
@@ -120,6 +121,7 @@ void pressure_statistics_and_frame_partition() {
     Rules::FrameRuleConfig c;
     c.garbageMode=Runtime::GarbageMode::QuickPlay;
     c.elapsedGameTime=Runtime::Duration::from_seconds(.5);
+    c.ownAttackApm=80;
     for (unsigned seed=0;seed<100;++seed) {
         Rules::FrameRuleState whole,split;
         whole.qpAltitude=split.qpAltitude=1000;
@@ -136,20 +138,39 @@ void pressure_statistics_and_frame_partition() {
         c.elapsedGameTime=Runtime::Duration::from_seconds(.5);
         assert(expected.incomingGarbagePackets==actual && a==b);
     }
-    for (double altitude:{24.,973.,2880.}) {
-        std::mt19937 random(1234);
-        Rules::FrameRuleState s; s.qpFloor=Rules::qp_floor(altitude);
-        c.elapsedGameTime=Runtime::Duration::from_seconds(10);
-        long long total=0;
-        constexpr int frames=240000;
-        for (int frame=0;frame<frames;++frame) {
-            s.qpAltitude=altitude;
-            const auto result=Rules::advance_frame_before_presentation(s,c,Runtime::Duration::from_seconds(1.0/60),random);
-            for (int attack:result.incomingGarbagePackets) total+=attack;
+    // Independent runs, not one run's fixed latent intensity, must recover
+    // both fitted moments. Grouping line credits must not multiply variance
+    // by the mean packet size. This catches the former Poisson-packet model.
+    for(const auto sample:std::vector<std::pair<double,double>>{{100,20},{500,40},{1000,80}}) {
+        const auto [altitude,ownApm]=sample;
+        const auto model=Rules::qp_pressure(altitude,ownApm);
+        constexpr int runs=512,frames=14400; // Four minutes per independent run.
+        double sum=0,squares=0;
+        c.ownAttackApm=ownApm;c.elapsedGameTime=Runtime::Duration::from_seconds(10);
+        for(int run=0;run<runs;++run) {
+            std::mt19937 random(12000+run);
+            Rules::FrameRuleState s;s.qpFloor=Rules::qp_floor(altitude);
+            int total=0;
+            for(int frame=0;frame<frames;++frame) {
+                s.qpAltitude=altitude;
+                const auto result=Rules::advance_frame_before_presentation(s,c,Runtime::Duration::from_seconds(1./60),random);
+                for(int attack:result.incomingGarbagePackets)total+=attack;
+            }
+            sum+=total;squares+=double(total)*total;
         }
-        const double observed=total*3600.0/frames,expected=Rules::qp_survival_apm(altitude);
-        std::cerr<<"QP2 opponent "<<altitude<<"m: "<<observed<<" / "<<expected<<" APM\n";
-        assert(std::abs(observed-expected)<expected*.13);
+        const double mean=sum/runs,variance=(squares-sum*sum/runs)/(runs-1);
+        const double expected=model.mean*4,expectedVariance=0.9375553655037346*expected+
+            model.relativeVariance*expected*expected;
+        std::cerr<<"QP2 "<<altitude<<"m / own "<<ownApm<<" APM: mean "<<mean<<" / "<<expected
+            <<", variance "<<variance<<" / "<<expectedVariance<<'\n';
+        assert(std::abs(mean-expected)<expected*.10);
+        assert(std::abs(variance-expectedVariance)<expectedVariance*.28);
+    }
+    // Invalid external predictors and unsupported tails stay finite.
+    for(double h:{-1.,0.,6000.,1e20,std::nan("")})for(double a:{-1.,0.,500.,1e20,std::nan("")}) {
+        const auto p=Rules::qp_pressure(h,a);
+        assert(std::isfinite(p.mean) && p.mean>=1 && p.mean<=180.00001);
+        assert(std::isfinite(p.relativeVariance) && p.relativeVariance>0 && p.relativeVariance<=1);
     }
 }
 void warning_is_visible_and_cached() {
@@ -258,8 +279,10 @@ void fixtures() {
     std::cout<<out.str()<<"]\n";
 }
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     if (argc>1 && std::string(argv[1])=="--fixtures") { fixtures(); return 0; }
     timing_thresholds_and_reception(); replay_and_undo();
     pressure_statistics_and_frame_partition(); warning_is_visible_and_cached();
+    return 0;
 }
+} // namespace TetrTests::qp_pressure_test

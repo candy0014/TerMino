@@ -7,8 +7,11 @@
 #include "tetr/app/start_screen_navigation.h"
 #include "tetr/network/network_services.h"
 #include "tetr/network/lobby_channel.h"
+#include "tetr/engine/multiplayer_scene.h"
 #include "tetr/runtime/game_context.h"
+#include "tetr/frontend/ui_surface.h"
 #include "multiplayer_battle.h"
+#include "ui_text.h"
 #include <cstdlib>
 namespace App {
 int run_client(Runtime::GameContext& context,bool skipStart) {
@@ -50,6 +53,11 @@ int run_client(Runtime::GameContext& context,bool skipStart) {
             App::Settings::run_menu(context);
             continue;
         } catch (const Network::LobbyInterrupted&) {
+            if(networkServices.multiplayerRoom && context.session.roomScene.enabled &&
+               context.session.roomScene.started && networkServices.matchEpoch!=context.session.roomScene.epoch) {
+                auto& scene=context.session.roomScene;
+                if(!scene.finished)Engine::finish_multiplayer_scene(context,true);
+            }
             if(networkServices.multiplayerRoom && networkServices.matchCanceled) {
                 networkServices.matchCanceled=false;
                 App::Settings::run_menu(context);
@@ -59,7 +67,14 @@ int run_client(Runtime::GameContext& context,bool skipStart) {
                 context.session.roomScene.finished && networkServices.matchEpoch!=context.session.roomScene.epoch)
                 watchInterruptedRoom=true;
             continue;
-        } catch (const Network::ConnectionError&) {
+        } catch (const Network::ConnectionError& error) {
+            if(Frontend::ui_surface_active()) {
+                // A failed Start action must explain the failure, rather than
+                // silently turning into an Open Settings action.
+                applicationState.startMenuNotice=UiText::tr(error.what());
+                applicationState.startScreenRequested=true;
+                continue;
+            }
             applicationState.settingsCategoryIndex = 6; // NETWORK, after Player
             App::Settings::run_menu(context);
             continue;

@@ -12,6 +12,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__ANDROID__)
+#include <SDL3/SDL.h>
 #else
 #include <dlfcn.h>
 #endif
@@ -26,7 +28,11 @@ namespace {
 class AudioWorker {
     std::mutex mutex;std::condition_variable wake;std::deque<std::vector<double>> queue;bool stop=false;std::thread thread;
     void run() {
-#ifndef _WIN32
+#ifdef __ANDROID__
+        SDL_AudioSpec spec{SDL_AUDIO_S16,1,22050};
+        SDL_AudioStream* stream=SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,&spec,nullptr,nullptr);
+        if(stream)SDL_ResumeAudioStreamDevice(stream);
+#elif !defined(_WIN32)
         // PulseAudio simple API loaded optionally: no new build-time package.
         struct SampleSpec {int format;std::uint32_t rate;std::uint8_t channels;};
         void* library=dlopen("libpulse-simple.so.0",RTLD_LAZY);
@@ -48,21 +54,30 @@ class AudioWorker {
                 if(!stream)continue;
                 std::vector<std::int16_t> samples(882);
                 for(std::size_t i=0;i<samples.size();++i){const double envelope=std::min({1.0,i/80.0,(samples.size()-i)/80.0});samples[i]=static_cast<std::int16_t>(7000*envelope*std::sin(6.283185307179586*frequency*i/22050));}
+#ifdef __ANDROID__
+                if(SDL_GetAudioStreamQueued(stream)>22050*4)SDL_ClearAudioStream(stream);
+                if(!SDL_PutAudioStreamData(stream,samples.data(),int(samples.size()*sizeof(samples[0]))))break;
+#else
                 if(write(stream,samples.data(),samples.size()*sizeof(samples[0]),&error)<0)break;
+#endif
 #endif
             }
         }
-#ifndef _WIN32
+#ifdef __ANDROID__
+        if(stream)SDL_DestroyAudioStream(stream);
+#elif !defined(_WIN32)
         if(stream)close(stream);if(library)dlclose(library);
 #endif
     }
 public:
     AudioWorker():thread([this]{run();}){}
-    ~AudioWorker(){{std::lock_guard<std::mutex> lock(mutex);stop=true;}wake.notify_one();thread.join();}
+    ~AudioWorker(){shutdown();}
+    void shutdown(){{std::lock_guard<std::mutex> lock(mutex);stop=true;}wake.notify_one();if(thread.joinable())thread.join();}
     void push(std::vector<double> notes){{std::lock_guard<std::mutex> lock(mutex);if(queue.size()>8)queue.pop_front();queue.push_back(std::move(notes));}wake.notify_one();}
 };
 AudioWorker& audio_worker(){static AudioWorker worker;return worker;}
 }
+void shutdown_audio(){audio_worker().shutdown();}
 void play_audio_cue(AudioCue cue,int value,int extra) {
     if(output_suppressed() && !detached_audio_enabled())return;
     audio_worker().push(cue_frequencies(cue,value,extra));

@@ -22,6 +22,7 @@
 #include <sstream>
 #include <thread>
 
+namespace TetrTests::autoplay_network_test {
 using namespace std::chrono_literals;
 using D=Runtime::Duration;
 using Clock=std::chrono::steady_clock;
@@ -54,7 +55,7 @@ struct RunningRelay {
     ~RunningRelay(){running=false;if(worker.joinable())worker.join();}
 };
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     RunningRelay relay(argc<2);const std::string url=argc>1?argv[1]:"127.0.0.1:3038";
     Player a,b;
     const auto poll=[&]{Network::poll_connection(a.network);Network::poll_connection(b.network);};
@@ -154,4 +155,6 @@ int main(int argc,char** argv) {
     Network::configure_board_sync(a.context,false,42);
     Network::send_piece_motion_frame(a.context,p,pose,true);assert(a.network.boardSync.motionsSent==0);
     std::cerr<<"BOT motion transmission, remote reconstruction, hidden/mini subscriptions and burst limit passed\n";
+    return 0;
 }
+} // namespace TetrTests::autoplay_network_test

@@ -1,7 +1,8 @@
 #include "tetr/rules/opener_phase.h"
 #include <cassert>
 
-int main() {
+namespace TetrTests::opener_phase_test {
+int run(int argc,char** argv) {
     using Rules::opener_phase_double_cancel;
     using Rules::opener_phase_cancel_budget;
 
@@ -17,3 +18,4 @@ int main() {
 
     return 0;
 }
+} // namespace TetrTests::opener_phase_test

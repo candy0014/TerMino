@@ -11,6 +11,10 @@ namespace Engine {
 // this lightweight signal unwinds whichever replay wait loop is active.
 struct ReplaySeekRequested {};
 
+// One input reader prevents a shared keyboard press from toggling twice, and
+// accepts either player's pause binding, including distinct virtual actions.
+void share_replay_playback_controls(Runtime::GameContext& first, Runtime::GameContext& second);
+
 // Extent of the visible playback controls, sharing their actual text/layout.
 Render::TerminalSize replay_playback_terminal_size(Runtime::GameContext& context,
     const Runtime::PlayerSessionState& player, bool compact=false, bool maximum=true);

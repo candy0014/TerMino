@@ -32,7 +32,9 @@ bool apply_initial_movement(Runtime::GameContext& context, MovementInputState& i
     const auto moves=collect_action_keys(bindings,{Input::Action::MoveLeft,Input::Action::MoveRight});
     const int key=input.mostRecentActive(moves);
     if(!context.config.movement.allows_horizontal(Input::horizontal_delta(bindings.action_for(key)))) return false;
-    if (!input.horizontalCharged(key,now,context.config.handling.das)) return false;
+    const auto sampled=services.gameplay_sample_time();
+    const auto inputNow=sampled ? std::min(now,context.real_time_at(*sampled)) : now;
+    if (!input.horizontalCharged(key,inputNow,context.config.handling.das)) return false;
     const auto candidate=state.pose.translated(0,Input::horizontal_delta(bindings.action_for(key)));
     if (!canPlace(candidate)) return false;
     state.pose=candidate;

@@ -5,7 +5,8 @@
 #include "tetr/runtime/piece.h"
 #include <cassert>
 #include <iostream>
-int main() {
+namespace TetrTests::multiplayer_config_test {
+int run(int argc,char** argv) {
     UserConfig::Settings host,guest;
     host.gameMode=guest.gameMode=4;
     host.fieldWidth=14; host.fieldHeight=25; host.nextCount=2; host.holdEnabled=0;
@@ -92,4 +93,6 @@ int main() {
     UserConfig::reset_settings(reset);
     assert(reset.gameMode==4 && reset.serverIp=="wss://custom/ws" && reset.username=="Kept user" && reset.fieldWidth==10);
     std::cerr<<"multiplayer_config_test: OK; 60000-piece map="<<wire.size()<<" bytes in "<<count<<" fragments\n";
+    return 0;
 }
+} // namespace TetrTests::multiplayer_config_test

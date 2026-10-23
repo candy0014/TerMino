@@ -1,4 +1,6 @@
 #include "tetr/bot/bot_mech.h"
+#include "tetr/bot/quick_play_search.h"
+#include "tetr/bot/bot_candy0014.h"
 
 #include <algorithm>
 #include <cassert>
@@ -526,6 +528,7 @@ int nodenext[100]=
 bool init(const Bot::Environment& environment)
 {
 	if(!availability(environment)) return false;
+    if(Bot::QuickPlaySearch::enabled(environment))return true;
 	node=-1;i=0;hld=7;
 	for(int i=0;i<7;i++)
 	{
@@ -536,6 +539,21 @@ bool init(const Bot::Environment& environment)
 
 int getpos(const Bot::Environment& environment,const Runtime::PlayerSessionState& player,Runtime::Playfield mp,std::vector<int>nex,const std::vector<int>& unseenBagPieces,int sx,int sy,int stype,int hold,int &ans_x,int &ans_y,int &ans_type,int &ans_rot)
 {
+    if(Bot::QuickPlaySearch::enabled(environment)) {
+        const auto shape=[&](const std::vector<std::uint32_t>& rows,int width,int height,int,int) {
+            Runtime::Playfield field;field.initialize(width,height);
+            for(int y=-Runtime::kHiddenRowCapacity;y<height;++y)for(int x=0;x<width;++x)
+                if(rows[height-1-y]&(std::uint32_t{1}<<x))field.set_cell(y,x,Runtime::BoardCell::piece(1));
+            auto geometry=environment;geometry.fieldWidth=width;geometry.fieldHeight=height;
+            return 512*Bot_candy0014::terrain(geometry,field);
+        };
+        // Fixed opener scripts cannot survive QP's altered bags/boards. Keep
+        // Mech's perfect-clear objective through the shared rule search.
+        const auto result=Bot::QuickPlaySearch::adapt(Bot::QuickPlaySearch::Profile::Mech,
+            environment,player,mp,nex,unseenBagPieces,{{sx,sy},Runtime::Rotation::from_index(stype)},hold,{},shape);
+        ans_x=result.pose.position.row;ans_y=result.pose.position.col;ans_type=result.pose.rotation.index();
+        ans_rot=result.rotation.rotated()?result.rotation.kick().index()+1:0;return result.selected;
+    }
 	(void)unseenBagPieces; // Interface-only metadata; strategy intentionally unchanged.
 	(void)player;
 	(void)environment; // Used by debug-only assertions below in Release builds.

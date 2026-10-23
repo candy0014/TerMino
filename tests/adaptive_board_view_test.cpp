@@ -31,6 +31,22 @@ struct Member {
 };
 int main(int argc,char** argv) {
     Member a,b,c;std::vector<Member*> members{&a,&b,&c};
+    {
+        Member large;auto& f=large.session->player.gameplay.playfield;
+        for(int width:{20,40,80})for(int hole:{0,1,7,19}) {
+            f.width=width;f.field.initialize(width,20);
+            for(int row=12;row<20;++row)for(int col=0;col<width;++col)
+                if(col!=hole)f.field.set_cell(row,col,Runtime::BoardCell::garbage());
+            const auto original=capture_mini_board(large.session->player,16,14,1);
+            const auto projected=project_mini_board(original,8,7);
+            for(const auto* frame:{&original,&projected}) {
+                int gaps=0,filled=0;for(int col=0;col<frame->columns;++col)
+                    frame->at(frame->rows-1,col).occupied()?++filled:++gaps;
+                assert(gaps>0 && filled>0);
+                const auto decoded=decode_mini_board(encode_mini_board(*frame));assert(decoded && decoded->cells==frame->cells);
+            }
+        }
+    }
     auto wide=capture_mini_board(a.session->player,20,28,1),small=capture_mini_board(a.session->player,8,12,2);
     assert(wide.at(27,2).occupied() && wide.at(7,2).occupied());
     for(const auto* frame:{&wide,&small}) {
@@ -94,6 +110,14 @@ int main(int argc,char** argv) {
     for(auto* p:members)send(p->network,"start6");
     wait([&]{for(auto* p:members)if(p->network.matchPhase!=RoomMatchPhase::Playing)return false;return true;});
     for(auto* p:members)configure_board_sync(p->context,true,static_cast<std::uint32_t>(a.network.matchEpoch));
+    a.context.config.field.invisible=true;a.context.config.field.periodicInvisible=true;
+    a.context.config.field.invisibilityDuration=Runtime::Duration::from_seconds(3);
+    send_field_visibility(a.context);
+    wait([&]{return b.network.peerFieldVisibility.count(0) && c.network.peerFieldVisibility.count(0);});
+    assert(b.network.peerFieldVisibility.at(0).periodic && b.network.peerFieldVisibility.at(0).duration==Runtime::Duration::from_seconds(3));
+    assert(!b.context.config.field.invisible);
+    a.context.config.field.invisible=false;send_field_visibility(a.context);
+    wait([&]{return !b.network.peerFieldVisibility.at(0).invisible;});
     // All three viewers request thumbnails. No actor needs to serialize a
     // full field on movement, even when a caller requests a forced checkpoint.
     for(auto* p:members) {

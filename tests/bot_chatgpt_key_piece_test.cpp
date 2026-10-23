@@ -7,6 +7,7 @@
 #include <random>
 #include <tuple>
 
+namespace TetrTests::bot_chatgpt_key_piece_test {
 namespace B = Bot_chatgpt;
 class InspectKeyQueue : public B::KeyPieceEvaluation {
 public:
@@ -50,7 +51,7 @@ static void host_legal(const m_tetris::TetrisContext* context, const Map& map, B
     assert(BotNativeHost::reachable(move.node, Piece::get_definition(Piece::Type::from_index(B::piece_index(move->status.t))),
         field, B::host_pose(*spawn), move.spin, move.mini, answer, kick));
 }
-int main() {
+int run(int argc,char** argv) {
     using Engine = m_tetris::TetrisEngine<rule_tetr_srs_plus::TetrisRule, B::Evaluation, B::Search>;
     Engine owner; assert(owner.prepare(10, 40)); const auto* context = owner.context().get();
     B::KeyPieceGeometry geometry; geometry.init(context);
@@ -270,4 +271,6 @@ int main() {
     std::cout << "normal endpoints=" << normalChecks << " key geometry=" << checked << " spins=" << spins << " minis=" << minis
               << " setups=" << setups << " independent spins="<<exact<<" valued minis="<<valuedMinis
               << " persistent cache, weak completion, HOLD, garbage verified\n";
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_key_piece_test

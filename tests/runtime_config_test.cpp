@@ -4,7 +4,8 @@
 #include <cassert>
 #include <iostream>
 
-int main(){
+namespace TetrTests::runtime_config_test {
+int run(int argc,char** argv){
     Runtime::RuntimeConfig a;
     assert(a.mode.mode==Runtime::GameMode::Zen&&!a.mode.replayMode&&a.mode.racingDistance==40);
     assert(a.handling.gravityInterval.interval().seconds()==0.6&&a.handling.das.seconds()==0.1&&a.handling.lockResetLimit==15);
@@ -24,4 +25,6 @@ int main(){
     assert(b.field.width==37&&b.quickPlay.allSpin==Runtime::AllSpinMode::Extended&&b.handling.gravityInterval.interval().seconds()==.125);
 
     std::cout<<"runtime_config_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::runtime_config_test

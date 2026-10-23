@@ -5,6 +5,7 @@
 #include <iostream>
 #include <tuple>
 
+namespace TetrTests::bot_chatgpt_local_pattern_evaluation_test {
 namespace B = Bot_chatgpt;
 
 static m_tetris::TetrisMap rows(std::initializer_list<unsigned> values) {
@@ -60,7 +61,7 @@ static void check_mirror(const m_tetris::TetrisMap& map) {
     assert(std::abs(B::local_pattern_correction(map) - B::local_pattern_correction(mirrored)) < 1e-9);
 }
 
-int main() {
+int run(int argc,char** argv) {
     double l1 = 0;
     assert(B::fitted_local_pattern_weights[0] == 0);
     for (const auto weight : B::fitted_local_pattern_weights) {
@@ -136,4 +137,6 @@ int main() {
     assert(checks > 100 && pcs > 0 && spins > 0 && rises > 0);
     std::cout << "local pattern model formula, direct-table correction, mirror fixtures and "
               << checks << " unchanged rule transitions passed\n";
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_local_pattern_evaluation_test

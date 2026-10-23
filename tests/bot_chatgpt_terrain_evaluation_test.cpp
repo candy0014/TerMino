@@ -8,6 +8,7 @@
 #include <iostream>
 #include <tuple>
 
+namespace TetrTests::bot_chatgpt_terrain_evaluation_test {
 namespace B = Bot_chatgpt;
 
 static m_tetris::TetrisMap rows(std::initializer_list<unsigned> values) {
@@ -53,7 +54,7 @@ static void check_bridge_partition_and_symmetry(const m_tetris::TetrisMap& map) 
     assert(B::bridge_terrain_value(map) == B::bridge_terrain_value(mirrored));
 }
 
-int main() {
+int run(int argc,char** argv) {
     using Engine = m_tetris::TetrisEngine<rule_tetr_srs_plus::TetrisRule, B::Evaluation, B::Search>;
     Engine geometry;
     assert(geometry.prepare(10, 40));
@@ -158,4 +159,6 @@ int main() {
               << " spin_garbage=" << spinGarbageChecks << " rise=" << riseChecks
               << " death=" << deathChecks << " hold=" << holdChecks
               << " bridge_value_changes=" << bridgeValueChanges << '\n';
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_terrain_evaluation_test

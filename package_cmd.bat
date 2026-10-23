@@ -39,5 +39,7 @@ exit /b 2
 :help
 echo Usage: package.bat -Cmd [-Generator NAME] [-BuildDirectory DIR]
 echo                        [-OutputDirectory DIR] [-DataDirectory DIR] [-Parallel N]
-echo Uses Windows CMake and the compiler directly, without requiring PowerShell.
+echo Requires Windows CMake, Python 3.12+, Git and a C++ compiler.
+echo Builds terminal, OpenGL, FT7 and server in one default-data package.
+echo DataDirectory is accepted for compatibility; no personal files are copied.
 exit /b 0

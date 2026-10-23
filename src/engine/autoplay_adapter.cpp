@@ -1,5 +1,6 @@
 #include "tetr/engine/autoplay_adapter.h"
 #include "tetr/engine/autoplay_path.h"
+#include "autoplay_search.h"
 
 #include "tetr/engine/movement_controller.h"
 #include "tetr/engine/live_piece_periodic_events.h"
@@ -22,6 +23,7 @@
 #include <cassert>
 #include <cmath>
 #include <functional>
+#include <chrono>
 #include <string>
 
 namespace Engine {
@@ -90,25 +92,85 @@ AutoplayStepResult run_autoplay_step(
     Runtime::RotationRecord targetRotation = previousRotation;
     auto& hold = player.gameplay.hold;
 
+    bool boardChanged=false;
+    int targetShift=heldPieceContinuation?carry.fieldShift:autoplay_field_shift(player);
+    std::string searchedScript;
+    const auto softInterval=soft_drop_interval(gravityInterval,context.config.handling.softDropFactor,
+        context.config.handling.softDropFixed);
+    const bool slowPresentation=pps>1e-8 && pps<=5;
+
+    // Computing and presenting happen inside the placement period. Entry and
+    // clear delays since the previous lock have already spent part of it.
+    // Keep frame/input/garbage processing live throughout every wait.
+    const auto service=[&]() {
+        poll_undo_key(context);
+        const int activeHeightBefore=player.gameplay.playfield.activeHeight;
+        if (periodic_event_due(context.real_now(),player.timing.framePoll,Network::multiplayer_frame_poll_interval(context))) {
+            result.signal=pumpFrame();
+            if (result.signal!=Rules::PlayResult::ContinueFrame) return false;
+        }
+        bool fieldChanged=false;
+        if (const auto signal=apply_immediate_garbage_to_live_piece(
+                context,field,piece,player,movementState,player.presentation.paintedActivePose.has_value(),&fieldChanged)) {
+            result.signal=*signal;
+            return false;
+        }
+        if (fieldChanged || activeHeightBefore!=player.gameplay.playfield.activeHeight)boardChanged=true;
+        return true;
+    };
+    const auto waitUntil=[&](Runtime::TimePoint deadline) {
+        while (context.real_now()<deadline) {
+            if (!service()) return false;
+            const auto remaining=deadline-context.real_now();
+            context.services.clock.sleep_for(std::min(remaining,Runtime::Duration::from_seconds(.001)));
+        }
+        return service();
+    };
+
     if (!heldPieceContinuation) {
         const Autoplay::HoldInput botHold{holdEnabled, hold.piece};
         const auto botSequence = bot_piece_sequence(player);
         const auto unseenBagPieces = Engine::unseen_pieces_in_preview_endpoint_bag(context, player);
-        carry.selectedPieceType = context.autoplay_component()->choose_position(
-            context,
-            player,
-            field,
-            botSequence,
-            unseenBagPieces,
-            movementState.pose,
-            botHold,
-            targetPose,
-            targetRotation);
+        // Real-time garbage must keep progressing while BOT computation runs.
+        // Piece-time simulations and strategies without a clone retain their
+        // existing deterministic synchronous entry point.
+        const bool liveGarbage=!context.uses_piece_time() &&
+            (context.config.garbage.mode==Runtime::GarbageMode::QuickPlay ||
+             (Runtime::uses_garbage_buffer(context.config.garbage.mode) &&
+              context.config.garbage.entryMode==Runtime::GarbageEntryMode::Immediate) ||
+             player.garbage.rising.remainingLines>0);
+        struct WorkLifetime {
+            std::shared_ptr<std::atomic<bool>> cancelled=std::make_shared<std::atomic<bool>>(false);
+            ~WorkLifetime(){cancelled->store(true);}
+        } work;
+        auto task=liveGarbage?launch_autoplay_search(context,player,field,piece,movementState,botHold,
+            nullptr,gravityInterval,false,slowPresentation,work.cancelled):std::nullopt;
+        if(task) {
+            while(task->wait_for(std::chrono::seconds(0))!=std::future_status::ready) {
+                if(!service())return result;
+                context.services.clock.sleep_for(Runtime::Duration::from_seconds(.001));
+            }
+            if(!service())return result;
+            auto choice=task->get();carry.selectedPieceType=choice.selected;
+            targetPose=choice.pose;targetRotation=choice.rotation;targetShift=choice.fieldShift;searchedScript=std::move(choice.script);
+            context.autoplay_component()->restore_state(choice.strategyState);
+        } else {
+            carry.selectedPieceType = context.autoplay_component()->choose_position(
+                context,
+                player,
+                field,
+                botSequence,
+                unseenBagPieces,
+                movementState.pose,
+                botHold,
+                targetPose,
+                targetRotation);
+        }
         if (carry.selectedPieceType != piece.type()) {
             carry.pose = targetPose;
-            carry.lastRotation = targetRotation;
+            carry.lastRotation = targetRotation;carry.fieldShift=targetShift;
             present_autoplay_hold(
-                context, field, piece, player, previousPose, foolMode);
+                context, field, piece, player, movementState.pose, foolMode);
             result.signal = Rules::PlayResult::Hold;
             return result;
         }
@@ -130,58 +192,43 @@ AutoplayStepResult run_autoplay_step(
             targetRotation);
     }
 
-    assert(piece.can_place(targetPose, field));
-    assert(!piece.can_place(targetPose.translated(1, 0), field));
-
-    const auto softInterval=soft_drop_interval(gravityInterval,context.config.handling.softDropFactor,
-        context.config.handling.softDropFixed);
-    const bool slowPresentation=pps>1e-8 && pps<=5;
-
-    // Computing and presenting happen inside the placement period. Entry and
-    // clear delays since the previous lock have already spent part of it.
-    // Keep frame/input/garbage processing live throughout every wait.
-    const auto service=[&]() {
-        poll_undo_key(context);
-        const int activeHeightBefore=player.gameplay.playfield.activeHeight;
-        if (periodic_event_due(context.real_now(),player.timing.framePoll,Network::multiplayer_frame_poll_interval(context))) {
-            result.signal=pumpFrame();
-            if (result.signal!=Rules::PlayResult::ContinueFrame) return false;
+    const auto refreshTarget=[&] {
+        const int nowShift=autoplay_field_shift(player);
+        if(nowShift==targetShift && !boardChanged)return true;
+        auto repaired=repair_autoplay_path(field,piece,movementState,targetPose,targetRotation,
+            nowShift-targetShift,context.config.handling,context.config.movement,gravityInterval,false,
+            autoplay_spin_rules(context.config),searchedScript);
+        if(repaired)searchedScript=repaired->script;
+        if(!repaired) {
+            searchedScript.clear();
+            // A newly blocked tuck cannot justify waiting for the wave to end.
+            // The current live pose still has a legal vertical landing.
+            auto landed=movementState;
+            while(canPlace(landed.pose.translated(1,0))) {
+                ++landed.pose.position.row;landed.lastRotation={};
+            }
+            targetPose=landed.pose;targetRotation=landed.lastRotation;
         }
-        bool fieldChanged=false;
-        if (const auto signal=apply_immediate_garbage_to_live_piece(
-                context,field,piece,player,movementState,player.presentation.paintedActivePose.has_value(),&fieldChanged)) {
-            result.signal=*signal;
-            return false;
-        }
-        if (fieldChanged || activeHeightBefore!=player.gameplay.playfield.activeHeight) {
-            carry={}; // Replan against the changed field, using the same PPS slot.
-            return false;
-        }
-        return true;
+        targetShift=nowShift;boardChanged=false;return repaired.has_value();
     };
-    const auto waitUntil=[&](Runtime::TimePoint deadline) {
-        while (context.real_now()<deadline) {
-            if (!service()) return false;
-            const auto remaining=deadline-context.real_now();
-            context.services.clock.sleep_for(std::min(remaining,Runtime::Duration::from_seconds(.001)));
-        }
-        return service();
-    };
+    refreshTarget();
+    assert(piece.can_place(targetPose,field) && !piece.can_place(targetPose.translated(1,0),field));
 
     if (slowPresentation) {
-        std::string script=context.autoplay_component()->movement_script(
-            context,field,piece,previousPose,targetPose,targetRotation);
+        const auto displayStart=movementState;
+        std::string script=searchedScript.empty()?context.autoplay_component()->movement_script(
+            context,field,piece,displayStart.pose,targetPose,targetRotation):searchedScript;
         if (script.empty()) {
-            auto floor=previousPose;
+            auto floor=displayStart.pose;
             while (canPlace(floor.translated(1,0))) ++floor.position.row;
             if (floor==targetPose && !context.config.movement.disableHardDrop) script="H";
             else {
-                movementState.pose=previousPose;
-                movementState.lastRotation=previousRotation;
+                movementState.pose=displayStart.pose;
+                movementState.lastRotation=displayStart.lastRotation;
                 return result;
             }
         }
-        movementState.pose=previousPose;
+        movementState.pose=displayStart.pose;
         movementState.lastRotation=Runtime::RotationRecord::none();
         auto* tetrioRecorder=Replay::tetrio_recorder(context);
         if (tetrioRecorder) tetrioRecorder->begin_script(script.size()+field.height()+Runtime::kHiddenRowCapacity);
@@ -233,8 +280,10 @@ AutoplayStepResult run_autoplay_step(
             nextCommand=context.real_now()+(command==MovementScriptCommand::SoftDropStep ||
                 command==MovementScriptCommand::GravityStep ? Runtime::Duration{} : commandInterval);
         }
-        assert(movementState.pose==targetPose);
-        assert(autoplay_landing_matches(field,piece,movementState,targetPose,targetRotation,autoplay_spin_rules(context.config)));
+        if(!boardChanged) {
+            assert(movementState.pose==targetPose);
+            assert(autoplay_landing_matches(field,piece,movementState,targetPose,targetRotation,autoplay_spin_rules(context.config)));
+        }
     }
 
     if (pps>1e-8) {
@@ -250,13 +299,22 @@ AutoplayStepResult run_autoplay_step(
         player.timing.autoplay=context.real_now();
     }
 
+    // Rebase after the ORIGINAL cadence deadline; never restart the PPS slot.
+    const bool repairedAfterWait=boardChanged || autoplay_field_shift(player)!=targetShift;
+    refreshTarget();
     // A planned landing has no terminal overlay yet. Service garbage and
     // cadence waits at the live pose; only commit the landing after they pass.
     // A rise invalidates the plan and lifts/redraws that same live piece.
-    if (!slowPresentation) {
-        movementState.pose=targetPose;
-        movementState.lastRotation=targetRotation;
+    if (!slowPresentation || repairedAfterWait) {
+        const auto previous=movementState.pose;
+        movementState.pose=targetPose;movementState.lastRotation=targetRotation;
+        if(slowPresentation && previous!=targetPose) {
+            record_piece_pose(context,Replay::OperationKind::Move,targetPose);
+            if(player.presentation.paintedActivePose)
+                Render::draw_piece_transition(context,piece,player,*player.presentation.paintedActivePose,targetPose,field);
+        }
     }
+    carry={};
     result.hardDrop = !context.config.movement.disableHardDrop;
     result.locked = context.config.movement.disableHardDrop && gravityInterval.enabled() &&
         !canPlace(movementState.pose.translated(1,0));

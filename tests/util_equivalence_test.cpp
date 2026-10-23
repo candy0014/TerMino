@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+namespace TetrTests::util_equivalence_test {
 namespace legacy {
 int digit_count(long long value){
     if(value==0) return 1;
@@ -59,7 +60,7 @@ void shuffle_vector(std::vector<int>& values,std::mt19937& random){
 }
 }
 
-int main(){
+int run(int argc,char** argv){
     assert(Util::format_time(0)=="00:00.000");
     assert(Util::format_time(61.123)=="01:01.123");
     assert(Util::format_time(59.9996)=="01:00.000");
@@ -135,4 +136,6 @@ int main(){
     }
 
     std::cout<<"util_equivalence_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::util_equivalence_test

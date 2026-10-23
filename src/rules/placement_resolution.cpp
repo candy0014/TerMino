@@ -44,7 +44,9 @@ PlacementResult resolve_placement(
         in.currentCombo,
         in.garbageMode,
         in.attackRules,
-        out.clear.halfClear
+        out.clear.halfClear,
+        in.garbageMode==Runtime::GarbageMode::QuickPlay &&
+            Runtime::reverse(in.qp.doubleHole) && !in.legacyQuickPlayRules
     });
 
     AttackInput attackInput;

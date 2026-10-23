@@ -14,6 +14,7 @@
 #include <sstream>
 #include <stdexcept>
 
+namespace TetrTests::bot_coldclear_test {
 namespace {
 void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
 ColdClear::Input input_for(Runtime::GameContext& context, const Runtime::Playfield& field) {
@@ -183,6 +184,12 @@ void rotation_parity(Runtime::GameContext& context) {
 void execute_script(Runtime::GameContext& context, const Runtime::Playfield& field,
                     Piece::Type selected, Piece::Pose start, Piece::Pose target, Runtime::RotationRecord rotation) {
     const auto piece = Piece::get_definition(selected);
+    if(context.config.handling.gravityInterval.is_instant()) {
+        Engine::MovementState grounded;grounded.pose=start;
+        Engine::apply_presentation_instant_gravity(grounded,
+            [&](Piece::Pose pose){return piece.can_place(pose,field);});
+        start=grounded.pose;
+    }
     const auto script = Bot::getop(context,field,piece,start,target,rotation);
     require(!script.empty() && script.back() == 'H',"Cold Clear answer is unreachable");
     Engine::MovementState state; state.pose = start;
@@ -215,7 +222,13 @@ void controls_and_hold(Runtime::GameContext& context) {
                 field.set_cell(r,c,Runtime::BoardCell::piece(1));
             const std::vector<Piece::Type> next{types[5],types[0],types[3]};
             const auto heldPiece = held >= 0 ? types[held] : Piece::Type::none();
-            const Piece::Pose start{{-2,4},{}};
+            Piece::Pose start{{-2,4},{}};
+            if(instant) {
+                Engine::MovementState grounded;grounded.pose=start;
+                Engine::apply_presentation_instant_gravity(grounded,
+                    [&](Piece::Pose pose){return Piece::get_definition(next.front()).can_place(pose,field);});
+                start=grounded.pose;
+            }
             auto answer = start; Runtime::RotationRecord rotation;
             const auto selected = Bot::getpos(context,player,field,next,{},start,{held != -2,heldPiece},answer,rotation);
             const auto diagnostic = Bot_coldclear::last_diagnostics();
@@ -329,6 +342,15 @@ void twenty_g_moves_cannot_cross_a_pit(Runtime::GameContext& context) {
                 !input.pieces[3].can_place(move.pose.translated(1,0),field),"20G target is not grounded");
         }
     }
+    context.config.movement={};
+    field.clear();
+    for(int row=12;row<20;++row)for(int col=6;col<10;++col)
+        field.set_cell(row,col,Runtime::BoardCell::garbage());
+    const auto input=input_for(context,field);
+    const auto moves=ColdClear::find_moves(input,input.root,3,ColdClear::spawn(input,input.root,3),true);
+    require(!moves.empty(),"20G hold retains reachable low-side placements");
+    for(const auto& move:moves)for(const auto& cell:input.pieces[3].cells(move.pose.rotation))
+        require(move.pose.position.col+cell[1]<6,"20G HOLD moved above a high wall before settling");
     context.config=saved;
 }
 
@@ -406,7 +428,7 @@ void simulation(Runtime::GameContext& context, int placements, int width, unsign
 }
 }
 
-int main(int argc, char** argv) {
+int run(int argc,char** argv) {
     try {
         Runtime::SessionState session;
         Runtime::RuntimeServices services;
@@ -423,4 +445,6 @@ int main(int argc, char** argv) {
         simulation(context,80,30,279);
         return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
+    return 0;
 }
+} // namespace TetrTests::bot_coldclear_test

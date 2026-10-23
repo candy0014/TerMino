@@ -22,6 +22,7 @@ struct ChainInput {
     Runtime::GarbageMode garbageMode = Runtime::GarbageMode::None;
     Runtime::AttackRules attackRules;
     bool halfClear = false;
+    bool qpDisableB2B = false;
 };
 
 struct ChainResult {

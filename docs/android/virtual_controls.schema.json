@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerMino virtual_controls subtree, version 1",
+  "description": "Android gameplay buttons; fixed page commands are excluded.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "orientation",
+    "active_layout",
+    "layouts"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "orientation": {
+      "const": "landscape"
+    },
+    "active_layout": {
+      "$ref": "#/$defs/id"
+    },
+    "layouts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/layout"
+      },
+      "maxItems": 32
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+    },
+    "unit": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/unit"
+        },
+        "y": {
+          "$ref": "#/$defs/unit"
+        }
+      }
+    },
+    "size": {
+      "type": "object",
+      "description": "Both dimensions use the landscape safe area's short side as their unit.",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height"
+      ],
+      "properties": {
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 8
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 8
+        }
+      }
+    },
+    "shape": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "rectangle"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "corner_radius"
+          ],
+          "properties": {
+            "kind": {
+              "const": "rounded_rectangle"
+            },
+            "corner_radius": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 0.5,
+              "description": "Radius as a fraction of this button's shorter dimension."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "ellipse"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "vertices"
+          ],
+          "properties": {
+            "kind": {
+              "const": "polygon"
+            },
+            "vertices": {
+              "type": "array",
+              "description": "Ordered vertices in the local 0..1 bounding box; runtime must reject zero-area and self-intersecting polygons.",
+              "minItems": 3,
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/point"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "button": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "action",
+        "player",
+        "center",
+        "size",
+        "shape",
+        "rotation_degrees",
+        "opacity",
+        "enabled",
+        "z_order"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "MoveLeft",
+            "MoveRight",
+            "RotateClockwise",
+            "RotateCounterclockwise",
+            "Rotate180",
+            "SoftDrop",
+            "HardDrop",
+            "Hold",
+            "Pause",
+            "Retry",
+            "Undo"
+          ]
+        },
+        "player": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "center": {
+          "$ref": "#/$defs/point"
+        },
+        "size": {
+          "$ref": "#/$defs/size"
+        },
+        "shape": {
+          "$ref": "#/$defs/shape"
+        },
+        "rotation_degrees": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "opacity": {
+          "$ref": "#/$defs/unit"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "z_order": {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "buttons"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "buttons": {
+          "type": "array",
+          "description": "Empty/hidden layouts are recoverable through fixed page controls. Button IDs must be unique within each layout; duplicate actions are allowed.",
+          "items": {
+            "$ref": "#/$defs/button"
+          },
+          "maxItems": 256
+        }
+      }
+    }
+  }
+}

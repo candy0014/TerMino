@@ -15,6 +15,7 @@
 #include "tetr/render/terminal_renderer.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/config/user_config.h"
+#include "tetr/frontend/ui_surface.h"
 #include "../src/app/ui_text.h"
 #ifdef __linux__
 #include <unistd.h>
@@ -28,6 +29,7 @@
 #include <sstream>
 #include <thread>
 
+namespace TetrTests::start_screen_navigation_test {
 namespace {
 using Runtime::Duration;
 #ifdef _WIN32
@@ -89,7 +91,7 @@ void expect_start(Fixture& fixture, Action action) {
 }
 }
 
-int main() {
+int run(int argc,char** argv) {
     std::ostringstream output;
     auto* previous = std::cout.rdbuf(output.rdbuf());
     {
@@ -109,6 +111,31 @@ int main() {
         };
         assert(App::run_start_menu(f.first.context));
         assert(retryRequested && retryReads>=5);
+    }
+    {
+        Fixture f;
+        App::UiText::set_language(App::UiText::Language::English);
+        Frontend::UiFrame frame;
+        Frontend::UiSurfaceScope surface([&](Frontend::UiFrame value){frame=std::move(value);});
+        const auto check=[&](const char* start,const char* settings) {
+            App::draw_start_menu(f.first.context);
+            assert(frame.metadata.entries.at(0).value==start);
+            assert(frame.metadata.entries.at(1).value==settings);
+            assert(frame.metadata.entries.at(2).value=="[Esc]");
+        };
+        check("[R]","[P]");
+        const auto keys=f.first.user.keyCodes;
+        UserConfig::set_control_keys(f.first.user,8,{keys[8],keys[10]});
+        UserConfig::set_control_keys(f.first.user,9,{keys[9],keys[11]});
+        check("[R / S]","[P / U]");
+        f.first.user.gameMode=6;
+        UserConfig::set_control_keys(f.second.user,8,{keys[10],keys[12]});
+        UserConfig::set_control_keys(f.second.user,9,{keys[11],keys[12]});
+        check("[R / S / F2]","[P / U / F2]");
+        f.first.user.gameMode=0;
+        UserConfig::set_control_keys(f.first.user,8,{});
+        UserConfig::set_control_keys(f.first.user,9,{});
+        check("[Unbound]","[Unbound]");
     }
 #ifdef __linux__
     for(int variant:{0,1,2}) {
@@ -271,4 +298,6 @@ int main() {
         assert(f.second.session->player.gameplay.scoring.wins == 3);
     }
     std::cout.rdbuf(previous);
+    return 0;
 }
+} // namespace TetrTests::start_screen_navigation_test

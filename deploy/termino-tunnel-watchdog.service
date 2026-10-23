@@ -1,0 +1,13 @@
+[Unit]
+Description=Check TerMino tunnel readiness and recover lost connections
+ConditionPathExists=%h/.config/termino-cloudflare/token
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/termino-cloudflare/tunnel_watchdog.py
+StateDirectory=termino-tunnel-watchdog
+StateDirectoryMode=0700
+Environment=PYTHONDONTWRITEBYTECODE=1
+TimeoutStartSec=45s
+NoNewPrivileges=yes
+UMask=0077

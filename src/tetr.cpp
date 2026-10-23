@@ -15,6 +15,7 @@
 #include "tetr/replay/session_state.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/config/user_config.h"
+#include "tetr/config/profile_store.h"
 #include "tetr/util/runtime_directory_lock.h"
 
 #include <cstdio>
@@ -36,16 +37,18 @@ int main(int argc, char* argv[]) {
     const char* playerOneBindings = UserConfig::kDefaultKeybindingPath;
     const char* playerTwoBindings = UserConfig::kDefaultPlayerTwoKeybindingPath;
     bool continuousCancellation = false;
-    bool skipStart = false;
+    bool skipStart = false,migrateConfig=false;
     int bindingPaths = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument = argv[i];
-        if (argument == "--qp-continuous-cancel") {
+        if(argument=="--migrate-config"){migrateConfig=true;}
+        else if (argument == "--qp-continuous-cancel") {
             continuousCancellation = true;
         } else if (argument == "--play") {
             skipStart = true;
         } else if (argument == "--help") {
             std::puts("TerMino\nUsage: tetr [--play] [--qp-continuous-cancel] [player1-keybindings] [player2-keybindings]\n"
+                      "  --migrate-config        Import existing profiles into .tetr/config.json and exit.\n"
                       "  --play                  Start immediately with the saved configuration.\n"
                       "  --qp-continuous-cancel  Enable Quick Play continuous cancellation penalties (default: off).");
             return 0;
@@ -60,6 +63,7 @@ int main(int argc, char* argv[]) {
     }
     Util::RuntimeDirectoryLock directoryLock(".tetr/client.lock");
     if(!directoryLock.acquired()) {std::fprintf(stderr,"TerMino: %s\n",directoryLock.error().c_str());return 3;}
+    if(migrateConfig){const bool saved=UserConfig::migrate_client_config();std::fputs(saved?"Client settings migrated to .tetr/config.json\n":"Could not migrate client settings; existing files were preserved.\n",saved?stdout:stderr);return saved?0:1;}
     Runtime::SessionState session;
     Runtime::RuntimeServices runtimeServices;
     Runtime::GameContext context(session, runtimeServices);
@@ -99,6 +103,7 @@ int main(int argc, char* argv[]) {
     auto& user = userSettings;
     setvbuf(stdout, nullptr, _IOFBF, 4096);
     UserConfig::load_keybindings(user, playerOneBindings);
+    try {
     UserConfig::load_startup_settings(user, false, config_path_from_environment("TETR_USER_CONFIG", ""));
     playerTwoUserSettings = userSettings;
     UserConfig::load_player_two_keybindings(
@@ -106,11 +111,11 @@ int main(int argc, char* argv[]) {
         playerTwoBindings);
     UserConfig::load_startup_settings(playerTwoUserSettings, true,
         config_path_from_environment("TETR_USER_CONFIG_PLAYER2", ""));
+    } catch(const std::exception& error) {std::fprintf(stderr,"TerMino: %s\n",error.what());return 1;}
     applicationState.localVersusSettingsAvailable =
-        std::filesystem::exists(playerTwoUserSettings.persistencePath);
+        UserConfig::has_saved_profile(playerTwoUserSettings);
     if (!std::getenv("TETR_USER_CONFIG")) {
-        int owner = 0;
-        std::ifstream(".tetr/active_player") >> owner;
+        const int owner=UserConfig::load_active_player();
         if (owner == 1) {
             applicationState.singlePlayerOwner = 1;
             applicationState.savedPlayerOneSettings = user;

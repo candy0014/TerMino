@@ -283,6 +283,7 @@ void add_buffer(
             p.receiveProtection = std::min(18,p.receiveProtection +
                 (Runtime::reverse(context.config.quickPlay.volatileMode) ? resolvedLines / 3 : resolvedLines));
             p.sinceReceived = 0;
+            if(!context.config.quickPlay.legacyRules)p.piecesSinceRelief=0;
         }
         if (auto* recorder = Replay::tetrio_recorder(context))
             recorder->incoming(context, resolvedLines);
@@ -301,8 +302,9 @@ void add_qp_opponent_attack(Runtime::GameContext& context,Runtime::PlayerSession
     if (context.config.mode.replayMode || attack<=0) return;
     auto& qp=context.session.quickPlay;
     const double elapsed=Runtime::elapsed_game_time(context.session,context.now()).seconds();
-    // Equal-altitude opponents provide a neutral height penalty. Their APM
-    // is empirical; target selection is the project's local simulation.
+    // One shared reception path for both clients. The generated line budget
+    // already accounts for normal height/fatigue costs, including above 3500m;
+    // apply actual rounding, protection and Mod effects exactly once here.
     const double exact=Rules::qp_receive_attack(attack,qp.altitude,qp.altitude,qp.floor,
         context.config.quickPlay,qp.progress,elapsed);
     const double roll=double(player.attackRoundingRandom())/(double(std::mt19937::max())+1);

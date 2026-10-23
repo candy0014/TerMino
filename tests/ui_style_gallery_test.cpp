@@ -18,6 +18,7 @@
 #include <memory>
 #include <sstream>
 
+namespace TetrTests::ui_style_gallery_test {
 namespace {
 struct Rig {
     std::unique_ptr<Runtime::SessionState> session=std::make_unique<Runtime::SessionState>();
@@ -218,7 +219,7 @@ void gallery(bool chinese,Render::TerminalSize size,bool full) {
     }
 }
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     if(argc>1){directory=argv[1];std::filesystem::create_directories(directory);}
     for(bool chinese:{false,true}) {
         gallery(chinese,{120,40},true);
@@ -226,4 +227,6 @@ int main(int argc,char** argv) {
     }
     App::UiText::set_language(App::UiText::Language::English);
     std::cerr<<"UI gallery: bilingual menus, preserved parent columns, incremental submenus, colors and bounded small-terminal frames passed\n";
+    return 0;
 }
+} // namespace TetrTests::ui_style_gallery_test

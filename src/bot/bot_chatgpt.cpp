@@ -203,13 +203,16 @@ using Engine = m_tetris::TetrisEngine<rule_tetr_srs_plus::TetrisRule, Evaluation
 // Scratch search storage is private to the calling thread. Root chain/garbage
 // state is supplied afresh on every decision; no test or player globals exist.
 struct Workspace {
-    using Geometry=std::tuple<bool,bool,bool,Runtime::SpinBonuses,std::array<Piece::Type,7>>;
+    using Geometry=std::tuple<bool,bool,bool,Runtime::SpinBonuses,std::array<Piece::Type,7>,bool,bool,bool>;
     std::optional<Geometry> geometry;
     Engine engine;
+    Search quickGeometry;
+    Search::Config quickGeometryConfig;
     bool started = false;
     Workspace() {
         if (!engine.prepare(10, 40)) throw std::runtime_error("bot_chatgpt initialization failed");
         engine.memory_limit(64ull << 20);
+        quickGeometry.init(engine.context().get(),&quickGeometryConfig);
     }
 };
 thread_local std::unique_ptr<Workspace> workspace;
@@ -220,17 +223,52 @@ Workspace& current_workspace() {
     if (!workspace) workspace = std::make_unique<Workspace>();
     return *workspace;
 }
+
+std::optional<std::vector<Autoplay::PlacementCandidate>> quick_geometry(const Bot::Environment& env,
+    const Runtime::Playfield& field,int active,Piece::Type type,Piece::Pose start,Runtime::GravityInterval gravity) {
+    const auto metadata=Piece::metadata(type);
+    if(field.width()!=10 || env.rotationSystem!=0 || gravity.is_instant() || env.wall_only_horizontal() ||
+        env.movement.mask()!=0 || !env.partial_descent_available() || metadata.familyIndex<0 || metadata.familyIndex>=7 ||
+        metadata.rotationSystem!=Runtime::RotationSystem::SrsPlus || Piece::catalog_entry(type).shapes[0].size()!=4)return {};
+    // The graph represents forty rows. Never discard occupied hidden cells.
+    for(int y=-Runtime::kHiddenRowCapacity;y<active-40;++y)
+        for(int x=0;x<10;++x)if(field.cell(y,x).occupied())return {};
+    m_tetris::TetrisMap map(10,40);
+    for(int y=0;y<40;++y)for(int x=0;x<10;++x)if(field.cell(active-1-y,x).occupied()) {
+        map.row[y]|=1u<<x;++map.count;map.top[x]=y+1;map.roof=std::max(map.roof,y+1);
+    }
+    auto& work=current_workspace();auto& config=work.quickGeometryConfig;
+    config.retainSpinVariants=true;config.spinBonuses=env.spinBonuses;config.pieceTypes=env.pieceTypes;
+    const auto spin=env.quickPlayRules?::Engine::autoplay_spin_rules(*env.quickPlayRules):
+        ::Engine::AutoplaySpinRules{env.spinBonuses};
+    config.allSpinEnabled=spin.allSpinEnabled;config.noHoldReverse=spin.noHoldReverse;
+    config.suppressNonTSpins=spin.suppressNonTSpins;
+    const int offset=20-active;
+    const auto* node=native_pose(work.engine.context().get(),"IJLOSTZ"[metadata.familyIndex],start.translated(offset,0));
+    if(!node || !node->check(map))return {};
+    std::vector<Autoplay::PlacementCandidate> result;
+    for(const auto& landing:*work.quickGeometry.search(map,node,0)) {
+        const auto record=landing.kick?Runtime::RotationRecord::from_kick(Piece::KickIndex::from_index(landing.kick-1)):
+            Runtime::RotationRecord{};
+        result.push_back({type,host_pose(*landing.node).translated(-offset,0),record,0,0});
+    }
+    return result;
+}
 }
 
 Diagnostics last_diagnostics() { return diagnostics; }
 std::vector<Autoplay::PlacementCandidate> last_candidates() { return candidates; }
+std::optional<std::vector<Autoplay::PlacementCandidate>> enumerate_placements(const Bot::Environment& env,
+    const Runtime::Playfield& field,int active,Piece::Type type,Piece::Pose start,Runtime::GravityInterval gravity) {
+    return quick_geometry(env,field,active,type,start,gravity);
+}
 
 bool init(const Bot::Environment& environment) {
     if (!availability(environment)) return false;
     workspace.reset();
     if(Bot::QuickPlaySearch::enabled(environment)) {
         const auto baseline=Bot::QuickPlaySearch::native_environment(environment);
-        if(!Bot::QuickPlaySearch::plain(environment) || !availability(baseline))return true;
+        if(!Bot::QuickPlaySearch::native_policy_compatible(Bot::QuickPlaySearch::Profile::ChatGPT,environment) || !availability(baseline))return true;
     }
     (void)current_workspace();
     return true;
@@ -244,7 +282,7 @@ int getpos(const Bot::Environment& environment, const Runtime::PlayerSessionStat
     candidates.clear();
     if (!availability(environment) || next.empty()) return -1;
     if(Bot::QuickPlaySearch::enabled(environment)) {
-        if(Bot::QuickPlaySearch::plain(environment) &&
+        if(Bot::QuickPlaySearch::native_policy_compatible(Bot::QuickPlaySearch::Profile::ChatGPT,environment) &&
             availability(Bot::QuickPlaySearch::native_environment(environment))) {
             if(auto baseline=Bot::QuickPlaySearch::native_baseline(Bot::QuickPlaySearch::Profile::ChatGPT,
                 environment,player,field)) {
@@ -268,7 +306,10 @@ int getpos(const Bot::Environment& environment, const Runtime::PlayerSessionStat
         }
         const auto result=Bot::QuickPlaySearch::search(Bot::QuickPlaySearch::Profile::ChatGPT,
             environment,player,field,next,unseenBagPieces,
-            {{startRow,startCol},Runtime::Rotation::from_index(startRotation)},hold);
+            {{startRow,startCol},Runtime::Rotation::from_index(startRotation)},hold,{},
+            [&](const auto& image,int active,auto type,auto origin,auto gravity) {
+                return quick_geometry(environment,image,active,type,origin,gravity);
+            });
         candidates=result.candidates;
         diagnostics.rootNext=next;diagnostics.rootUnseen=unseenBagPieces;diagnostics.rootHold=hold;
         diagnostics.rootRow=startRow;diagnostics.rootCol=startCol;diagnostics.rootRotation=startRotation;
@@ -290,19 +331,24 @@ int getpos(const Bot::Environment& environment, const Runtime::PlayerSessionStat
         diagnostics.projectedAttack=result.attack;diagnostics.projectedB2b=result.b2b;
         diagnostics.projectedRisen=result.risen;diagnostics.projectedDepth=result.depth;
         diagnostics.projectedDead=result.dead;diagnostics.value=result.value;diagnostics.searchMilliseconds=result.searchMilliseconds;
+        diagnostics.searchWidth=result.searchWidth;diagnostics.peakFrontier=result.peakFrontier;diagnostics.evaluated=result.evaluated;
         diagnostics.fallbackReason=result.selected>=0?0:1;
         if(result.selected>=0) {
             answerRow=result.pose.position.row;answerCol=result.pose.position.col;answerRotation=result.pose.rotation.index();
             answerKick=result.rotation.rotated()?result.rotation.kick().index()+1:0;
             return result.selected;
         }
-        return BotNativeHost::fallback(field,next,startRow,startCol,startRotation,
-            answerRow,answerCol,answerRotation,answerKick);
+        // The host has a geometry-aware grounded fallback. The native helper
+        // is fixed to a 10x20 tetromino field and cannot handle QP dimensions.
+        return -1;
     }
     for (int type : next) if (type < 0 || type >= 7) return -1;
+    const auto spinRules=environment.quickPlayRules?::Engine::autoplay_spin_rules(*environment.quickPlayRules):
+        ::Engine::AutoplaySpinRules{environment.spinBonuses};
     const Workspace::Geometry geometry{environment.partial_descent_available(),
         environment.naturalGravityEnabled && environment.gravityIntervalSeconds<=1e-7,
-        environment.wall_only_horizontal(),environment.spinBonuses,environment.pieceTypes};
+        environment.wall_only_horizontal(),environment.spinBonuses,environment.pieceTypes,
+        spinRules.allSpinEnabled,spinRules.noHoldReverse,spinRules.suppressNonTSpins};
     if(workspace && workspace->geometry && *workspace->geometry!=geometry) workspace.reset();
     auto& work = current_workspace();work.geometry=geometry;
     const auto map = BotNativeHost::make_map(field);
@@ -342,6 +388,14 @@ int getpos(const Bot::Environment& environment, const Runtime::PlayerSessionStat
     status.cancellation = player.garbage.cancellation;
     status.spinBonuses = environment.spinBonuses;
     status.attackRules = environment.attackRules;
+    status.pieceTypes=environment.pieceTypes;
+    if(environment.quickPlayRules) {
+        const auto& q=environment.quickPlayRules->quickPlay;
+        status.qpAllSpin=q.allSpin;
+        status.qpModifiers={q.expert,q.noHold,q.messy,q.gravity,q.volatileMode,q.doubleHole,
+            q.invisible,q.allSpin,q.backfire,q.snakeEyes,q.snowball};
+        status.qpLastOperation=player.gameplay.quickPlay.lastOperation;
+    }
     if (environment.attackRules.halfClearEnabled)
         for (int row=-20; row<20; ++row)
             for (int col=0; col<10; ++col)
@@ -365,10 +419,10 @@ int getpos(const Bot::Environment& environment, const Runtime::PlayerSessionStat
         if (readyPrefix)
             status.readyIncoming += std::min(lines, std::numeric_limits<int>::max() - status.readyIncoming);
     }
-    // Retain the validated firepower baseline. The visible-state blend in
-    // policy.h is experimental: faster digging did not yet generalize to
-    // survival/versus, so it must not silently replace the default policy.
-    const PolicyWeights policy;
+    const auto bonuses=environment.spinBonuses;
+    const auto policy=capability_policy({map.roof,status.garbageHeight,status.incoming,status.readyIncoming},
+        player.gameplay.playfield.activeHeight,environment.holdEnabled,
+        !spinRules.suppressNonTSpins && full_non_t_spins(spinRules.allSpinEnabled?Runtime::SpinBonuses::AllSpinPlus:bonuses));
     diagnostics.digPressure = policy.digPressure;
     diagnostics.roof = map.roof;
     diagnostics.incoming = status.incoming;
@@ -384,8 +438,15 @@ int getpos(const Bot::Environment& environment, const Runtime::PlayerSessionStat
     search.search_config()->wallOnlyHorizontal=environment.wall_only_horizontal();
     search.search_config()->spinBonuses=environment.spinBonuses;
     search.search_config()->pieceTypes=environment.pieceTypes;
+    search.search_config()->allSpinEnabled=spinRules.allSpinEnabled;
+    search.search_config()->noHoldReverse=spinRules.noHoldReverse;
+    search.search_config()->suppressNonTSpins=spinRules.suppressNonTSpins;
     search.ai()->clear_candidates();
     search.ai()->set_policy(policy);
+    search.ai()->set_terrain_capabilities({environment.holdEnabled,
+        environment.wall_only_horizontal() || !environment.partial_descent_available() ||
+            (environment.naturalGravityEnabled && environment.gravityIntervalSeconds<=1e-7),true,4});
+    search.ai()->set_fast_terrain(bool(environment.quickPlayRules));
     diagnostics.forecastStepSeconds = environment.secondsPerPiece > 0
         ? environment.secondsPerPiece : budgetMs / 1000.0;
     diagnostics.openerDoubleCancelEnabled = environment.openerDoubleCancelEnabled;
@@ -428,6 +489,7 @@ int getpos(const Bot::Environment& environment, const Runtime::PlayerSessionStat
         candidates.push_back({environment.pieceTypes[candidate.type],candidate.pose,candidate.rotation,candidate.value,candidate.movementSeconds});
     diagnostics.searchMilliseconds = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - searchStarted).count();
+    diagnostics.searchWidth=environment.autoplaySearchWidth;
     diagnostics.projectedAttack = result.status.attack;
     diagnostics.value = result.status.value;
     diagnostics.rootNext = next;

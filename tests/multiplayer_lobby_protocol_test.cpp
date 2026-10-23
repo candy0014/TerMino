@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+namespace TetrTests::multiplayer_lobby_protocol_test {
 namespace {
 
 void lobby_signals_are_strictly_typed(){
@@ -79,7 +80,7 @@ void randomized_setup_round_trip(){
     std::mt19937 rng(0x30C0DEC0u);
     for(int iteration=0;iteration<10000;++iteration){
         Network::LobbyPlayerSetup setup;
-        setup.visibleHeight=2+static_cast<int>(rng()%99);
+        setup.visibleHeight=static_cast<int>(rng()%101);
         setup.width=4+static_cast<int>(rng()%97);
         setup.nextCount=static_cast<int>(rng()%11);
         setup.holdEnabled=(rng()&1u)!=0;
@@ -161,7 +162,7 @@ void room_codec_validation() {
 
 } // namespace
 
-int main(){
+int run(int argc,char** argv){
     lobby_signals_are_strictly_typed();
     player_setup_round_trip_preserves_legacy_wire();
     malformed_setup_is_rejected();
@@ -170,3 +171,4 @@ int main(){
     room_codec_validation();
     return 0;
 }
+} // namespace TetrTests::multiplayer_lobby_protocol_test

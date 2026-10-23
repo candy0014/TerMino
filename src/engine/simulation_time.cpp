@@ -3,6 +3,7 @@
 #include "tetr/engine/frame_coordinator.h"
 #include "tetr/engine/garbage_service.h"
 #include "tetr/engine/periodic_events.h"
+#include "tetr/rules/quick_play.h"
 #include "tetr/input/services.h"
 #include "tetr/network/multiplayer_channel.h"
 #include "tetr/network/network_services.h"
@@ -27,7 +28,8 @@ Rules::PlayResult advance_piece_time(Runtime::GameContext& context,
         static_cast<long double>(session.completedSimulationPieces) / context.config.simulationPps));
     auto& field = player.gameplay.playfield.field;
     const bool cheese = context.config.garbage.mode == Runtime::GarbageMode::CheeseTimer;
-    const bool quickPlay = context.config.garbage.mode == Runtime::GarbageMode::QuickPlay;
+    const bool quickPlay = context.config.garbage.mode == Runtime::GarbageMode::QuickPlay &&
+        Rules::qp_gravity_increases(context.config.quickPlay);
     const auto interval = context.config.garbage.generationInterval;
     const auto second = Runtime::Duration::from_seconds(1.0);
     auto result = Rules::PlayResult::ContinueFrame;

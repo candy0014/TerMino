@@ -8,7 +8,8 @@
 #include <string>
 #include <vector>
 
-int main() {
+namespace TetrTests::bot_selection_test {
+int run(int argc,char** argv) {
     using Runtime::AutoplayMode;
 
     static_assert(static_cast<int>(AutoplayMode::Disabled) == 0);
@@ -86,3 +87,4 @@ int main() {
 
     return 0;
 }
+} // namespace TetrTests::bot_selection_test

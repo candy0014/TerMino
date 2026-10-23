@@ -162,13 +162,17 @@ int dialog(Runtime::GameContext& context,const TerminalSettingsView& view,const 
     const auto draw=[&] {view.print_choices(item,selected,"PRESET SETTINGS");if(!hint.empty()) view.print_message(hint);};
     NavigationInput input(context);draw();
     for(;;) {
+        const auto command=Frontend::poll_ui_command();
+        if(command && command->ancestor)throw MenuJump{*command->ancestor,command->index};
+        if(command && command->kind==Frontend::UiCommandKind::Back)return -1;
+        if(command)selected=static_cast<int>(command->index);
         if(input.update(NavigationKey::Back,false) || input.update(NavigationKey::Left,false) || input.update(NavigationKey::Backspace,false)) return -1;
         const bool up=input.update(NavigationKey::Up,true),down=input.update(NavigationKey::Down,true);
         if(up && input.active_vertical_key()==NavigationKey::Up) selected=(selected+item.choice.values.size()-1)%item.choice.values.size();
         if(down && input.active_vertical_key()==NavigationKey::Down) selected=(selected+1)%item.choice.values.size();
         if(up || down || view.terminal_size_changed()) draw();
         const bool right=input.update(NavigationKey::Right,false);
-        if(input.update(NavigationKey::Confirm,false) || right) return selected;
+        if(command || input.update(NavigationKey::Confirm,false) || right) return selected;
         context.services.clock.sleep_for(Runtime::Duration::from_seconds(.001));
     }
 }

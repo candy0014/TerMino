@@ -24,6 +24,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+namespace TetrTests::room_start_spectator_test {
 namespace {
 using namespace Network;
 using namespace std::chrono_literals;
@@ -118,7 +119,7 @@ struct Output : std::streambuf {
     int sync() override {if(actor)actor->capture();return 0;}
 };
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     const bool local=argc<2 || std::string(argv[1])=="--local";
     const std::string address=local?"127.0.0.1:3040":argv[1];
     const int count=argc>2?std::stoi(argv[2]):4;
@@ -208,4 +209,6 @@ int main(int argc,char** argv) {
     }
     close(reports[0]);if(!released)close(release[1]);
     assert(passed);
+    return 0;
 }
+} // namespace TetrTests::room_start_spectator_test

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <iostream>
 
+namespace TetrTests::bot_chatgpt_hold_context_test {
 namespace B = Bot_chatgpt;
 namespace A = Bot_chatgpt::Analysis;
 using FixedEngine = m_tetris::TetrisEngine<rule_tetr_srs_plus::TetrisRule,
@@ -54,7 +55,7 @@ Runtime::Playfield blocker(const m_tetris::TetrisContext* context, char blocked,
     return {};
 }
 
-int main() {
+int run(int argc,char** argv) {
     A::PlainEngine geometry; assert(geometry.prepare(10, 40));
     B::Evaluation old; old.init(geometry.context().get());
     B::HoldContextEvaluation fixed; fixed.init(geometry.context().get());
@@ -148,4 +149,6 @@ int main() {
     assert(checked > 1000 && legacyMismatch > 0 && delayed > 0);
     std::cout << "checked_native_contexts=" << checked << " legacy_empty_hold_mismatches="
               << legacyMismatch << " delayed_empty_holds=" << delayed << " corrected_mismatches=0\n";
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_hold_context_test

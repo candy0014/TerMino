@@ -43,6 +43,10 @@ struct QuickPlayProgress {
     std::vector<QuickPlayWindup> windups;
     std::vector<QuickPlayWindupWarning> windupWarnings;
     double opponentTickRemainder = 0.0;
+    double opponentLineCredits = 0.0;
+    int opponentNextAttack = 0;
+    double opponentPressureNormal = 0.0;
+    bool opponentPressureInitialized = false;
 };
 
 } // namespace Runtime

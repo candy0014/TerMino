@@ -4,6 +4,7 @@
 #include "tetr/runtime/constants.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/runtime/player_session_state.h"
+#include <algorithm>
 
 namespace Engine {
 
@@ -44,9 +45,14 @@ Rules::FrameRuleConfig make_frame_rule_config(const Runtime::GameContext& contex
     config.qpGarbageInTime = context.session.quickPlay.garbageInTime;
     config.elapsedGameTime = elapsedGameTime;
     config.qpMods = context.config.quickPlay;
+    // Match the displayed own APM; a 30-second exposure stabilizes the opener.
+    config.ownAttackApm=context.session.player.gameplay.scoring.totalAttack*60.0/
+        std::max(30.0,elapsedGameTime.seconds()*context.config.timeMultiplier);
     const auto& field = context.session.player.gameplay.playfield;
     config.garbageRows = field.garbageHeight;
-    for (int row = -Runtime::kDisplayHiddenRows; row < 4; ++row)
+    // The danger band is the first five visible rows (four in old replays). Short
+    // fields (including a hidden-only field) still inspect their hidden rows.
+    for (int row = -Runtime::kDisplayHiddenRows; row < std::min(context.config.quickPlay.legacyRules?4:5,field.field.height()); ++row)
         for (int col = 0; col < field.width; ++col)
             config.inDanger = config.inDanger || field.field.cell(row, col).occupied();
     return config;

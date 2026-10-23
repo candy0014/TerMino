@@ -21,7 +21,8 @@ PlayerInputResult process_player_input_frame(
     const std::vector<int>& moveKeys,
     const PlayerInputConfig& config,
     const std::function<bool(int)>& keyDown,
-    const std::function<Runtime::TimePoint()>& now) {
+    const std::function<Runtime::TimePoint()>& now,
+    std::optional<Runtime::TimePoint> repeatThrough) {
     PlayerInputResult result;
     const bool zeroDas = config.das == Runtime::Duration{};
     const bool zeroArr = config.arr == Runtime::Duration{};
@@ -116,6 +117,7 @@ PlayerInputResult process_player_input_frame(
         if (input.consumeRelease(key, down)) continue;
 
         const Runtime::TimePoint inputNow = now();
+        const auto repeatNow = repeatThrough ? std::min(inputNow,*repeatThrough) : inputNow;
         if (input.beginPress(key, down, inputNow)) {
             if(Input::is_horizontal(action) || Input::is_rotation(action) || action==Input::Action::SoftDrop)movement.recordInput();
             if (action == Input::Action::Undo) {
@@ -154,7 +156,7 @@ PlayerInputResult process_player_input_frame(
             if (Input::is_rotation(action)) continue;
             if (action == Input::Action::SoftDrop) {
                 if (soft_drop_interval(config.gravityInterval,config.softDropFactor,config.softDropFixed)!=Runtime::Duration{}) {
-                    const int repeats = input.softDropRepeatsDue(key, inputNow, config.gravityInterval, config.softDropFactor,config.softDropFixed);
+                    const int repeats = input.softDropRepeatsDue(key, repeatNow, config.gravityInterval, config.softDropFactor,config.softDropFixed);
                     for (int i = 0; i < repeats; ++i) {
                         const auto effect = movement.softDropStep(inputNow);
                         result.scoreDelta += effect.scoreDelta;
@@ -163,7 +165,7 @@ PlayerInputResult process_player_input_frame(
                 }
             }
             if (Input::is_horizontal(action) && input.mostRecentActive(moveKeys) == key) {
-                const int repeats = input.horizontalRepeatsDue(key, inputNow, config.das, config.arr);
+                const int repeats = input.horizontalRepeatsDue(key, repeatNow, config.das, config.arr);
                 if (instantDrop!=HorizontalDropMode::None && !zeroArr) {
                     if (repeats) pendingShifts.push_back({Input::horizontal_delta(action),inputNow,false,repeats});
                 } else {

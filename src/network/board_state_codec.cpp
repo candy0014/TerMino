@@ -59,7 +59,7 @@ bool decode_hold(std::string_view text,Piece::Type& hold){
 
 bool decode_board_cells(std::string_view text,int width,int visibleHeight,Runtime::Playfield& field){
     if(width<=0||width>Runtime::Playfield::kStorageColumns ||
-       visibleHeight<=0||visibleHeight>Runtime::Playfield::kStorageRows) return false;
+       visibleHeight<0||visibleHeight>Runtime::Playfield::kStorageRows) return false;
     const int rows=visibleHeight+Runtime::kDisplayHiddenRows;
     if(rows<=0) return false;
     const std::size_t expected=static_cast<std::size_t>(width)*static_cast<std::size_t>(rows);
@@ -97,6 +97,25 @@ bool decode_garbage(std::string_view text,int visibleHeight,std::vector<RemoteGa
 }
 
 } // namespace
+
+std::string encode_field_visibility(const Runtime::FieldVisibility& f) {
+    std::ostringstream wire;wire.imbue(std::locale::classic());
+    wire<<"!visibility-v1;"<<(f.invisible?(f.periodic?2:1):0)<<';'<<std::setprecision(17)
+        <<f.delay.seconds()<<';'<<f.interval.seconds()<<';'<<f.duration.seconds();
+    return wire.str();
+}
+std::optional<Runtime::FieldVisibility> decode_field_visibility(std::string_view wire) {
+    if(wire.size()>256 || wire.substr(0,15)!="!visibility-v1;")return {};
+    const auto fields=Util::Text::split_exact<5>(wire,';');if(!fields)return {};
+    const auto mode=Util::Text::parse_integer<int>((*fields)[1]);
+    if(!mode || *mode<0 || *mode>2)return {};
+    double values[3];for(int i=0;i<3;++i) {
+        const auto value=Util::Text::parse_finite_real((*fields)[i+2]);
+        if(!value || *value<0 || *value>1e18)return {};values[i]=*value;
+    }
+    return Runtime::FieldVisibility{*mode!=0,*mode==2,Runtime::Duration::from_seconds(values[0]),
+        Runtime::Duration::from_seconds(values[1]),Runtime::Duration::from_seconds(values[2])};
+}
 
 std::uint64_t board_state_fingerprint(std::string_view state) {
     auto fields=split_sections(state);
@@ -163,6 +182,7 @@ std::string encode_board_state(
     for(int i=1;i<=field.visibleHeight+Runtime::kDisplayHiddenRows;i++) state+=char(wireColors[buffer[i]]+'0');
     state+=';';
     if(!player.pieces.bag.empty()) state+=std::to_string(Compat::to_legacy(player.pieces.bag.front().type))+",";
+    else if(activePiece.kind==ActivePieceStateKind::Locked)state+="0,"; // No active piece; keep the legacy current/next section well-formed.
     for(Piece::Type piece:player.pieces.nextPreview) state+=std::to_string(Compat::to_legacy(piece))+",";
     state+=';';
     if(!hold.piece.valid()) state+='-'; else state+=std::to_string(Compat::to_legacy(hold.piece))+",";
@@ -300,6 +320,10 @@ std::optional<BoardStateSnapshot> decode_board_state(std::string_view state,int 
         placement.perfectClear=*perfectClear!=0 && *perfectClear!=2;
         placement.halfClear=*perfectClear==2;
         snapshot.placement=placement;
+    }else if(rotation==-2 && row==-1 && col==-1) {
+        // A final board can be sent before the first lock (quit/top-out/host
+        // stop), so the locked sentinel does not require placement metadata.
+        snapshot.currentPiece=Piece::Type::none();
     }else{
         if(rotation<0||rotation>3) return std::nullopt;
         // Leave room for off-board shape pivots, but keep wire coordinates

@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+namespace TetrTests::periodic_and_input_test {
 namespace {
 
 bool near(double a, double b) { return std::fabs(a-b) < 1e-12; }
@@ -150,4 +151,6 @@ void test_input_basic() {
 
 } // namespace
 
-int main(){ test_replay_hash(); test_completion(); test_blitz(); test_periodic(); test_collect_keys(); test_input_basic(); }
+int run(int argc,char** argv){ test_replay_hash(); test_completion(); test_blitz(); test_periodic(); test_collect_keys(); test_input_basic();     return 0;
+}
+} // namespace TetrTests::periodic_and_input_test

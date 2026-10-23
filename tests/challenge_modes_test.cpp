@@ -33,6 +33,7 @@
 #include <memory>
 #include <sstream>
 
+namespace TetrTests::challenge_modes_test {
 namespace {
 using namespace Challenges;
 using Id=UserConfig::SettingId;
@@ -301,11 +302,13 @@ void lost_bot_round_records() {
     environment("TETR_LOCAL_VERSUS_BATCH","");environment("TETR_TEST_CLOCK_SCALE","");
 }
 }
-int main() {
+int run(int argc,char** argv) {
     directory=std::filesystem::temp_directory_path()/("termino_challenge_modes_"+std::to_string(utc_now_milliseconds()));std::filesystem::create_directories(directory);
     const auto* old=std::getenv("TETR_MAP_FILE");const std::string previous=old?old:"";environment("TETR_MAP_FILE",(directory/"maps.txt").string());
     App::UiText::set_language(App::UiText::Language::English);
     rollback_and_runtime();bot_levels_and_ownership();maps_and_menu();map_construction();local_replay_and_owner_restore();human_round_has_no_challenges();lost_bot_round_records();
     environment("TETR_MAP_FILE",previous);std::filesystem::remove_all(directory);
     std::cerr<<"runtime challenge checks, full rollback, ChatGPT levels, per-player records, maps and versus replays passed\n";
+    return 0;
 }
+} // namespace TetrTests::challenge_modes_test

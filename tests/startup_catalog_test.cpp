@@ -4,7 +4,8 @@
 #include <cassert>
 #include <cstddef>
 
-int main() {
+namespace TetrTests::startup_catalog_test {
+int run(int argc,char** argv) {
     const auto srsPlus = Piece::types_for_rotation_system(Runtime::RotationSystem::SrsPlus);
     assert(srsPlus.size() == static_cast<std::size_t>(Piece::standard_tetromino_count()));
     const auto& first = Piece::catalog();
@@ -14,3 +15,4 @@ int main() {
     assert(first.size() >= srsPlus.size());
     return 0;
 }
+} // namespace TetrTests::startup_catalog_test

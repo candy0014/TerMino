@@ -35,39 +35,13 @@ try {
         $suffix = if ($Generator) { $Generator -replace '[^a-zA-Z0-9]+', '-' } else { 'vs' }
         $BuildDirectory = "build-portable-windows-$suffix"
     }
-    if (-not $DataDirectory) { $DataDirectory = $PSScriptRoot }
-    $DataDirectory = (Resolve-Path -LiteralPath $DataDirectory).Path
     $BuildDirectory = Get-ProjectPath $BuildDirectory
     $OutputDirectory = Get-ProjectPath $OutputDirectory
-    # Every package run configures explicitly. Avoid concurrent regeneration
-    # when copied sources have timestamps ahead of the build machine's clock.
-    $configureArguments = @('-S', $PSScriptRoot, '-B', $BuildDirectory,
-        '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=OFF', '-DTETR_PORTABLE_BUILD=ON',
-        '-DTETR_PORTABLE_RESET_SETTINGS=ON',
-        '-DCMAKE_SUPPRESS_REGENERATION=ON',
-        "-DTETR_PORTABLE_DATA_DIR=$DataDirectory")
-    if ($Generator) { $configureArguments += @('-G', $Generator) }
-    & cmake @configureArguments
-    if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed. Use a new -BuildDirectory if the source path or generator changed." }
-    & cmake --build $BuildDirectory --config Release --target tetr tetr_server --parallel $Parallel
-    if ($LASTEXITCODE -ne 0) { throw "Build failed; no package was created." }
-
-    $platform = (Get-Content -LiteralPath (Join-Path $BuildDirectory 'portable-platform.txt') -Raw).Trim()
-    $packageName = "TerMino-$platform-$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')"
-    $packageDirectory = Join-Path $OutputDirectory $packageName
-    if (Test-Path -LiteralPath $packageDirectory) { throw "Package already exists: $packageDirectory" }
-    New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
-    & cmake --install $BuildDirectory --config Release --component Portable --prefix $packageDirectory
-    if ($LASTEXITCODE -ne 0) { throw "Package staging failed." }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $archive = "$packageDirectory.zip"
-    [IO.Compression.ZipFile]::CreateFromDirectory($packageDirectory, $archive,
-        [IO.Compression.CompressionLevel]::Optimal, $true)
-    $checksum = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-    [IO.File]::WriteAllText("$archive.sha256", "$checksum  $packageName.zip`n", [Text.Encoding]::ASCII)
-    Write-Host "Portable package: $packageDirectory"
-    Write-Host "Archive:          $archive"
-    Write-Host "Start the game using Play.bat."
+    & cmake "-DTETR_PACKAGE_SOURCE_DIR=$PSScriptRoot" "-DTETR_PACKAGE_GENERATOR=$Generator" `
+        "-DTETR_PACKAGE_BUILD_DIR=$BuildDirectory" "-DTETR_PACKAGE_OUTPUT_DIR=$OutputDirectory" `
+        "-DTETR_PACKAGE_DATA_DIR=$DataDirectory" "-DTETR_PACKAGE_PARALLEL=$Parallel" `
+        -P (Join-Path $PSScriptRoot 'cmake/portable/Package.cmake')
+    if ($LASTEXITCODE -ne 0) { throw "Package build or audit failed." }
 } catch {
     Write-Error $_ -ErrorAction Continue
     exit 1

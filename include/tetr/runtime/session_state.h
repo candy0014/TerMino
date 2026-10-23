@@ -45,6 +45,12 @@ struct SessionState {
     PlayerSessionState opponent;
     struct RoomScene {
         bool enabled=false, spectator=false, selfAlive=true, finished=false, localForfeit=false;
+        bool aborted=false;
+        bool started=false;
+        int winnerSlot=-1;
+        std::uint64_t roomInstance=0;
+        std::vector<int> participants;
+        std::map<int,bool> alive;
         int ownSlot=-1, focusSlot=-1;
         std::uint64_t epoch=0, revision=0;
         std::map<int,PlayerSessionState> players;
@@ -75,6 +81,9 @@ struct SessionState {
         int paintedColumns=0,paintedRows=0;
     } roomScene;
     std::optional<TimePoint> gameStartTime;
+    // Presentation of the shared start sequence; zero outside its 3/2/1 phases.
+    // This is not a second timer and is not part of recording/network formats.
+    int countdownDigit = 0;
     QuickPlaySessionState quickPlay;
     DynamicRuleState dynamicRules;
     TimePoint simulationTime{};

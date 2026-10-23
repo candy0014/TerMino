@@ -75,7 +75,7 @@ const Services& Services::physical_source() const {
 FocusState& Services::focus_state() {
     auto& source=physical_source();
     if (source.focusSource) return *source.focusSource;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     return source.keyboard.focus_state();
 #elif defined(_WIN32)
     return source.consoleFocus_;
@@ -86,7 +86,7 @@ FocusState& Services::focus_state() {
 const FocusState& Services::focus_state() const {
     const auto& source=physical_source();
     if (source.focusSource) return *source.focusSource;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     return source.keyboard.focus_state();
 #elif defined(_WIN32)
     return source.consoleFocus_;
@@ -113,7 +113,7 @@ void set_console_focus(FocusState& focus,bool focused) {
 void Services::poll_focus() {
     auto& source=physical_source();
     if (source.focusSource || source.keyStateProvider || source.keyEventSource) return;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     source.keyboard.terminal_input().poll();
 #elif defined(_WIN32)
     auto& focus=source.consoleFocus_;
@@ -162,31 +162,31 @@ void Services::set_continue_input_unfocused(bool enabled) {
     synchronize_focus();
 }
 void Services::start_terminal_input() {
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     physical_source().keyboard.terminal_input().start();
 #endif
 }
 void Services::stop_terminal_input() {
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     physical_source().keyboard.terminal_input().stop();
 #endif
 }
 bool Services::terminal_input_active() {
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     return physical_source().keyboard.terminal_input().active();
 #else
     return false;
 #endif
 }
 void Services::set_terminal_text_input(bool enabled) {
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     physical_source().keyboard.terminal_input().set_text_input(enabled);
 #else
     (void)enabled;
 #endif
 }
 int Services::read_terminal_character() {
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     return physical_source().keyboard.terminal_input().read_character();
 #else
     return -1;
@@ -199,7 +199,7 @@ KeyEventBuffer& Services::event_buffer() {
     if (source.focusSource) return source.focusSource->events();
 #ifdef _WIN32
     return source.focus_state().events();
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(__ANDROID__)
     return source.keyboard.events();
 #else
     return source.unavailableEvents_;
@@ -257,7 +257,7 @@ void Services::begin_gameplay_input() {
             (void)source.read_key_state(key);
     }
 #endif
-    gameplayDown_ = event_buffer().snapshot(eventCursor_, &gameplayPressedAt_);
+    gameplayDown_ = event_buffer().snapshot(eventCursor_, &gameplayPressedAt_, &gameplaySampleTime_);
     gameplayInputActive_ = true;
 }
 
@@ -266,6 +266,7 @@ void Services::end_gameplay_input() {
     pendingEvents_.clear();
     gameplayDown_.clear();
     gameplayPressedAt_.clear();
+    gameplaySampleTime_.reset();
 }
 
 bool Services::gameplay_key_down(int key) const {
@@ -291,7 +292,7 @@ void Services::poll_gameplay_events() {
             (void)source.read_key_state(key);
     }
 #endif
-    for (const auto& event : event_buffer().read(eventCursor_)) {
+    for (const auto& event : event_buffer().read(eventCursor_, &gameplaySampleTime_)) {
         if (bindings.action_for(event.key) != Action::Unknown) pendingEvents_.push_back(event);
     }
 }
@@ -315,7 +316,7 @@ bool Services::gameplay_input_pending() {
     }
 #endif
     poll_platform_events();
-    for(const auto& event:event_buffer().read(eventCursor_))
+    for(const auto& event:event_buffer().read(eventCursor_, &gameplaySampleTime_))
         if(bindings.action_for(event.key)!=Action::Unknown)pendingEvents_.push_back(event);
     return next_gameplay_event()!=nullptr;
 }
@@ -408,7 +409,7 @@ bool Services::read_key_state(int keyCode) {
 #ifdef _WIN32
     consoleFocus_.update(keyCode,(GetAsyncKeyState(keyCode)&0x8000)!=0);
     return consoleFocus_.key_down(keyCode);
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(__ANDROID__)
     return keyboard.keydown(keyCode);
 #else
     (void)keyCode;
@@ -421,7 +422,7 @@ void share_key_state(Services& target, Services& source) {
         target.keyStateSource = nullptr;
         return;
     }
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     target.keyboard.stop();
 #endif
     target.keyStateSource = &source;
@@ -438,7 +439,7 @@ bool shares_key_state_with(
 
 void initialize_services(Services& services) {
     if (services.initialized) return;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     services.keyboard.init();
 #endif
     services.initialized = true;
@@ -447,6 +448,7 @@ void initialize_services(Services& services) {
 void refresh_bindings(Services& services, const std::array<int, kBindableActionCount>& keyCodes,
     const std::array<std::vector<int>, kBindableActionCount>& additional) {
     services.bindings = BindingSet::from_key_codes(keyCodes, additional);
+    services.bindings.add_virtual_actions(services.virtualPlayerSlot);
 }
 
 } // namespace Input

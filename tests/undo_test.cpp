@@ -27,6 +27,7 @@
 #include <sstream>
 #include <vector>
 
+namespace TetrTests::undo_test {
 namespace {
 using Runtime::Duration;
 using Runtime::TimePoint;
@@ -50,6 +51,9 @@ struct Fixture {
     bool undoDown=false;
     explicit Fixture(UserConfig::Settings user={}, GameMode mode=GameMode::Zen) {
         user.fieldWidth=4; user.fieldHeight=6; user.nextCount=0;
+        // Historical fixture labels now select explicit goals in Zen mode.
+        if(mode==GameMode::Racing)user.goal=static_cast<int>(Runtime::GameGoal::Lines);
+        if(mode==GameMode::Blitz)user.goal=static_cast<int>(Runtime::GameGoal::Time);
         context.config=Runtime::normalize_user_config(user,mode);
         context.attach_replay(replay); context.attach_input(input);context.attach_network(network);
         Input::refresh_bindings(input,UserConfig::default_key_codes());
@@ -129,13 +133,24 @@ void equal_player(const Runtime::PlayerSessionState& actual,const Runtime::Playe
 }
 
 struct FakeStrategy final:Autoplay::Strategy {
+    struct Snapshot {
+        std::mt19937 random;
+        int decisions;
+        int* copies;
+        Snapshot(const std::mt19937& rng,int count,int* observed)
+            :random(rng),decisions(count),copies(observed) {}
+        Snapshot(const Snapshot& other)
+            :random(other.random),decisions(other.decisions),copies(other.copies) { ++*copies; }
+        Snapshot(Snapshot&&)=default;
+    };
     std::mt19937 random{246};
     int decisions=0;
+    mutable int snapshotCopies=0;
     bool initialize(Runtime::GameContext&) override { return true; }
-    std::any capture_state() const override { return std::make_pair(random,decisions); }
+    std::any capture_state() const override { return Snapshot{random,decisions,&snapshotCopies}; }
     void restore_state(const std::any& saved) override {
-        const auto& state=std::any_cast<const std::pair<std::mt19937,int>&>(saved);
-        random=state.first; decisions=state.second;
+        const auto& state=std::any_cast<const Snapshot&>(saved);
+        random=state.random; decisions=state.decisions;
     }
     Piece::Type choose_position(Runtime::GameContext&,Runtime::PlayerSessionState& player,Runtime::Playfield field,
         const std::vector<Piece::Type>&,const std::vector<Piece::Type>&,Piece::Pose start,Autoplay::HoldInput,
@@ -149,6 +164,82 @@ struct FakeStrategy final:Autoplay::Strategy {
     std::string movement_script(Runtime::GameContext&,Runtime::Playfield,Piece::Definition,
         Piece::Pose,Piece::Pose,Runtime::RotationRecord) override { return "H"; }
 };
+
+void long_game_history_is_bounded_without_copying_prior_states() {
+    Fixture f;
+    FakeStrategy bot;
+    f.context.attach_autoplay(bot);
+    Engine::begin_undo_history(f.context,&f.loop);
+    const auto prefixSize=f.replay.data.size();
+    constexpr int limit=static_cast<int>(Engine::kUndoPieceLimit);
+    constexpr int locks=limit*4+1;
+    for(int i=1;i<=locks;++i) {
+        f.session.player.gameplay.scoring.placedBlocks=i;
+        f.session.player.gameplay.scoring.score=i*100;
+        bot.decisions=i;
+        f.replay.data+='x';
+        Engine::capture_undo_snapshot(f.context);
+        // Copy-count evidence avoids scheduler-dependent timing assertions.
+        assert(bot.snapshotCopies==0);
+        assert(Engine::undo_snapshot_count(f.context)==static_cast<std::size_t>(std::min(i+1,limit+1)));
+    }
+    // Evicting undo snapshots must not truncate the full recording.
+    assert(f.replay.data.size()==prefixSize+locks);
+    constexpr int oldest=locks-limit;
+    for(int i=locks-1;i>=oldest;--i) {
+        assert(Engine::restore_previous_undo_snapshot(f.context));
+        assert(f.session.player.gameplay.scoring.placedBlocks==i);
+        assert(f.session.player.gameplay.scoring.score==i*100);
+        assert(bot.decisions==i);
+        assert(f.replay.data.size()==prefixSize+i);
+    }
+    assert(Engine::undo_snapshot_count(f.context)==1);
+    assert(bot.snapshotCopies==0);
+    // Resetting the active piece at the retained boundary cannot reach an
+    // evicted placement, even after repeated Undo presses.
+    for(int i=0;i<3;++i) {
+        assert(Engine::restore_previous_undo_snapshot(f.context));
+        assert(f.session.player.gameplay.scoring.placedBlocks==oldest);
+        assert(f.session.player.gameplay.scoring.score==oldest*100);
+        assert(bot.decisions==oldest && f.replay.data.size()==prefixSize+oldest);
+    }
+    // A new branch can still be undone to its retained starting boundary.
+    f.session.player.gameplay.scoring.placedBlocks=oldest+1;
+    Engine::capture_undo_snapshot(f.context);
+    assert(Engine::restore_previous_undo_snapshot(f.context));
+    assert(f.session.player.gameplay.scoring.placedBlocks==oldest);
+}
+
+void replay_undo_limit_keeps_the_correct_event_suffix() {
+    Fixture f;
+    f.context.config.mode.replayMode=true;
+    constexpr int limit=static_cast<int>(Engine::kUndoPieceLimit),locks=limit+19;
+    Replay::configure_playback(f.context,1,Duration::from_seconds(locks+2));
+    Replay::start_playback(f.context,f.context.now());
+    for(int i=0;i<locks+2;++i)
+        f.replay.operations.push({Replay::OperationKind::StartPlace,Duration::from_seconds(i)});
+    Engine::begin_undo_history(f.context);
+    for(int i=1;i<=locks;++i) {
+        f.replay.operations.pop();
+        f.session.player.gameplay.scoring.placedBlocks=i;
+        f.replay.lastConsumedTimestamp=Duration::from_seconds(i);
+        f.replay.lastGameTimestamp=Duration::from_seconds(i);
+        Engine::capture_undo_snapshot(f.context);
+    }
+    for(int i=locks-1;i>=locks-limit;--i) {
+        assert(Engine::restore_previous_undo_snapshot(f.context));
+        assert(f.session.player.gameplay.scoring.placedBlocks==i);
+        assert(f.replay.operations.size()==static_cast<std::size_t>(locks+2-i));
+        assert(f.replay.operations.front().timestamp==Duration::from_seconds(i));
+        assert(f.replay.lastConsumedTimestamp==Duration::from_seconds(i));
+    }
+    assert(Engine::restore_previous_undo_snapshot(f.context));
+    assert(f.session.player.gameplay.scoring.placedBlocks==locks-limit);
+    // Starting another game/history starts its own window.
+    f.session.player.gameplay.scoring.placedBlocks=0;
+    Engine::begin_undo_history(f.context);
+    assert(Engine::undo_snapshot_count(f.context)==1);
+}
 
 void complete_state_and_time_restore() {
     Fixture f;
@@ -570,12 +661,16 @@ void app_replay_goal_finishes_with_an_unconsumed_end_marker() {
 }
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     Capture capture;
+    long_game_history_is_bounded_without_copying_prior_states();
+    replay_undo_limit_keeps_the_correct_event_suffix();
     complete_state_and_time_restore(); game_loop_saves_initial_and_each_lock(); hold_is_part_of_the_undone_turn();
     snowball_restore_and_random_branch(); interrupted_lock_key_debounce_and_modes(); undo_usage_survives_all_branches();
     replay_cursor_and_clock_restore(); app_undo_lifecycle(false); app_undo_lifecycle(true); post_game_discards_undo_history();
     replay_short_taps_and_multiple_presses(); app_replay_undo_after_end_all();
     app_replay_goal_finishes_with_an_unconsumed_end_marker();
     std::cerr << "undo: OK\n";
+    return 0;
 }
+} // namespace TetrTests::undo_test

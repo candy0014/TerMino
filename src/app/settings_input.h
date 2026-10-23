@@ -3,6 +3,7 @@
 
 #include <string>
 #include <functional>
+#include <optional>
 #include "tetr/input/action.h"
 
 namespace Runtime { class GameContext; }
@@ -14,6 +15,8 @@ namespace Model { struct SettingItem; }
 
 using CheckMenuControls = std::function<void()>;
 using ScalarInputRedraw = std::function<void(const std::string&, std::size_t)>;
+struct ReplayBrowseRequested {};
+std::optional<std::string> choose_replay_file(Runtime::GameContext& context,const CheckMenuControls& checkControls,std::string* errorMessage=nullptr);
 int capture_key(Runtime::GameContext& context, Input::Action action, const CheckMenuControls& checkControls);
 void refresh_runtime_bindings(Runtime::GameContext& context);
 std::string read_scalar_text(Runtime::GameContext& context, const CheckMenuControls& checkControls,

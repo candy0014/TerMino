@@ -179,6 +179,7 @@ const std::vector<FieldCodec>& field_codecs() {
         INT_FIELD("QP_default_floor", config.quickPlay.defaultFloor, config.quickPlay.defaultFloor = integer),
         INT_FIELD("QP_continuous_cancellation", config.quickPlay.continuousCancellation ? 1 : 0,
                   config.quickPlay.continuousCancellation = integer != 0),
+        INT_FIELD("QPRulesVersion", config.quickPlay.legacyRules ? 1 : 2, config.quickPlay.legacyRules = integer < 2),
         REAL_FIELD("Speed", Compat::to_legacy_seconds(config.handling.gravityInterval), config.handling.gravityInterval = Compat::gravity_from_legacy_seconds(real)),
         FieldCodec{"GravityProgression",
             [](std::string& output,const Config& config) {
@@ -258,6 +259,7 @@ const std::vector<FieldCodec>& field_codecs() {
         INT_FIELD("GarbageSpecialAttack", config.attackRules.garbageSpecialAttack, config.attackRules.garbageSpecialAttack = std::clamp(integer,0,1000000)),
         INT_FIELD("SpinBonuses", static_cast<int>(config.spinBonuses), config.spinBonuses = Runtime::spin_bonuses_from_index(integer)),
         INT_FIELD("RotationRulesVersion", config.legacyRotationRules ? 0 : 1, config.legacyRotationRules = integer < 1),
+        INT_FIELD("EventGeometryVersion", config.legacyEventGeometry ? 0 : 1, config.legacyEventGeometry = integer < 1),
         INT_FIELD("FoolPieceSetVersion", config.legacyFoolPieceSet ? 0 : 1, config.legacyFoolPieceSet = integer < 1),
         FieldCodec{"LegacySpinScoring",
             [](std::string& output, const Config& config) {
@@ -365,6 +367,7 @@ bool decode_config_prefix(std::string_view replay, Runtime::RuntimeConfig& confi
     config.spinBonuses = Runtime::SpinBonuses::AllMiniPlus;
     config.legacySpinScoring = false;
     config.legacyRotationRules = true;
+    config.legacyEventGeometry = true;
     config.legacyFoolPieceSet = true;
     config.bagRandomizer = Runtime::BagRandomizer::SevenBag;
     config.legacyRandomizerRules = true;
@@ -394,6 +397,7 @@ bool decode_config_prefix(std::string_view replay, Runtime::RuntimeConfig& confi
     // Recordings predating the startup switch used continuous cancellation unconditionally.
     config.quickPlay.continuousCancellation = true;
     config.quickPlay.snowball = Runtime::ModifierMode::Disabled;
+    config.quickPlay.legacyRules = true;
     result.operationOffset = outerEnd + 1;
     bool hasTurnPieces = false;
     bool hasUndoCount = false;

@@ -13,6 +13,7 @@
 #include "tetr/runtime/bag_randomizer.h"
 #include "tetr/runtime/attack_rules.h"
 #include "tetr/runtime/challenge_rules.h"
+#include "tetr/runtime/visual_effects.h"
 
 namespace Runtime {
 
@@ -104,6 +105,7 @@ struct QuickPlayConfig {
     int defaultFloor=1;
     bool continuousCancellation=false;
     ModifierMode snowball=ModifierMode::Disabled;
+    bool legacyRules=false; // Recordings predating the 2026-10-20 QP audit.
 };
 struct AutoplayConfig {
     AutoplayMode mode=AutoplayMode::Disabled;
@@ -115,6 +117,7 @@ struct DisplayConfig {
     int squareStyle=0;
     bool obscuredColors=false;
     bool showSpawnPosition=false;
+    VisualEffectsConfig effects;
 };
 struct RuntimeConfig {
     ChallengeRules challengeRules=ChallengeRules::None;
@@ -139,6 +142,7 @@ struct RuntimeConfig {
     SpinBonuses spinBonuses=SpinBonuses::AllMiniPlus;
     bool legacySpinScoring=false; // Compatibility for recordings without this setting.
     bool legacyRotationRules=false;
+    bool legacyEventGeometry=false;
     BagRandomizer bagRandomizer=BagRandomizer::SevenBag;
     bool legacyRandomizerRules=false;
     bool legacyFoolPieceSet=false; // Older recordings used all ten event floors.

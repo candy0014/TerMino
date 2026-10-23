@@ -37,9 +37,14 @@ void precharge(Runtime::GameContext& context, MovementInputState& input,
             else held.push_back({key,true,services.gameplay_press_time(key).value_or(std::chrono::steady_clock::now()),0});
         }
         std::stable_sort(held.begin(),held.end(),[](const auto& a,const auto& b) { return a.time<b.time; });
-        for (const auto& event:held) observe(event.key,true,std::min(now,event_time(event.time)));
-        for (const auto& event:services.take_spawn_horizontal_events()) {
-            observe(event.key,event.down,std::min(now,event_time(event.time)));
+        const auto events=services.take_spawn_horizontal_events();
+        if (const auto sampled=services.gameplay_sample_time()) now=std::min(now,event_time(*sampled));
+        // `now` may predate the events when polling/navigation descheduled
+        // this thread. Preserve real press times; only timer advancement is
+        // limited by the completed sample, never the origin of a new hold.
+        for (const auto& event:held) observe(event.key,true,event_time(event.time));
+        for (const auto& event:events) {
+            observe(event.key,event.down,event_time(event.time));
         }
     } else {
         for (const auto& [key,action]:services.bindings.entries()) {

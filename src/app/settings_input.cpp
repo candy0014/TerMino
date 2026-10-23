@@ -2,10 +2,18 @@
 #include "tetr/config/user_config.h"
 #include "tetr/app/application_state.h"
 #include "settings_input.h"
+#include "settings_navigation.h"
+#include "tetr/frontend/ui_surface.h"
 
 #include "tetr/frontend/text_input.h"
+#include "tetr/frontend/file_dialog.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/util/terminal_text.h"
+#include "tetr/replay/file_path.h"
+#include "terminal_canvas.h"
+#include "ui_text.h"
+#include <algorithm>
+#include <filesystem>
 
 #include <iostream>
 #include <chrono>
@@ -21,6 +29,29 @@
 #endif
 
 namespace App::Settings {
+std::optional<std::string> choose_replay_file(Runtime::GameContext& context,const CheckMenuControls& checkControls,std::string* errorMessage) {
+    auto* dialogs=context.app_component()?context.app_component()->fileDialogs:nullptr;
+    if(!dialogs)return {};
+    std::error_code error;auto directory=std::filesystem::absolute(Replay::replay_directory(),error);
+    if(error)directory=Replay::replay_directory();
+    const auto request=dialogs->open_file(directory.generic_u8string());
+    if(!request)return {};
+    struct CancelOnExit {std::shared_ptr<Frontend::FileDialog> request;~CancelOnExit(){request->complete();}} guard{request};
+    for(;;) {
+        checkControls();
+        if(const auto result=request->result()) {
+            if(!result->error.empty() && errorMessage)
+                *errorMessage=UiText::tr("Could not open the system file picker.")+" "+result->error;
+            if(result->path.empty())return {};
+            if(!std::filesystem::is_regular_file(std::filesystem::u8path(result->path),error) || error) {
+                if(errorMessage)*errorMessage=UiText::tr("The replay file is not available.");
+                return {};
+            }
+            return Replay::replay_setting_path(result->path);
+        }
+        context.services.clock.sleep_for(Runtime::Duration::from_seconds(.002));
+    }
+}
 
 namespace {
 
@@ -302,6 +333,11 @@ std::string read_scalar_text(Runtime::GameContext& context, const CheckMenuContr
         if(redraw)redraw(field.value,field.caret);
         while(!field.done) {
             checkControls();
+            if(const auto command=Frontend::poll_ui_command([](const auto& c){return c.ancestor || c.kind==Frontend::UiCommandKind::Back;})) {
+                if(command->ancestor)throw MenuJump{*command->ancestor,command->index};
+                field.apply({Frontend::TextEditKind::Cancel});
+                break;
+            }
             if(auto event=session->poll_text_event()) {
                 field.apply(*event);
                 if(redraw)redraw(field.value,field.caret);

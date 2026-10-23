@@ -5,6 +5,7 @@
 #include <iostream>
 #include <sstream>
 
+namespace TetrTests::next_preview_render_test {
 namespace {
 struct Buffer:std::stringbuf {
     int flushes=0;
@@ -16,7 +17,7 @@ struct Capture {
     ~Capture() { std::cout.rdbuf(old); }
 };
 }
-int main() {
+int run(int argc,char** argv) {
     Runtime::SessionState session;
     Runtime::RuntimeServices services;
     Runtime::GameContext context{session,services};
@@ -71,4 +72,6 @@ int main() {
         for (int y=1;y<=50;++y) for (int x=39;x<=75;++x)
             assert(actual.at(y,x).glyph==" " || actual.at(y,x).glyph.empty());
     }
+    return 0;
 }
+} // namespace TetrTests::next_preview_render_test

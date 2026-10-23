@@ -6,6 +6,7 @@
 #include "tetr/runtime/time.h"
 
 #include <functional>
+#include <optional>
 
 namespace Engine {
 
@@ -15,6 +16,7 @@ struct MovementState {
     int lockResetCount = 0;
     Runtime::TimePoint lockTimer{};
     int inputActions=0;
+    std::optional<int> hardDropFromRow; // Presentation only; never part of input/rule decisions.
 };
 
 struct MovementEffect {
@@ -23,13 +25,15 @@ struct MovementEffect {
 };
 
 enum class HorizontalDropMode { None, Gravity, SoftDrop };
+enum class MovementContact { Wall, Rotation };
 
 class MovementController {
 public:
     using CanPlace = std::function<bool(Piece::Pose pose)>;
     using TryRotate = std::function<bool(Piece::Pose& pose, Runtime::Rotation targetRotation, Piece::KickIndex& kickIndex)>;
+    using ContactObserver = std::function<void(MovementContact,int,Runtime::TimePoint)>;
 
-    MovementController(MovementState& state, CanPlace canPlace, TryRotate tryRotate);
+    MovementController(MovementState& state, CanPlace canPlace, TryRotate tryRotate, ContactObserver observer = {});
 
     bool grounded() const;
     void recordInput() {++state_.inputActions;}
@@ -47,6 +51,7 @@ private:
     MovementState& state_;
     CanPlace canPlace_;
     TryRotate tryRotate_;
+    ContactObserver observer_;
     void applyGroundedReset(bool wasGrounded, Runtime::TimePoint now, int lockResetLimit);
 };
 

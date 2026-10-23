@@ -28,6 +28,7 @@
 #include <iostream>
 #include <sstream>
 
+namespace TetrTests::spawn_marker_test {
 namespace {
 struct Fixture {
     std::unique_ptr<Runtime::SessionState> session=std::make_unique<Runtime::SessionState>();
@@ -257,6 +258,21 @@ void actual_event_shape_and_remote() {
     }
 }
 
+void deep_spawn_pose_keeps_semantic_cells() {
+    Fixture f;f.redraw();
+    const auto type=Piece::Type::from_index(5);
+    const Piece::Pose pose{{-9,3},Runtime::Rotation{}};
+    f.player.presentation.nextSpawnType=type;f.player.presentation.nextSpawnPose=pose;
+    f.paint([&]{Render::refresh_spawn_marker(f.context,f.player);});
+    const auto& cells=f.player.presentation.spawnMarkerCells;
+    const auto shape=Piece::get_definition(type).cells(pose.rotation);
+    assert(cells.size()==shape.size());
+    for(const auto& cell:cells)assert(cell.row< -Runtime::kDisplayHiddenRows);
+    for(const auto& offset:shape)assert(std::any_of(cells.begin(),cells.end(),[&](auto cell){
+        return cell.row==pose.position.row+offset[0] && cell.col==pose.position.col+offset[1];
+    }));
+    f.matches_redraw("deep semantic spawn hint");
+}
 void settings_persistence() {
     Fixture a,b;
     App::ApplicationState app;
@@ -352,8 +368,11 @@ void construction_targets() {
 }
 }
 
-int main() {
+int run(int argc,char** argv) {
     App::UiText::set_language(App::UiText::Language::Chinese);
     covered_cells_and_toggle(); movement_and_next_change(); ghost_and_garbage();
-    clear_animation(); actual_event_shape_and_remote(); settings_persistence(); restored_state();construction_targets();
+    clear_animation(); actual_event_shape_and_remote();deep_spawn_pose_keeps_semantic_cells();
+    settings_persistence(); restored_state();construction_targets();
+    return 0;
 }
+} // namespace TetrTests::spawn_marker_test

@@ -3,9 +3,10 @@
 #include "../src/bot/chatgpt/analysis/native_trace.h"
 #include <cassert>
 #include <iostream>
+namespace TetrTests::bot_chatgpt_settled_risk_test {
 namespace B=Bot_chatgpt;
 namespace A=B::Analysis;
-int main() {
+int run(int argc,char** argv) {
     A::PlainEngine engine;assert(engine.prepare(10,40));
     B::Evaluation base;B::SettledRiskEvaluation candidate;B::ClearStallRiskEvaluation clearOnly;
     base.init(engine.context().get());candidate.init(engine.context().get());clearOnly.init(engine.context().get());
@@ -46,4 +47,6 @@ int main() {
     }
     assert(refunded>0);std::cout<<"settled risk transitions="<<checked<<" refunded="<<refunded<<"; exact rules/terminal death retained\n";
     assert(clearRefunded>0&&nonClearGuarded>0);std::cout<<"clear-only refunds="<<clearRefunded<<" guarded non-clears="<<nonClearGuarded<<'\n';
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_settled_risk_test

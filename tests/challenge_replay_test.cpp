@@ -24,6 +24,7 @@
 #include <memory>
 #include <sstream>
 
+namespace TetrTests::challenge_replay_test {
 namespace {
 void environment(const char* name,const char* value) {
 #ifdef _WIN32
@@ -100,7 +101,10 @@ void automatic_challenge_replays(const std::string& contents) {
     const auto transient=Replay::save_recent(contents,"unsaved expiry");assert(transient);
     assert(Challenges::load(history,store) && history.attach_replay(unrelatedRun,*transient) && Challenges::save(history,store));
     for(int i=0;i<30;++i)assert(Replay::save_recent(contents,"newer play"));
-    assert(!std::filesystem::exists(*transient) && std::filesystem::exists(cached));
+    // The original is retained by Save As, then expires normally with the
+    // recent-round cache; all explicitly saved copies remain available.
+    assert(!std::filesystem::exists(*transient) && !std::filesystem::exists(cached));
+    assert(std::filesystem::exists(first) && std::filesystem::exists(second) && std::filesystem::exists(third));
     const auto expiredMenu=App::make_challenge_menu(r.settings);
     const auto& expiredRows=expiredMenu.children.front().children.front().children.front().children;
     bool foundExpired=false;
@@ -139,7 +143,7 @@ void play(const std::filesystem::path& path,bool challenge,bool seek,int expecte
     std::cerr<<"played "<<path.u8string()<<" lines="<<expectedLines<<" seek="<<seek<<'\n';
 }
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     const auto originalDirectory=std::filesystem::current_path();
     const auto actual=argc>1?std::optional<std::filesystem::path>{std::filesystem::absolute(std::filesystem::u8path(argv[1]))}:std::nullopt;
     const auto actualContents=actual?read(*actual):std::string{};
@@ -226,4 +230,6 @@ int main(int argc,char** argv) {
     std::cout.rdbuf(previous);Render::end_output_suppression();
     std::filesystem::current_path(originalDirectory);std::filesystem::remove_all(moved);std::filesystem::remove_all(external);
     std::cerr<<"challenge replay load, playback, seek, settings restoration and project relocation passed\n";
+    return 0;
 }
+} // namespace TetrTests::challenge_replay_test

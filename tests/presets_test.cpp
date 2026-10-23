@@ -1,4 +1,5 @@
 #include "tetr/config/presets.h"
+#include "tetr/config/map_store.h"
 #include "tetr/config/normalization.h"
 #include "tetr/replay/config_codec.h"
 #include "tetr/replay/session_state.h"
@@ -19,6 +20,7 @@
 #include <memory>
 #include <sstream>
 
+namespace TetrTests::presets_test {
 namespace {
 using UserConfig::SettingId;
 using UserConfig::PresetKind;
@@ -453,8 +455,22 @@ void quick_play_mod_recovery() {
 }
 
 }
-int main() {
+int run(int argc,char** argv) {
+    if(argc==3 && std::string(argv[1])=="--distribution-libraries") {
+        const auto path=std::filesystem::u8path(argv[2]);
+        UserConfig::Maps::Collection maps;Presets::Collection presets;
+        assert(UserConfig::Maps::load(maps,path/"maps.txt") && maps.maps.size()==24 && maps.nextId==25);
+        for(std::size_t i=0;i<maps.maps.size();++i)
+            assert(maps.maps[i].id==int(i+1) && Runtime::valid_map(maps.maps[i]));
+        assert(Presets::load(presets,path/"presets.txt") && presets.presets.size()==4 && presets.nextId==5);
+        assert(presets.presets.back().name=="下棋模式" && Presets::is_local_versus(presets.presets.back()));
+        assert(presets.presets.back().playerTwoFields && !presets.presets.back().playerTwoFields->empty());
+        std::cerr<<"DISTRIBUTION_LIBRARIES_OK maps=24 presets=4; both-player chess preset preserved\n";
+        return 0;
+    }
     layering();independent_concerns();persistence();two_players_and_hidden_fields();progressive_gravity_and_replay();sparse_authoring_and_storage();two_player_storage_and_conditional_branches();
     local_root_draft_reset();quick_play_mod_recovery();
     std::cerr<<"presets_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::presets_test

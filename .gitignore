@@ -2,6 +2,7 @@
 /.tetr/
 /replay/
 /keybinding*.txt
+/keybinding*.txt.lock
 *.challenges
 *.ttr
 *.ttrm
@@ -30,6 +31,18 @@
 /.venv/
 /venv/
 /node_modules/
+
+# Android machine-local state, signing material and generated install packages
+**/.gradle/
+**/.cxx/
+**/.externalNativeBuild/
+**/local.properties
+*.jks
+*.keystore
+*.apk
+*.aab
+*.apks
+
 /log
 /runlogs/*
 !/runlogs/README.md
@@ -48,4 +61,5 @@
 .env
 .env.*
 *.pem
+!/resources/certificates/cacert.pem
 *.key

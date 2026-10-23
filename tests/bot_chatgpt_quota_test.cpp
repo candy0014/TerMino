@@ -3,8 +3,9 @@
 #include <cassert>
 #include <cmath>
 
+namespace TetrTests::bot_chatgpt_quota_test {
 namespace A = Bot_chatgpt::Analysis;
-int main() {
+int run(int argc,char** argv) {
     A::PlainEngine geometry; assert(geometry.prepare(10, 40));
     for (int held : {-2, -1, 4}) {
         Bot_chatgpt::RootSnapshot root;
@@ -63,4 +64,6 @@ int main() {
     try { Bot_chatgpt::SpinQuotaEngine invalid(geometry.context(), 21); }
     catch (const std::exception&) { rejected = true; }
     assert(rejected);
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_quota_test

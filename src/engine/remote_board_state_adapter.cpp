@@ -7,10 +7,41 @@
 #include "tetr/render/terminal_renderer.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/runtime/player_session_state.h"
+#include "tetr/rules/spike.h"
+#include "tetr/rules/lock_analysis.h"
 
 namespace Engine {
 using namespace Render;
 namespace {
+void capture_remote_placement(Runtime::PlayerSessionState& player,const Network::BoardStateSnapshot& snapshot) {
+    if(!snapshot.placement)return;
+    auto& feedback=player.presentation.placement;
+    // Duplicate repair checkpoints must retain the pre-lock geometry. The
+    // following spawn/board repair already contains the field after the clear.
+    if(feedback.sequence==snapshot.score.placedBlocks && feedback.sequence>0)return;
+    const auto& event=*snapshot.placement;
+    feedback={};feedback.sequence=snapshot.score.placedBlocks;feedback.clearedLines=event.clearedLines;
+    const auto& p=player.presentation;
+    if(snapshot.score.placedBlocks!=player.gameplay.scoring.placedBlocks+1 ||
+        !event.piece.valid() || p.activePieceType!=event.piece || !p.activePose)return;
+    const auto& field=player.gameplay.playfield.field;
+    if(field.width()!=snapshot.field.width() || field.height()!=snapshot.field.height())return;
+    const auto piece=Piece::get_definition(event.piece);
+    auto landing=*p.activePose;
+    if(!piece.can_place(landing,field))return;
+    while(piece.can_place(landing.translated(1,0),field))++landing.position.row;
+    feedback.type=event.piece;feedback.pose=landing;feedback.dropFromRow=p.activePose->position.row;
+    // Reuse shared lock analysis for the observed pose; never mutate the field
+    // or apply a second gameplay placement. The remote count is authoritative.
+    const auto cells=piece.cells(landing.rotation);
+    const auto result=Rules::analyze_locked_field(field.width(),-Runtime::kDisplayHiddenRows,field.height(),field.height(),field.height(),
+        [&](int row,int col) {
+            for(const auto& cell:cells)if(row==landing.position.row+cell[0] && col==landing.position.col+cell[1])
+                return Runtime::BoardCell::piece(piece.color_id());
+            return field.cell(row,col);
+        });
+    if(result.clearedLines==event.clearedLines)feedback.clearedRows=result.clearedRows;
+}
 void update_clock(const Runtime::GameContext& context,Runtime::PlayerSessionState& player,
     const std::optional<Network::RemoteClockSample>& clock) {
     if(!clock) return;
@@ -51,6 +82,15 @@ bool apply_remote_piece_motion(Runtime::GameContext& context,Runtime::PlayerSess
 
 void apply_remote_board_state(Runtime::GameContext& context,Runtime::PlayerSessionState& player,
                               const Network::BoardStateSnapshot& snapshot,bool render) {
+    capture_remote_placement(player,snapshot);
+    if(context.session.roomScene.enabled) {
+        auto& p=player.presentation;const auto& score=player.gameplay.scoring;
+        if(snapshot.score.totalAttack<score.totalAttack || snapshot.score.placedBlocks<score.placedBlocks)p.spike={};
+        const int attack=snapshot.score.totalAttack-score.totalAttack;
+        if(attack>0 && p.remoteAttackBaselineKnown)
+            Rules::add_spike_attack(p.spike,attack,context.now());
+        p.remoteAttackBaselineKnown=true;
+    }
     update_clock(context,player,snapshot.clock);
     const bool activeValid=!snapshot.placement && snapshot.currentPiece.valid() &&
         Piece::get_definition(snapshot.currentPiece).can_place(snapshot.activePose,snapshot.field);

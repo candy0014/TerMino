@@ -14,6 +14,7 @@
 #include "tetr/replay/playback_clock.h"
 #include "tetr/replay/replay_hash.h"
 #include "tetr/replay/local_versus_codec.h"
+#include "tetr/replay/multiplayer_codec.h"
 #include "tetr/replay/turn_timeline.h"
 #include "tetr/render/terminal_renderer.h"
 #include "tetr/config/normalization.h"
@@ -29,6 +30,8 @@
 #include <fstream>
 #include <string>
 #include <utility>
+#include <sstream>
+#include <iterator>
 
 namespace App::InitDetail {
 namespace {
@@ -52,6 +55,8 @@ bool replay_hash_valid(const std::string& replay) {
 void reset_replay_state(Runtime::GameContext& context) {
     auto& state = Replay::session(context);
     state.data.clear();
+    state.recordObserver={};state.recordingLimit=10000000;state.onlineRecording=false;state.multiplayerReplay.reset();
+    state.onlineIdentity={};state.onlineProfile=0;
     state.loadedRecording.clear();state.sourcePath.clear();state.recentPath.clear();state.challengeRecords.clear();
     state.configPrefix.clear();
     state.undoCount = 0;
@@ -85,12 +90,7 @@ bool load_replay_stream(
     // Display preferences are local UI choices rather than replay gameplay
     // state, so keep the current user's settings while decoding the recorded
     // rules. They are intentionally not part of the replay config prefix.
-    replayConfig.display.squareStyle = UserConfig::clamped_int(
-        context.user_settings(), UserConfig::SettingId::SquareStyle);
-    replayConfig.display.obscuredColors = UserConfig::clamped_int(
-        context.user_settings(), UserConfig::SettingId::ObscuredColors) != 0;
-    replayConfig.display.showSpawnPosition = UserConfig::clamped_int(
-        context.user_settings(), UserConfig::SettingId::ShowSpawnPosition) != 0;
+    replayConfig.display = Runtime::normalize_user_config(context.user_settings(),Runtime::GameMode::Replay).display;
 
     Replay::ConfigPrefixResult prefix;
     if (!Replay::decode_config_prefix(Replay::session(context).data, replayConfig, prefix)) {
@@ -161,12 +161,35 @@ bool load_replay(
     if (secondContext != nullptr) reset_replay_state(*secondContext);
     const auto replayPath=session_replay_path(user);
     if (!replayPath) return false;
-    std::ifstream input(*replayPath);
-    std::string replay;
-    if (!(input >> replay) || !replay_hash_valid(replay)) {
+    std::error_code sizeError;
+    if(std::filesystem::file_size(*replayPath,sizeError)>Replay::kMaxMultiplayerReplayBytes+17 || sizeError)return false;
+    std::ifstream input(*replayPath,std::ios::binary);
+    std::string replay((std::istreambuf_iterator<char>(input)),{});
+    if(!Replay::is_multiplayer_replay(replay)) {
+        // Preserve the historical whitespace-tolerant single/local-VS reader.
+        std::istringstream legacy(replay);std::string token;if(!(legacy>>token))return false;replay=std::move(token);
+    }
+    if (input.bad() || !replay_hash_valid(replay)) {
         return false;
     }
     replay.resize(replay.size() - 17);
+
+    if(Replay::is_multiplayer_replay(replay)) {
+        auto archive=Replay::decode_multiplayer_replay(replay);if(!archive)return false;
+        std::string config;
+        for(const auto& track:archive->tracks) {
+            auto journal=std::string_view(track.journal);Replay::JournalRecord record;
+            if(Replay::take_journal_record(journal,record) && record.kind=='C') {
+                if(config.empty() || track.actor==archive->viewer)config=record.data;
+                if(track.actor==archive->viewer)break;
+            }
+        }
+        if(config.empty())config="{{Model,4}}";
+        if(!load_replay_stream(context,config+"{end_all,0}"))return false;
+        auto& state=Replay::session(context);state.multiplayerReplay=std::make_shared<Replay::MultiplayerReplay>(std::move(*archive));
+        state.loadedRecording=std::move(replay);state.sourcePath=Util::FilePath::generic(*replayPath);
+        return true;
+    }
 
     if (!Replay::is_local_versus_replay(replay)) {
         const auto original=replay;

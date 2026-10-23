@@ -13,6 +13,7 @@
 #include <random>
 #include <set>
 
+namespace TetrTests::rotation_systems_test {
 namespace {
 void configuration() {
     const auto options=UserConfig::choice_options(UserConfig::ChoiceKind::RotationSystem);
@@ -30,7 +31,7 @@ void configuration() {
         assert(restored.rotationSystem==user.rotationSystem);
         Runtime::RuntimeConfig decoded; Replay::ConfigPrefixResult result;
         assert(Replay::decode_config_prefix(Replay::encode_config_prefix(config)+"}",decoded,result));
-        assert(decoded.rotationSystem==info.value && !decoded.legacyRotationRules);
+        assert(decoded.rotationSystem==info.value && !decoded.legacyRotationRules && !decoded.legacyEventGeometry);
         const auto types=Piece::types_for_rotation_system(info.value);
         assert(types.size()==7);
         for(int family=0;family<7;++family) {
@@ -47,6 +48,7 @@ void configuration() {
     Runtime::RuntimeConfig decoded; Replay::ConfigPrefixResult result;
     assert(Replay::decode_config_prefix("{{RotationSystem,2}}",decoded,result));
     assert(decoded.legacyRotationRules);
+    assert(decoded.legacyEventGeometry);
     assert(Piece::types_for_rotation_system(decoded.rotationSystem,true).front().index()==14);
     assert(Replay::decode_config_prefix(Replay::encode_config_prefix(decoded)+"}",decoded,result));
     assert(decoded.legacyRotationRules);
@@ -54,6 +56,9 @@ void configuration() {
         const auto old=Piece::types_for_rotation_system(Runtime::rotation_system_from_index(system),true);
         assert(old.size()==7 && old.front().index()==system*7);
     }
+    assert(Replay::decode_config_prefix("{{RotationSystem,3}{RotationRulesVersion,1}}",decoded,result));
+    assert(!decoded.legacyRotationRules && decoded.legacyEventGeometry);
+    assert(Piece::types_for_rotation_system(decoded.rotationSystem,false,10,decoded.legacyEventGeometry).front().index()==21);
     std::filesystem::remove(user.persistencePath);
 }
 void rotations(bool output) {
@@ -115,8 +120,10 @@ void rotations(bool output) {
     if(output)std::cout<<"]\n";
 }
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     if(argc==2 && std::string(argv[1])=="--fixtures") {rotations(true);return 0;}
     configuration(); rotations(false);
     std::cout<<"Rotation profiles, spawn orientations, bitboard paths, configuration and replay compatibility passed\n";
+    return 0;
 }
+} // namespace TetrTests::rotation_systems_test

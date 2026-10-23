@@ -5,6 +5,7 @@
 #include <cassert>
 #include <vector>
 
+namespace TetrTests::bot_strategy_isolation_test {
 namespace {
 
 struct BotFixture {
@@ -65,7 +66,7 @@ void assert_same(const Decision& first, const Decision& second) {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     BotFixture first;
     BotFixture second;
     assert(first.strategy.initialize(first.context));
@@ -90,4 +91,6 @@ int main() {
     const Decision firstFollowup = choose(first, sequence);
     const Decision secondFollowup = choose(second, sequence);
     assert_same(firstFollowup, secondFollowup);
+    return 0;
 }
+} // namespace TetrTests::bot_strategy_isolation_test

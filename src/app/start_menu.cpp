@@ -70,6 +70,18 @@ void draw_start_menu(const Runtime::GameContext& context,std::optional<Render::T
         const auto* app=context.app_component();
         const int selection=app?app->startMenuSelection:0;
         frame.metadata={Frontend::UiKind::Start,"start","TerMino",{},{{"play","Start"},{"settings","Settings"},{"quit","Quit"}},static_cast<std::size_t>(selection)};
+        if(app)frame.metadata.notice=app->startMenuNotice;
+        frame.metadata.chinese=UiText::language()!=UiText::Language::English;
+        frame.metadata.context=context.user_settings().username;
+        const auto modes=UserConfig::choice_options(UserConfig::ChoiceKind::GameMode);
+        const auto mode=std::find(modes.values.begin(),modes.values.end(),context.user_settings().gameMode);
+        if(mode!=modes.values.end())frame.metadata.currentValue=tr(modes.labels[mode-modes.values.begin()]);
+        for(auto& entry:frame.metadata.entries)entry.label=tr(entry.label);
+        // Display the same current bindings used by the terminal and controller,
+        // including alternate keys and the second player in local versus.
+        frame.metadata.entries[0].value=binding_label(context,8);
+        frame.metadata.entries[1].value=binding_label(context,9);
+        frame.metadata.entries[2].value="[Esc]";
         const char* labels[]={"Start","Settings","Quit"};
         for(int i=0;i<3;++i) frame.write(12+i*4,x+4,(selection==i?">  ":"   ")+tr(labels[i]),52,
             selection==i?accent:fg,selection==i?selected:bg);
@@ -111,7 +123,16 @@ bool run_start_menu(Runtime::GameContext& context) {
     bool settingsWasDown = key_down(context, 9);
     bool retryWasDown = key_down(context, 8);
     auto shownSize = Render::terminal_size();
+    if(app)app->startMenuSelection=0;
     draw_start_menu(context);
+    const auto return_to_start=[&] {
+        input.suppress_held_keys();
+        settingsWasDown=key_down(context,9);
+        retryWasDown=key_down(context,8);
+        shownSize=Render::terminal_size();
+        if(app)app->startMenuSelection=0;
+        draw_start_menu(context);
+    };
     auto start_playing = [&] {
         // Release the menu action before the first piece can receive it.
         while (key_down(context, 8) || key_down(context, 9) ||
@@ -119,6 +140,7 @@ bool run_start_menu(Runtime::GameContext& context) {
             if (input.update(NavigationKey::Back, false)) return false;
             context.services.clock.sleep_for(Runtime::Duration::from_seconds(0.001));
         }
+        if(app)app->startMenuNotice.clear();
         return true;
     };
     for (;;) {
@@ -130,6 +152,9 @@ bool run_start_menu(Runtime::GameContext& context) {
         }
         if (input.update(NavigationKey::Back, false)) return false;
         if(Frontend::ui_surface_active()) {
+            const auto command=Frontend::poll_ui_command();
+            if(command && command->kind==Frontend::UiCommandKind::Back)return false;
+            if(command && app)app->startMenuSelection=static_cast<int>(command->index);
             const bool up=input.update(NavigationKey::Up,true);
             const bool down=input.update(NavigationKey::Down,true);
             const bool tab=input.update(NavigationKey::Tab,false);
@@ -141,12 +166,12 @@ bool run_start_menu(Runtime::GameContext& context) {
 #endif
             const int delta=(down?1:0)-(up?1:0)+(tab?(shifted?-1:1):0);
             if(app && delta) {app->startMenuSelection=(app->startMenuSelection+delta+3)%3;draw_start_menu(context);}
-            if(input.update(NavigationKey::Confirm,false)) {
+            if(input.update(NavigationKey::Confirm,false) || command) {
                 const int selected=app?app->startMenuSelection:0;
                 if(selected==2)return false;
                 if(selected==0)return start_playing();
                 if(run_menu(context,true)==MenuResult::StartGame)return start_playing();
-                input.suppress_held_keys();draw_start_menu(context);
+                return_to_start();
             }
         }
         const bool retryDown = key_down(context, 8);
@@ -159,11 +184,7 @@ bool run_start_menu(Runtime::GameContext& context) {
         if (openSettings) {
             context.config.display.obscuredColors = context.user_settings().obscuredColors != 0;
             if (run_menu(context, true) == MenuResult::StartGame) return start_playing();
-            input.suppress_held_keys();
-            settingsWasDown = key_down(context, 9);
-            retryWasDown = key_down(context, 8);
-            shownSize = Render::terminal_size();
-            draw_start_menu(context);
+            return_to_start();
         }
         context.services.clock.sleep_for(Runtime::Duration::from_seconds(0.001));
     }

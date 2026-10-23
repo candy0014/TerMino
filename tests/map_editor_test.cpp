@@ -31,6 +31,7 @@
 #include <memory>
 #include <sstream>
 
+namespace TetrTests::map_editor_test {
 namespace {
 using Runtime::MapDefinition;using Runtime::MapGenerator;
 struct MapFile {
@@ -120,6 +121,37 @@ void codec_and_storage(MapFile& file) {
     }
 }
 void editor_operations() {
+    {
+        App::MapEditorState pointer;
+        const auto empty=pointer.map;
+        Frontend::UiCommand brush{Frontend::UiCommandKind::MapBrush,7};
+        assert(App::apply_map_editor_command(pointer,brush) && pointer.brush=='T' && pointer.map==empty);
+        pointer.paint_to(19,0);pointer.paint_to(10,9,true);pointer.end_stroke();
+        for(int i=0;i<10;++i)assert(pointer.map.rows[19-i][i]=='T');
+        assert(pointer.undoHistory.size()==1 && pointer.undo() && pointer.map==empty);
+        assert(pointer.redo());const auto diagonal=pointer.map;
+        pointer.paint_to(10,0);pointer.paint_to(10,9,true);pointer.end_stroke();
+        assert(pointer.map.rows[10]=="TTTTTTTTTT" && pointer.undo() && pointer.map==diagonal);
+        pointer.paint_to(-1,0);assert(pointer.map==diagonal);
+        pointer.sequenceFocus=true;pointer.map.generator=MapGenerator::CustomSequence;
+        pointer.map.sequence.assign(100,Piece::april_fools_piece(69));pointer.caret=100;
+        Frontend::UiCommand wheel{Frontend::UiCommandKind::MapScroll};wheel.delta=-1;
+        assert(App::apply_map_editor_command(pointer,wheel,3,3));
+        assert(pointer.sequenceScroll && *pointer.sequenceScroll<78 && pointer.caret==100 && pointer.map.sequence.size()==100);
+        pointer.map.rotationSystem=Runtime::RotationSystem::AprilFools2026;
+        wheel.index=1;wheel.delta=2;assert(App::apply_map_editor_command(pointer,wheel,3,3));
+        assert(pointer.candidateScroll && *pointer.candidateScroll==6);
+        Frontend::UiCommand select{Frontend::UiCommandKind::MapCaret,2};
+        assert(App::apply_map_editor_command(pointer,select) && pointer.caret==2);
+        select.kind=Frontend::UiCommandKind::MapCandidate;select.index=1;
+        assert(App::apply_map_editor_command(pointer,select) && pointer.map.sequence.size()==101 && pointer.caret==3);
+        select.alternate=true;assert(App::apply_map_editor_command(pointer,select) && pointer.map.sequence.size()==102 && pointer.caret==4);
+        App::MapEditorState large;large.resize(100,100);
+        Frontend::UiCommand paint{Frontend::UiCommandKind::MapPaint};paint.row=80;paint.column=5;
+        assert(App::apply_map_editor_command(large,paint));const auto viewport=large.fieldViewport;
+        paint.row=79;paint.column=8;paint.alternate=true;assert(App::apply_map_editor_command(large,paint));
+        assert(large.fieldViewport==viewport && viewport==std::pair(78,0));
+    }
     App::MapEditorState editor;editor.paint('T');editor.column=1;editor.paint('G');
     editor.resize(4,8);assert(editor.map.rows.back()=="TG  " && editor.row==7);
     editor.resize(12,25);assert(editor.map.rows.back()=="TG          " && editor.row==24);
@@ -138,6 +170,7 @@ void editor_operations() {
     const auto pentomino=App::map_browser_pieces(Runtime::RotationSystem::SrsPlus,"PENTOMINO I");
     assert(!pentomino.empty());for(const auto type:pentomino) assert(Piece::metadata(type).rotationSystem==Runtime::RotationSystem::Pentomino);
     assert(App::map_browser_pieces(Runtime::RotationSystem::SrsPlus,"no_such_piece_123").empty());
+    assert(App::map_browser_pieces(Runtime::RotationSystem::SrsPlus,"#103")==std::vector<Piece::Type>{Piece::Type::from_index(103)});
     App::MapEditorState drawing;drawing.resize(4,4);
     drawing.move(-2,2,'T');
     assert(drawing.map.rows[3][0]=='T' && drawing.map.rows[2][0]=='T');
@@ -405,9 +438,11 @@ void startup_and_replay(MapFile&) {
     for(const auto type:fixture.owned->player.pieces.allowedPieces) if(Piece::metadata(type).rotationSystem==Runtime::RotationSystem::AprilFools2026) assert(Piece::metadata(type).familyIndex/7+1<=3);
 }
 }
-int main() {
+int run(int argc,char** argv) {
     App::UiText::set_language(App::UiText::Language::English);
     std::ostringstream output;auto* previous=std::cout.rdbuf(output.rdbuf());
     MapFile file;codec_and_storage(file);editor_operations();map_racing_goals();custom_rotation(file);editor_layout();finite_sequences();startup_and_replay(file);
     std::cout.rdbuf(previous);std::cerr<<"map_editor_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::map_editor_test

@@ -13,6 +13,7 @@
 #include <tuple>
 #include <vector>
 
+namespace TetrTests::movement_controller_test {
 namespace {
 
 struct RefState {
@@ -262,10 +263,28 @@ void inputStateRegression() {
 
 } // namespace
 
-int main() {
+void contactObserverRegression() {
+    Engine::MovementState state;state.pose={{0,1},Runtime::Rotation{}};
+    std::vector<std::pair<Engine::MovementContact,int>> contacts;
+    Engine::MovementController movement(state,[](Piece::Pose pose){return pose.position.col>=0 && pose.position.col<=2 && pose.position.row<=4;},
+        [](Piece::Pose& pose,Runtime::Rotation rotation,Piece::KickIndex& kick){pose.rotation=rotation;kick=Piece::KickIndex(0);return true;},
+        [&](Engine::MovementContact type,int direction,Runtime::TimePoint){contacts.emplace_back(type,direction);});
+    const auto now=Runtime::TimePoint::from_seconds(1);
+    assert(movement.moveHorizontal(1,now,10).changed && contacts.empty());
+    assert(!movement.moveHorizontal(1,now,10).changed && contacts.back().first==Engine::MovementContact::Wall && contacts.back().second==1);
+    assert(movement.moveHorizontalToWall(-1,now,10).changed && contacts.back().second==-1);
+    const auto before=contacts.size();
+    assert(!movement.moveHorizontalToWall(-1,now,10).changed && contacts.size()==before+1);
+    assert(movement.rotate(-1,now,10).changed && contacts.back().first==Engine::MovementContact::Rotation && contacts.back().second==-1);
+    const auto count=contacts.size();movement.dropToFloor(2,false,now);movement.applyGravity(now,Runtime::GravityInterval::disabled());
+    assert(contacts.size()==count); // observers report contacts, without changing movement/score rules
+}
+int run(int argc,char** argv) {
+    contactObserverRegression();
     movementRandomRegression();
     lockConditionRegression();
     inputStateRegression();
     std::cout << "movement controller regression: OK\n";
     return 0;
 }
+} // namespace TetrTests::movement_controller_test

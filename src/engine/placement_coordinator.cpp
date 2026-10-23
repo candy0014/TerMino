@@ -82,8 +82,19 @@ Rules::PlayResult finalize_locked_piece(
 
     PlacementApplicationConfig applicationConfig =
         capture_placement_application_config(context, blitzLevel);
+    if(context.config.garbage.mode==Runtime::GarbageMode::QuickPlay &&
+        Runtime::reverse(context.config.quickPlay.doubleHole) &&
+        !context.config.quickPlay.legacyRules && gameplay.quickPlay.blighted) {
+        applicationConfig.qpBlightedRoundingRoll=static_cast<double>(player.attackRoundingRandom()) /
+            (static_cast<double>(std::mt19937::max())+1);
+    }
     applicationConfig.pieceFamily = Piece::metadata(piece.type()).familyIndex;
     applicationConfig.pieceColumn = movementState.pose.position.col;
+    if(applicationConfig.pieceFamily==0 && !context.config.quickPlay.legacyRules) {
+        const auto& cells=piece.cells(movementState.pose.rotation);
+        applicationConfig.pieceColumn+=std::min_element(cells.begin(),cells.end(),
+            [](const auto& a,const auto& b){return a[1]<b[1];})->at(1);
+    }
     if (applicationConfig.pieceFamily == 0 && placement.clear.clearedLines == 0) {
         const auto& cells = piece.cells(movementState.pose.rotation);
         const int column = movementState.pose.position.col + cells.front()[1];
@@ -130,6 +141,8 @@ Rules::PlayResult finalize_locked_piece(
         applicationConfig,
         offset.rawOffsetResult);
     store_post_offset_application_state(gameplay, application.state, context);
+    player.presentation.placement={gameplay.scoring.placedBlocks,piece.type(),movementState.pose,
+        placement.clear.clearedRows,movementState.hardDropFromRow};
 
     if (std::getenv("TETR_TEST_METRICS") && !context.config.mode.replayMode) {
         std::unique_lock<std::recursive_mutex> outputLock;

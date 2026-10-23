@@ -32,6 +32,7 @@
 #include <sstream>
 #include <type_traits>
 
+namespace TetrTests::serialization_boundary_test {
 namespace {
 
 void replay_is_decoded_once() {
@@ -833,7 +834,7 @@ void garbage_packet_has_typed_api() {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     replay_is_decoded_once();
     replay_gameplay_payloads_hide_argument_positions();
     local_versus_replay_envelope_preserves_both_streams();
@@ -852,4 +853,6 @@ int main() {
     network_attack_wire_order_is_explicit();
     garbage_packet_has_typed_api();
     std::cout << "serialization boundary tests passed\n";
+    return 0;
 }
+} // namespace TetrTests::serialization_boundary_test

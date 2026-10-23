@@ -17,6 +17,7 @@
 #include <numeric>
 #include <sstream>
 
+namespace TetrTests::bag_randomizer_test {
 namespace {
 using Mode=Runtime::BagRandomizer;
 struct Fixture {
@@ -158,8 +159,10 @@ void fixtures() {
     std::cout<<"]\n";
 }
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     if(argc==2 && std::string(argv[1])=="--fixtures") {fixtures();return 0;}
     contents();settings_and_replays();restarting();
     std::cout<<"Bag randomizers, event catalogs, queue restart, config and legacy replay checks passed\n";
+    return 0;
 }
+} // namespace TetrTests::bag_randomizer_test

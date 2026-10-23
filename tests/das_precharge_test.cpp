@@ -30,6 +30,7 @@
 #include <sstream>
 #include <thread>
 
+namespace TetrTests::das_precharge_test {
 namespace {
 using Clock=std::chrono::steady_clock;
 Runtime::Duration dur(double t) { return Runtime::Duration::from_seconds(t); }
@@ -144,6 +145,65 @@ void disabled_pause_precharge_freezes_existing_charge() {
     assert(!f.loop.input.horizontalCharged(left,f.context.real_now(),dur(.2)));
 }
 
+void sampled_precharge_does_not_run_ahead_of_a_release() {
+    for(bool charged:{false,true}) {
+        Fixture f;
+        f.context.config.handling.das=dur(.09);f.context.config.handling.arr=dur(.004);
+        // Keep both sampled instants after this context's clock origin, so
+        // the test exercises capture lag rather than negative startup time.
+        std::this_thread::sleep_for(f.runtime.clock.wall_duration(dur(.03)));
+        const auto press=Clock::now()-f.runtime.clock.wall_duration(dur(.1));
+        f.key(left,true,press);
+        f.events.complete_sample(press+f.runtime.clock.wall_duration(dur(charged?.095:.08)));
+        Input::GameplayInputScope capture(&f.input);
+        Engine::precharge_movement_input(f.context,f.loop.input);
+        assert((f.loop.input.phase(left)==Engine::KeyPhase::Repeating)==charged);
+        auto state=f.spawn();const auto before=state.pose;
+        assert(Engine::apply_initial_movement(f.context,f.loop.input,state,
+            [](Piece::Pose) {return true;})==charged);
+        assert(state.pose.position.col==before.position.col-(charged?1:0));
+        if(!charged) {
+            f.key(left,false,press+f.runtime.clock.wall_duration(dur(.088)));
+            f.events.complete_sample(Clock::now());
+            Engine::precharge_movement_input(f.context,f.loop.input);
+            assert(f.loop.input.phase(left)==Engine::KeyPhase::Released);
+            assert(!Engine::apply_initial_movement(f.context,f.loop.input,state,
+                [](Piece::Pose) {return true;}));
+        }
+    }
+}
+
+void delayed_precharge_does_not_backdate_a_press() {
+    for (bool sampled : {false,true}) for (bool alreadyHeld : {false,true}) {
+        Fixture f;
+        f.context.config.handling.das=dur(.09);
+        const auto press=Clock::now();
+        const auto stamp=f.runtime.clock.at(press);
+        if (sampled) f.events.complete_sample(press);
+        if (alreadyHeld) {
+            f.key(left,true,press);
+            if (sampled) f.events.complete_sample(press);
+        }
+        Input::GameplayInputScope capture(&f.input);
+        if (!alreadyHeld) f.key(left,true,press);
+        if (sampled) f.events.complete_sample(press+f.runtime.clock.wall_duration(dur(.01)));
+        // A stale invocation time must not replace either a snapshot's
+        // original press time or the timestamp of a newly queued press.
+        Engine::precharge_paused_movement_input(f.context,f.loop.input,stamp-dur(.15));
+        Engine::precharge_paused_movement_input(f.context,f.loop.input,stamp+dur(.01));
+        assert(f.loop.input.phase(left)==Engine::KeyPhase::Pressed);
+        assert(f.loop.input.timestamp(left)==stamp);
+    }
+    Engine::MovementInputState input;
+    const auto press=Runtime::TimePoint::from_seconds(1);
+    assert(input.beginPress(left,true,press));
+    // Disabling precharge resets time spent waiting, but a stale sample
+    // cannot move a newly recorded press into the past either.
+    input.prechargeHorizontal(left,press-dur(.15),dur(.09),dur(.01),false);
+    assert(input.timestamp(left)==press);
+    assert(input.horizontalRepeatsDue(left,press+dur(.01),dur(.09),dur(.01))==0);
+}
+
 void switches_persist_reset_and_roundtrip_replays() {
     const auto file=std::filesystem::temp_directory_path()/"tetr_precharge_switches.ini";
     for(bool charge:{false,true}) for(bool preMove:{false,true}) {
@@ -221,8 +281,10 @@ void countdown_preserves_uncovered_cells() {
             if(screen.at(top,left+2).glyph=="┓") stage=2;
             else if(screen.at(top,left).glyph=="┏") stage=screen.at(top+2,left).glyph=="┏" ? 1 : 0;
             if(stage>=0 && !seen[stage]) {verify(stage);seen[stage]=true;}
+            if(stage>=0)assert(f.session.countdownDigit==3-stage);
         };
         assert(Engine::run_start_countdown(f.context,player,f.session.opponent)==Engine::CountdownResult::Completed);
+        assert(f.session.countdownDigit==0);
         f.runtime.clock.waitInterrupt={};read();verify(-1);assert(std::all_of(seen.begin(),seen.end(),[](bool value){return value;}));
         for(int row=1;row<=5;++row) for(int col=0;col<10;++col) assert(player.gameplay.playfield.field.cell(row,col)==Runtime::BoardCell::piece(0));
     }
@@ -384,10 +446,14 @@ void app_first_piece_uses_prestart_charge() {
 }
 }
 
-int main() {
+int run(int argc,char** argv) {
+    delayed_precharge_does_not_backdate_a_press();
+    sampled_precharge_does_not_run_ahead_of_a_release();
     switches_control_spawn_and_charge_independently(); disabled_pause_precharge_freezes_existing_charge();
     switches_persist_reset_and_roundtrip_replays();
     countdown_charges_and_discards_other_prestart_actions(); countdown_preserves_uncovered_cells(); held_baseline_order_and_nested_piece_loop();
     clear_and_entry_delays_share_charge(); release_and_switch_during_entry_reset_charge();
     waiting_saturates_das_and_preserves_dcd(); both_local_players_precharge(); app_first_piece_uses_prestart_charge();
+    return 0;
 }
+} // namespace TetrTests::das_precharge_test

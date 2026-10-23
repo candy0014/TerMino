@@ -56,6 +56,9 @@ int main() {
     tower.next={0,3};tower.hold=-2;tower.step=1;
     tower.pose=B::host_pose(*owner.context()->generate('I'));
     B::RootCoverageEngine candidate(owner.context());A::configure_native(candidate,tower);
+    // Deliberately retain a partial historical future subtree, even though
+    // the corrected default now covers this fixture before promotion.
+    candidate.search_config()->legacySourceDescent=true;
     for(int pass=0;pass<100;++pass)A::native_pass(candidate,tower);
     B::RootCoverageTestAccess::promotion(candidate);
     B::RootCoverageSearch wrapper;B::Search original;B::CoverageSearch full;B::Search::Config config;

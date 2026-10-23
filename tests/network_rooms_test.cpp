@@ -8,6 +8,7 @@
 #include <iostream>
 #include <memory>
 
+namespace TetrTests::network_rooms_test {
 struct Client {
     // GameContext carries large session buffers: do not allocate six on the stack.
     std::unique_ptr<Runtime::SessionState> session = std::make_unique<Runtime::SessionState>();
@@ -16,7 +17,7 @@ struct Client {
     Network::NetworkServices network;
     Client() { context.attach_network(network); }
 };
-int main() {
+int run(int argc,char** argv) {
     using namespace Network;
     using namespace std::chrono_literals;
     RelayServer server(341);
@@ -210,4 +211,6 @@ int main() {
     for (auto* client : {&a,&b,&c,&d,&e,&f}) disconnect_online(client->network);
     pump();
     std::cerr << "network_rooms_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::network_rooms_test

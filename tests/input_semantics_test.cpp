@@ -11,7 +11,8 @@
 #include <sstream>
 #include <iostream>
 
-int main() {
+namespace TetrTests::input_semantics_test {
+int run(int argc,char** argv) {
     using Input::Action;
     {
         Input::FocusState focus;
@@ -162,6 +163,9 @@ int main() {
     std::ostringstream rendered;
     auto* old=std::cout.rdbuf(rendered.rdbuf());
     assert(Engine::run_start_countdown(context,session.player,session.opponent)==Engine::CountdownResult::Retry);
+    assert(session.countdownDigit==0);
     std::cout.rdbuf(old);
     assert(primaryReads>=6 && aliasReads>=6);
+    return 0;
 }
+} // namespace TetrTests::input_semantics_test

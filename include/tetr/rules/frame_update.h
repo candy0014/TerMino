@@ -37,6 +37,7 @@ struct FrameRuleConfig {
     bool inDanger = false;
     // BOT forecasts advance known Windup/fatigue without inventing opponents.
     bool generateOpponentPressure = true;
+    double ownAttackApm = 0.0;
 };
 
 struct FramePrePresentationResult {

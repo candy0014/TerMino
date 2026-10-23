@@ -148,6 +148,10 @@ using BotrisEngine = m_tetris::TetrisEngine<
 
 class BotrisAdapter final : public EngineAdapterBase<BotrisEngine> {
 public:
+    double terrain(const m_tetris::TetrisMap& map) override {
+        return engine_.ai()->eval(search_aspin::Search::TetrisNodeWithASpinType(
+            engine_.context()->generate('I')), map, map, 0).value;
+    }
     BotrisAdapter(int width, int height)
         : EngineAdapterBase(info(Kind::Botris), width, height) {
         auto* search = engine_.search_config();
@@ -187,6 +191,10 @@ using TojEngine = m_tetris::TetrisEngine<
 
 class TojAdapter final : public EngineAdapterBase<TojEngine> {
 public:
+    double terrain(const m_tetris::TetrisMap& map) override {
+        return engine_.ai()->eval(search_tspin::Search::TetrisNodeWithTSpinType(
+            engine_.context()->generate('I')), map, map, 0).value;
+    }
     TojAdapter(int width, int height)
         : EngineAdapterBase(info(Kind::Toj), width, height) {
         auto* search = engine_.search_config();
@@ -226,6 +234,9 @@ using DigEngine = m_tetris::TetrisEngine<
 
 class DigAdapter final : public EngineAdapterBase<DigEngine> {
 public:
+    double terrain(const m_tetris::TetrisMap& map) override {
+        return engine_.ai()->eval(engine_.context()->generate('I'), map, map, 0);
+    }
     DigAdapter(int width, int height)
         : EngineAdapterBase(info(Kind::Dig), width, height) {}
 
@@ -243,8 +254,14 @@ using QqEngine = m_tetris::TetrisEngine<
 
 class QqAdapter final : public EngineAdapterBase<QqEngine> {
 public:
+    double terrain(const m_tetris::TetrisMap& map) override {
+        return engine_.ai()->eval(engine_.context()->generate('I'), map, map, 0).map;
+    }
     QqAdapter(int width, int height)
-        : EngineAdapterBase(info(Kind::Qq), width, height) {}
+        : EngineAdapterBase(info(Kind::Qq), width, height) {
+        engine_.ai_config()->level = 1;
+        engine_.ai_config()->mode = 1;
+    }
 
     Decision choose(const m_tetris::TetrisMap& map, char current, char hold,
                     const char* next, std::size_t nextLength, bool,
@@ -285,6 +302,9 @@ using C2Engine = m_tetris::TetrisEngine<
 
 class C2Adapter final : public EngineAdapterBase<C2Engine> {
 public:
+    double terrain(const m_tetris::TetrisMap& map) override {
+        return engine_.ai()->eval(engine_.context()->generate('I'), map, map, 0).map;
+    }
     C2Adapter(int width, int height)
         : EngineAdapterBase(info(Kind::C2), width, height) {
         engine_.search_config()->fast_move_down = true;

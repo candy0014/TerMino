@@ -48,6 +48,8 @@ void apply_remote_setup(
     remote.presentation.blockMaxHeight = setup.blockMaxHeight;
     remote.presentation.blockMaxWidth = setup.blockMaxWidth;
     remote.presentation.spike = {};
+    remote.presentation.remoteAttackBaselineKnown=false;
+    remote.presentation.remoteFieldVisibility.reset();
     remote.pieces.bag.clear();
     for (Piece::Type piece : setup.nextPreview) {
         remote.pieces.bag.push_back(Runtime::QueuedPiece{piece, false});
@@ -130,7 +132,8 @@ LobbyWaitResult wait_for_multiplayer_lobby(Runtime::GameContext& context) {
             configLoaded=true;
         }
         if (network.connection == Network::ConnectionState::Connected && network.room.name.empty()) {
-            Settings::run_network_menu(context);
+            if(Frontend::ui_surface_active())Settings::run_play_room_menu(context);
+            else Settings::run_network_menu(context);
             return LobbyWaitResult::Reconfigure;
         }
         if(network.connection==Network::ConnectionState::Failed) throw Network::ConnectionError(network.connectionMessage);
@@ -147,6 +150,11 @@ LobbyWaitResult wait_for_multiplayer_lobby(Runtime::GameContext& context) {
                 paint_room_waiting(context,waitingSurface,shownSize.value_or(Render::TerminalSize{80,40}),hostChoice,rosterOffset,true);
             } else if(Frontend::ui_surface_active()) {
                 TerminalCanvas canvas;canvas.box(8,8,104,7,"NETWORK",{{58,222,240}},{{230,240,255}},{{9,17,28}});
+                canvas.metadata={Frontend::UiKind::Notice,"network-waiting",UiText::tr("NETWORK")};
+                canvas.metadata.chinese=UiText::language()!=UiText::Language::English;
+                canvas.metadata.hint=status;
+                canvas.metadata.shortcuts={UiText::binding_label(context.user_settings(),9)+" "+UiText::tr("Settings")+"   "+
+                    UiText::binding_label(context.user_settings(),8)+" "+UiText::tr("Restart")+"   Esc: "+UiText::tr("Start")};
                 canvas.write(10,11,status,98,{{230,240,255}},{{9,17,28}});
                 canvas.write(13,11,"P: Settings / disconnect    R: Reconnect    Esc: Start",98,{{58,222,240}},{{9,17,28}});
                 canvas.present({},false);
@@ -186,7 +194,8 @@ LobbyWaitResult wait_for_multiplayer_lobby(Runtime::GameContext& context) {
                         return LobbyWaitResult::Reconfigure;
                     }
                     Network::initialize_network_services(context, context.user_settings().serverIp);
-                    Settings::run_network_menu(context);
+                    if(Frontend::ui_surface_active())Settings::run_play_room_menu(context);
+                    else Settings::run_network_menu(context);
                     return LobbyWaitResult::Reconfigure;
                 }
                 heldKeys[key] = down;

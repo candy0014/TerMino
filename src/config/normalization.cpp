@@ -173,6 +173,14 @@ RuntimeConfig normalize_user_config(const UserConfig::Settings& personal, GameMo
     config.display.squareStyle = UserConfig::clamped_int(user, UserConfig::SettingId::SquareStyle);
     config.display.obscuredColors = UserConfig::clamped_int(user, UserConfig::SettingId::ObscuredColors) != 0;
     config.display.showSpawnPosition = UserConfig::clamped_int(user, UserConfig::SettingId::ShowSpawnPosition) != 0;
+    config.display.effects = {
+        UserConfig::clamped_int(user, UserConfig::SettingId::EffectsIntensity),
+        UserConfig::clamped_int(user, UserConfig::SettingId::FieldShake),
+        UserConfig::clamped_int(user, UserConfig::SettingId::ParticleIntensity),
+        UserConfig::clamped_int(user, UserConfig::SettingId::LandingEffect),
+        UserConfig::clamped_int(user, UserConfig::SettingId::LineClearEffect),
+        UserConfig::clamped_int(user, UserConfig::SettingId::HardDropTrail),
+        UserConfig::clamped_int(user, UserConfig::SettingId::BoardBounciness)};
     config.timeMultiplier = 1.0;
     config.simulationPps = UserConfig::clamped_real(user, UserConfig::SettingId::SimulationPps);
     if (!std::isfinite(config.simulationPps)) config.simulationPps = 0.0;
@@ -238,6 +246,7 @@ RuntimeConfig normalize_user_config(const UserConfig::Settings& personal, GameMo
     }
     if (reverse(config.quickPlay.noHold) || enabled(config.quickPlay.doubleHole))
         config.garbage.cheeseMessiness = UserConfig::clamped_real(user, UserConfig::SettingId::CheeseMessiness);
+    if (reverse(config.quickPlay.doubleHole)) config.garbage.cap=2;
     if (reverse(config.quickPlay.volatileMode)) config.field.height = static_cast<int>(config.field.height * 0.7);
     if (reverse(config.quickPlay.messy)) config.field.lineClearDelay = seconds(70.0 / 60.0);
 

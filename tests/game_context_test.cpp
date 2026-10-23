@@ -10,7 +10,8 @@
 #include <iostream>
 #include <stdexcept>
 
-int main() {
+namespace TetrTests::game_context_test {
+int run(int argc,char** argv) {
     Runtime::SessionState baselineSession;
     Runtime::RuntimeServices baselineServices;
     Runtime::GameContext baseline(baselineSession, baselineServices);
@@ -141,4 +142,6 @@ int main() {
     custom.config.field.width = 37;
     assert(baseline.config.field.width == baselineWidth);
     std::cout << "game_context_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::game_context_test

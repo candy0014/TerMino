@@ -21,6 +21,7 @@
 #include <memory>
 #include <sstream>
 
+namespace TetrTests::multiplayer_geometry_test {
 namespace {
 struct Scene {
     std::unique_ptr<Runtime::SessionState> session=std::make_unique<Runtime::SessionState>();
@@ -99,7 +100,7 @@ void bounds(Scene& scene,const Test::TerminalScreen& screen,Render::TerminalSize
     }
 }
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     const std::filesystem::path folder=argc>1?argv[1]:"";
     if(!folder.empty())std::filesystem::create_directories(folder);
     const auto capture=[&](Scene& scene,Render::TerminalSize size,const char* name) {
@@ -356,4 +357,6 @@ int main(int argc,char** argv) {
         assert(screen.position_of("PLAYER-1").first>0);
     }
     std::cout<<"multiplayer geometry passed\n";
+    return 0;
 }
+} // namespace TetrTests::multiplayer_geometry_test

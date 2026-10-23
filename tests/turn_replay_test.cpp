@@ -1,5 +1,7 @@
 #include "tetr/engine/board_lifecycle.h"
 #include "tetr/engine/game_loop_adapter.h"
+#include "tetr/engine/replay_playback_controls.h"
+#include "tetr/config/user_config.h"
 #include "tetr/input/services.h"
 #include "tetr/render/terminal_renderer.h"
 #include "tetr/replay/operation_codec.h"
@@ -12,11 +14,13 @@
 
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <iostream>
 #include <mutex>
 #include <thread>
 #include <vector>
 
+namespace TetrTests::turn_replay_test {
 namespace {
 using Runtime::Duration;
 using Runtime::TimePoint;
@@ -83,6 +87,56 @@ void clock_and_recording() {
     assert(Replay::playback_game_elapsed(f.context,TimePoint::from_seconds(3)).seconds()>4);
     auto old=Replay::decode_operation_stream("{start_place,4.0}",0);
     assert(!old.front().gameTimestamp && old.front().timestamp.seconds()==4);
+}
+void shared_controls_without_graphical_frontend() {
+    Fixture a,b;
+    Input::FocusState physical;
+    a.input.focusSource=&physical;a.input.keyEventSource=&physical.events();
+    Input::share_key_state(b.input,a.input);
+    Input::refresh_bindings(a.input,UserConfig::default_key_codes());
+    Input::refresh_bindings(b.input,UserConfig::default_player_two_key_codes());
+    a.input.bindings.add_virtual_actions(0);b.input.bindings.add_virtual_actions(1);
+    for(auto* f:{&a,&b}) {
+        f->replay.localVersusReplay=true;f->context.config.simulationPps=0;
+        Replay::configure_playback(f->context,1,Duration::from_seconds(60));
+        f->replay.playback.progressVisible=false;
+        Replay::start_playback(f->context,f->context.now());
+    }
+    Replay::share_playback_clock(a.context,b.context);
+    Engine::share_replay_playback_controls(a.context,b.context);
+    const auto poll=[&] {
+        Engine::update_replay_playback_controls(a.context,a.state.player);
+        Engine::update_replay_playback_controls(b.context,b.state.player);
+    };
+    poll();
+    // Even a complete short tap queued between polls acts once for both workers.
+    physical.update(Input::virtual_action_key(12),true);
+    physical.update(Input::virtual_action_key(12),false);poll();
+    assert(Replay::playback_paused(a.context) && Replay::playback_paused(b.context));
+    const auto native=std::chrono::steady_clock::now();
+    const auto first=Replay::playback_elapsed(a.context,a.services.clock.at(native));
+    const auto second=Replay::playback_elapsed(b.context,b.services.clock.at(native+std::chrono::seconds(2)));
+    assert(first==second);
+    // Player 2 can resume the whole recording, whichever worker polls first.
+    physical.update(Input::virtual_action_key(12,1),true);
+    Engine::update_replay_playback_controls(b.context,b.state.player);poll();
+    assert(!Replay::playback_paused(a.context) && !Replay::playback_paused(b.context));
+    physical.update(Input::virtual_action_key(12,1),false);poll();
+    Replay::set_playback_speed(b.context,b.context.now(),2);
+    assert(Replay::playback_speed(a.context)==2 && Replay::playback_speed(b.context)==2);
+    const auto at=std::chrono::steady_clock::now();
+    const auto later=at+std::chrono::milliseconds(200);
+    assert(std::abs((Replay::playback_elapsed(a.context,a.services.clock.at(later))-
+        Replay::playback_elapsed(b.context,b.services.clock.at(later))).seconds())<.00001);
+    const auto delta=Replay::playback_elapsed(b.context,b.services.clock.at(later))-
+        Replay::playback_elapsed(b.context,b.services.clock.at(at));
+    assert(std::abs(delta.seconds()-.4)<.00001);
+    // A completed track does not own controls needed by its longer peer.
+    Replay::finish_playback(a.context,a.context.now());
+    physical.update(Input::virtual_action_key(12),true);
+    physical.update(Input::virtual_action_key(12),false);
+    Engine::update_replay_playback_controls(b.context,b.state.player);
+    assert(Replay::playback_paused(b.context));
 }
 void alternation(double firstQuota,double secondQuota,const std::vector<int>& expected) {
     Fixture a,b;
@@ -168,12 +222,15 @@ void legacy_and_checkpoints() {
     assert(!disabled.replay.turnPlayback && !peer.replay.turnPlayback);
 }
 }
-int main() {
+int run(int argc,char** argv) {
     Render::begin_output_suppression();
     clock_and_recording();
+    shared_controls_without_graphical_frontend();
     alternation(2.5,1.5,{1,1,1,2,2,1,1,2,1});
     alternation(1e-6,1e-6,{1,2,1,2,1});
     alternation(1e-6,2e-6,{1,2,2,1,2,2,1});
     legacy_and_checkpoints();
     std::cerr<<"turn_replay_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::turn_replay_test

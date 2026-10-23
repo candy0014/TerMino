@@ -7,6 +7,7 @@
   "source_dirty": @TETR_CLIENT_DIRTY@,
   "compiler": "@CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@",
   "linux_full_static": @TETR_CLIENT_STATIC@,
-  "initial_data": "built-in defaults; no personal files",
+  "initial_data": "built-in settings; approved default map and preset libraries; no personal profiles or replays",
+  "default_libraries": true,
   "graphics_minimum": "OpenGL 3.3 Core for opengl frontend"
 }

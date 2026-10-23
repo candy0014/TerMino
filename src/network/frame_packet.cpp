@@ -30,7 +30,7 @@ std::optional<FramePacket> decode_attack_packet(std::string_view text) {
 
 bool is_gameplay_extension(std::string_view text) noexcept {
     for (const auto prefix : {std::string_view("!piece-turn;"),std::string_view("!motion-v1;"),
-                              std::string_view("!snapshot-v1;"),std::string_view("!snapshot-request;"),std::string_view("!board-v1;")})
+                              std::string_view("!snapshot-v1;"),std::string_view("!snapshot-request;"),std::string_view("!board-v1;"),std::string_view("!visibility-v1;")})
         if (text.substr(0,prefix.size())==prefix) return true;
     if (text.size() < 2 || text.front() != '!') return false;
     // Historical board snapshots begin with their first cell, rather than a

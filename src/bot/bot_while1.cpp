@@ -485,7 +485,7 @@ bool init(const Bot::Environment& environment){
 int getpos(const Bot::Environment& environment,const Runtime::PlayerSessionState& player,Runtime::Playfield mp,std::vector<int>nex,const std::vector<int>& unseenBagPieces,int sx,int sy,int stype,int hold,int &ans_x,int &ans_y,int &ans_type,int &ans_rot)
 {
     if(Bot::QuickPlaySearch::enabled(environment)) {
-        if(Bot::QuickPlaySearch::plain(environment) &&
+        if(Bot::QuickPlaySearch::native_policy_compatible(environment) &&
             availability(Bot::QuickPlaySearch::native_environment(environment))) {
             if(auto baseline=Bot::QuickPlaySearch::native_baseline(Bot::QuickPlaySearch::Profile::While1,
                 environment,player,mp)) {

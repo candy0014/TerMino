@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+namespace TetrTests::board_state_codec_test {
 static std::string legacy_oracle(Runtime::GameContext& context,Runtime::PlayerSessionState& player,int row,int col,int rotation,int lastPiece,int spin,int mini,int cleared,int b2b,int combo,int pc){
     auto& game=player.gameplay;
     auto& field=game.playfield;
@@ -53,7 +54,7 @@ static std::string legacy_oracle(Runtime::GameContext& context,Runtime::PlayerSe
     return state;
 }
 
-int main(){
+int run(int argc,char** argv){
     std::mt19937 rng(20260901);
     for(int tc=0;tc<10000;tc++){
         Runtime::SessionState aSession,bSession;
@@ -107,5 +108,12 @@ int main(){
         // while the real codec must leave y presentation state untouched.
         assert(!y.presentation.activePose);
     }
+    for(int mode=0;mode<3;++mode) {
+        const Runtime::FieldVisibility visibility{mode!=0,mode==2,Runtime::Duration::from_seconds(.75),Runtime::Duration::from_seconds(5),Runtime::Duration::from_seconds(1.25)};
+        assert(Network::decode_field_visibility(Network::encode_field_visibility(visibility))==visibility);
+    }
+    for(const auto* invalid:{"!visibility-v1;3;0;5;1","!visibility-v1;1;-1;5;1","!visibility-v1;2;0;nan;1","!visibility-v1;2;0;5;inf","!visibility-v1;0;0;5;1;extra"})
+        assert(!Network::decode_field_visibility(invalid));
     return 0;
 }
+} // namespace TetrTests::board_state_codec_test

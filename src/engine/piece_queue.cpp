@@ -28,10 +28,10 @@ void extend_fool_bag(Runtime::GameContext& context, Runtime::PlayerSessionState&
     const int floor=context.session.quickPlay.floor;
     if(pieces.qpBagBreather) pieces.qpBagBreather=false;
     else {
-        if(pieces.bagCount%2==0) bag.push_back(Piece::april_fools_piece(static_cast<int>(pieces.random()%(std::min(3,std::max(1,floor-1))*7))));
+        if(pieces.bagCount%2==0) bag.push_back(Piece::april_fools_piece(static_cast<int>(pieces.random()%(std::min(3,std::max(1,floor-1))*7)),context.config.legacyEventGeometry));
         if(pieces.foolLastTypes.empty()) {pieces.foolLastTypes.resize(7);std::iota(pieces.foolLastTypes.begin(),pieces.foolLastTypes.end(),0);}
         Util::deterministic_shuffle(pieces.foolLastTypes,pieces.random);
-        bag.push_back(Piece::april_fools_piece(pieces.foolLastTypes.back()+(floor-1)*7));
+        bag.push_back(Piece::april_fools_piece(pieces.foolLastTypes.back()+(floor-1)*7,context.config.legacyEventGeometry));
         pieces.foolLastTypes.pop_back();
     }
 }
@@ -61,8 +61,8 @@ void add_legacy_bag(Runtime::GameContext& context, Runtime::PlayerSessionState& 
         if(april) {
             const int roll=pieces.random()%17;
             if(roll<14) pieces.bag.push_back({pieces.allowedPieces[pieces.random()%pieces.allowedPieces.size()],true});
-            else if(roll<16) pieces.bag.push_back({Piece::april_fools_piece(static_cast<int>(pieces.random()%7)+(floor-1)*7),true});
-            else pieces.bag.push_back({Piece::april_fools_piece(static_cast<int>(pieces.random()%(std::min(3,std::max(1,floor-1))*7))),true});
+            else if(roll<16) pieces.bag.push_back({Piece::april_fools_piece(static_cast<int>(pieces.random()%7)+(floor-1)*7,context.config.legacyEventGeometry),true});
+            else pieces.bag.push_back({Piece::april_fools_piece(static_cast<int>(pieces.random()%(std::min(3,std::max(1,floor-1))*7)),context.config.legacyEventGeometry),true});
         } else pieces.bag.push_back({pieces.allowedPieces[pieces.random()%pieces.allowedPieces.size()],true});
         return;
     }

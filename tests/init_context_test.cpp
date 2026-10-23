@@ -12,6 +12,7 @@
 #include "tetr/config/normalization.h"
 #include "tetr/engine/board_lifecycle.h"
 #include "tetr/engine/piece_queue.h"
+#include "tetr/presentation/board_view.h"
 #include "../src/app/init_player_setup.h"
 
 #include <algorithm>
@@ -24,6 +25,7 @@
 #include <iostream>
 #include <memory>
 
+namespace TetrTests::init_context_test {
 namespace {
 struct InitializedStrategy : Autoplay::Strategy {
     bool initialize(Runtime::GameContext&) override { return true; }
@@ -81,6 +83,26 @@ void set_common_user_config(UserConfig::Settings& user){
     user.autoplayWidth=300;
     user.squareStyle=1;
     user.obscuredColors=0;
+}
+void new_round_clears_placement_feedback() {
+    auto session=std::make_unique<Runtime::SessionState>();
+    Runtime::RuntimeServices services;Runtime::GameContext context{*session,services};
+    auto& player=session->player;
+    App::InitDetail::reset_player_board(player,context.config);
+    for(bool queue:{true,false,true}) {
+        auto& p=player.presentation;
+        p.eventSpinPiece=p.remoteSpinPiece=Piece::Type::from_index(5);
+        p.eventClearLines=p.remoteClearLines=4;
+        p.eventMini=p.eventPerfectClear=p.eventHalfClear=true;
+        p.remoteMini=p.remotePerfectClear=p.remoteHalfClear=true;
+        p.remotePlacementRevision=8;p.remoteAttackBaselineKnown=true;
+        p.spike={24,context.now()};
+        Engine::initialize_board(context,player,queue);
+        const auto view=Presentation::capture_board_view(context.config,player,player.gameplay.playfield.field,{});
+        assert(!view.spinPiece.valid() && !view.clearLines && !view.mini && !view.perfectClear && !view.halfClear && !view.spike);
+        assert(!p.remoteSpinPiece.valid() && !p.remoteClearLines && !p.remoteMini && !p.remotePerfectClear && !p.remoteHalfClear);
+        assert(!p.remotePlacementRevision && !p.remoteAttackBaselineKnown && !p.spike.lastAttackAt);
+    }
 }
 void april_fools_initial_floor() {
     auto session=std::make_unique<Runtime::SessionState>();
@@ -141,7 +163,8 @@ void april_fools_initial_floor() {
 }
 }
 
-int main(){
+int run(int argc,char** argv){
+    new_round_clears_placement_feedback();
     april_fools_initial_floor();
 #ifdef __linux__
     setenv("TERM","xterm",1);
@@ -278,4 +301,6 @@ int main(){
     assert(context.config.disableUndo);
 
     std::cerr<<"init_context_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::init_context_test

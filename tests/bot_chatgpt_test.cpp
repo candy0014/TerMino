@@ -16,7 +16,8 @@
 #include <map>
 #include <tuple>
 
-int main() {
+namespace TetrTests::bot_chatgpt_test {
+int run(int argc,char** argv) {
     assert(Bot_chatgpt::search_budget_ms(-1) == 1);
     assert(Bot_chatgpt::search_budget_ms(0) == 1);
     assert(Bot_chatgpt::search_budget_ms(60) == 20);
@@ -484,8 +485,8 @@ int main() {
     assert(rootTrace.rootGarbageHeight == 10 && rootTrace.rootB2b == player.gameplay.scoring.b2b);
     assert(rootTrace.rootPackets == (std::vector<std::pair<int,double>>{{3,-1},{4,1},{5,-5}}));
     const double originalPressure = Bot_chatgpt::last_diagnostics().digPressure;
-    // Rejected automatic blends stay disabled in the production default.
-    assert(originalPressure == 0);
+    // Visible physical pressure activates the shared capability policy.
+    assert(originalPressure > 0 && originalPressure <= 1);
     // Mode identifiers are not inputs to the posture selection.
     for (int model : {0, 3, 5}) {
         environment.garbageModel = model;
@@ -600,4 +601,6 @@ int main() {
     queryHost();
     assert(Bot_chatgpt::last_diagnostics().incoming==maximum);
     assert(Bot_chatgpt::last_diagnostics().readyIncoming>=0);
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_test

@@ -58,6 +58,12 @@ inline constexpr std::array<Action, kBindableActionCount> kBindableActions = {
     Action::Hold, Action::Retry, Action::OpenSettings, Action::SaveReplay, Action::Undo, Action::Pause
 };
 
+// Internal tokens for a frontend's semantic controls, never persisted as
+// keyboard bindings. Each local player has a separate namespace.
+constexpr int virtual_action_key(std::size_t index,int player=0) noexcept {
+    return 0x10000+player*32+static_cast<int>(index);
+}
+
 class BindingSet {
 public:
     using Map = std::map<int, Action>;
@@ -81,6 +87,11 @@ public:
     }
 
     const Map& entries() const noexcept { return bindings_; }
+    void add_virtual_actions(int player) {
+        if(player<0 || player>1)return;
+        for(std::size_t i=0;i<kBindableActions.size();++i)
+            bindings_[virtual_action_key(i,player)]=kBindableActions[i];
+    }
     bool empty() const noexcept { return bindings_.empty(); }
 
 private:

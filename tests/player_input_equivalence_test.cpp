@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+namespace TetrTests::player_input_equivalence_test {
 namespace {
 
 using Engine::PlayerInputCommand;
@@ -342,4 +343,6 @@ void guideline_horizontal_timing() {
 
 } // namespace
 
-int main(){ run_random_equivalence(); zero_horizontal_input(); guideline_horizontal_timing(); }
+int run(int argc,char** argv){ run_random_equivalence(); zero_horizontal_input(); guideline_horizontal_timing();     return 0;
+}
+} // namespace TetrTests::player_input_equivalence_test

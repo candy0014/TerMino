@@ -12,6 +12,7 @@
 #include <tuple>
 #include <vector>
 
+namespace TetrTests::movement_presentation_test {
 namespace {
 
 struct LegacyState {
@@ -187,4 +188,6 @@ void test_each_cell_settles_before_the_next_shift() {
     }
 }
 } // namespace
-int main(){test_script_random_equivalence();test_script_sequence_with_instant_gravity();test_playback_timing();test_replay_events();test_instant_horizontal_commands();test_each_cell_settles_before_the_next_shift();std::cout<<"movement presentation tests passed\n";}
+int run(int argc,char** argv){test_script_random_equivalence();test_script_sequence_with_instant_gravity();test_playback_timing();test_replay_events();test_instant_horizontal_commands();test_each_cell_settles_before_the_next_shift();std::cout<<"movement presentation tests passed\n";    return 0;
+}
+} // namespace TetrTests::movement_presentation_test

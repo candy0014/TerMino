@@ -151,7 +151,7 @@ std::optional<AutoplayPath> make_autoplay_path(const Runtime::Playfield& field,c
 std::optional<AutoplayPath> search_autoplay_path(const Runtime::Playfield& field,const Piece::Definition& piece,
     MovementState start,Piece::Pose target,Runtime::RotationRecord rotation,const Runtime::HandlingConfig& h,
     const Runtime::MovementRestrictions& r,Runtime::GravityInterval gravity,bool timed,const std::function<bool()>& cancelled,
-    const AutoplaySpinRules& spinRules) {
+    const AutoplaySpinRules& spinRules,int maxExpanded) {
     if(!piece.can_place(start.pose,field) || !piece.can_place(target,field)) return {};
     if(r.disableHardDrop && !gravity.enabled()) return {};
     struct Node {PresentationState state;int parent=-1;char command=0;D cost;int count=0;};
@@ -159,7 +159,9 @@ std::optional<AutoplayPath> search_autoplay_path(const Runtime::Playfield& field
     std::map<Key,Cost> best{{key(nodes.front().state),{0,0}}};
     std::priority_queue<std::tuple<double,int,int>,std::vector<std::tuple<double,int,int>>,std::greater<>> pending;
     pending.emplace(0,0,0);
+    int expanded=0;
     while(!pending.empty()) {
+        if(maxExpanded>0 && ++expanded>maxExpanded)return {};
         const auto [seconds,count,index]=pending.top();pending.pop();const auto current=nodes[index];
         if(best[key(current.state)]!=Cost{seconds,count}) continue;
         if(cancelled && cancelled()) return {};
@@ -186,4 +188,39 @@ std::optional<AutoplayPath> search_autoplay_path(const Runtime::Playfield& field
     }
     return {};
 }
+std::optional<AutoplayPath> repair_autoplay_path(const Runtime::Playfield& field,
+    const Piece::Definition& piece,MovementState start,Piece::Pose& target,
+    Runtime::RotationRecord& rotation,int raised,const Runtime::HandlingConfig& h,
+    const Runtime::MovementRestrictions& r,Runtime::GravityInterval gravity,bool timed,
+    const AutoplaySpinRules& spinRules,std::string_view preferredScript) {
+    auto projected=target.translated(-raised,0);
+    const auto& cells=piece.cells(projected.rotation);
+    const int minimum=-Runtime::kHiddenRowCapacity-std::min_element(cells.begin(),cells.end(),
+        [](auto a,auto b){return a[0]<b[0];})->at(0);
+    while(!piece.can_place(projected,field) && projected.position.row>minimum)--projected.position.row;
+    if(!piece.can_place(projected,field))return {};
+    const auto beforeDrop=projected;
+    while(piece.can_place(projected.translated(1,0),field))++projected.position.row;
+    const auto expectedRotation=beforeDrop==projected?rotation:Runtime::RotationRecord::none();
+    const auto accepts=[&](const std::optional<AutoplayPath>& path) {
+        return path && autoplay_landing_matches(field,piece,path->finalMovement,projected,expectedRotation,spinRules);
+    };
+    auto path=make_autoplay_path(field,piece,start,h,r,gravity,preferredScript,timed);
+    if(!accepts(path)) {
+        // Most repairs are a few lateral/rotation commands and an instantaneous
+        // hard drop. Try these before bounded geometric search (never BOT search).
+        const int turns=(projected.rotation.index()-start.pose.rotation.index()+4)%4;
+        const std::string rotate=turns==1?"X":turns==2?"A":turns==3?"Z":"";
+        const int dx=projected.position.col-start.pose.position.col;
+        const std::string horizontal(std::abs(dx),dx<0?'L':'R');
+        const std::string finish=r.disableHardDrop?"W":"H";
+        for(const auto& script:{rotate+horizontal+finish,horizontal+rotate+finish}) {
+            path=make_autoplay_path(field,piece,start,h,r,gravity,script,timed);if(accepts(path))break;
+        }
+    }
+    if(!accepts(path))path=search_autoplay_path(field,piece,start,projected,expectedRotation,h,r,gravity,timed,{},spinRules,1024);
+    if(!accepts(path))return {};
+    target=projected;rotation=path->finalMovement.lastRotation;return path;
+}
+
 }

@@ -1,16 +1,18 @@
 # 双前端验收与本地候选包
 
 第四阶段以 `cd5b9f47b554de9ba495c7238ae6f01fd5c9afda` 为起点。
-本次范围是本地工程、自动化检查和四组合候选包；用户明确要求不向 GitHub 发行，
+本次范围是本地工程、自动化检查和双平台候选包；用户明确要求不向 GitHub 发行，
 因此不推送提交/标签、不上传产物，也不创建或修改 GitHub Release。
 
 ## 构建与打包
 
 需要 CMake 3.21+、Git、对应 C++ 工具链；打包和检查脚本使用 Python 3.12 或更新版本。
-保持原 `compile.sh` / `compile.ps1` 和终端打包入口。新增统一入口：
+保留原 `compile.sh` / `compile.ps1`。`package.sh`、`package.ps1` 和
+`package.bat -Cmd` 默认构建一个含终端、图形、FT7 和服务器的完整运行包。
+Linux 使用系统 libc／窗口库／驱动，图形依赖捆绑静态构建。统一入口：
 
 ```sh
-python tools/package_frontends.py --preset both-linux --frontend both
+python tools/package_frontends.py --preset both-linux --frontend bundle
 python tools/package_frontends.py --preset terminal-linux --frontend terminal
 python tools/package_frontends.py --preset opengl-linux --frontend opengl
 ```
@@ -21,7 +23,8 @@ MinGW 使用对应的 `*-windows-mingw`。`both` 生成两个独立压缩包。
 `--no-build` 只安装现有程序，不改变编译选项。跨环境安装后，
 `--stage-dir DIR` 可将一个已安装组件归档。
 
-统一打包从 `ClientTerminal` / `ClientOpenGL` 组件复制固定文件清单，
+合包通过 `ClientBundle` 安装固定清单，强制包含两个客户端、FT7、服务器和
+Play／PlayGL／Server 启动脚本。仍支持 `ClientTerminal` / `ClientOpenGL` 分包，
 保留终端、FT7 与可选服务端，并为图形版提供字体、许可证和说明。
 不读取 `TETR_PORTABLE_DATA_DIR`，不复制个人 `.tetr`、成绩或回放。
 空 `.tetr/replay` 目录使用内置初始配置。已有本地数据目录不清理。
@@ -32,8 +35,11 @@ MinGW 使用对应的 `*-windows-mingw`。`both` 生成两个独立压缩包。
 不宣称可运行于任意 Linux 发行版。正式兼容基线使用 Ubuntu 24.04 CI 构建验证。
 
 每包包含 `BUILD.json`、逐文件 SHA256 的 `PACKAGE.json` 和压缩包 SHA256。
-同组四包必须来自同一源码提交；工作区未提交时只允许显式 `--allow-dirty`
-制作本地测试候选包。脚本不会覆盖已有候选包。
+同组两平台合包（或四个独立前端包）必须来自同一源码提交。平台脚本明确使用
+`--allow-dirty` 构建当前工作区的本地候选包，并记录 `source_dirty=true`；不提交源码，
+不把未提交构建标为正式版本。直接使用 Python 工具时仍需自行传入该选项。
+脚本不覆盖已有包。全部设置、图形窗口配置、键位、个人库及记录均不复制；
+不通过清空原 `.tetr` 达到默认包效果。
 
 ## 全键盘与数据检查
 
@@ -45,7 +51,7 @@ MinGW 使用对应的 `*-windows-mingw`。`both` 生成两个独立压缩包。
 | 焦点和双人 | 事件历史、左右修饰、多重绑定、失焦释放和独立玩家输入 | 真键盘、Alt+Tab、窗口切换 |
 | 窗口和 DPI | 缩放绘制、窗口配置边界和原子保存；隐藏窗口多尺寸检查 | 原生 Windows 高 DPI、多显示器与缩放变化 |
 | 联网和回放 | UDP/WSS、房间管理、观战、混合入口、交叉录像和结果回归 | 跨机器 Linux/Windows 混合房间 |
-| 数据保护 | 两端运行目录排他锁、退出后重新获取；隔离目录和默认包审计 | 异常退出和升级备份的现场演练 |
+| 数据保护 | 图形多窗口共享与单配置写入者、终端排他锁；成绩并发保存和默认包审计 | 异常退出和升级备份的现场演练 |
 
 所有图形自动化从创建时隐藏或在离屏显示服务运行，不在用户桌面显示窗口。
 输入法事件注入不等于真实输入法验证，Wine 不等于原生 Windows 验收。
@@ -54,8 +60,10 @@ MinGW 使用对应的 `*-windows-mingw`。`both` 生成两个独立压缩包。
 `.tetr/graphics.ini` 独立保存窗口宽高、最大化、垂直同步和显示帧率上限；
 不改变原玩家配置格式。`--window-size WIDTHxHEIGHT`、`--frame-limit FPS`、
 `--vsync` / `--no-vsync` 提供键盘/命令行入口，规则时钟独立于显示帧率。
-终端和图形客户端启动时获取同一目录的 `.tetr/client.lock`；占用时退出并提示，
-操作系统在进程退出后释放锁，锁文件保留。多开使用不同运行目录。
+图形客户端可共享同一运行目录打开多个窗口，各自独立调整配置；首个窗口持有配置保存权，
+后开的窗口使用临时配置，成绩和录像仍共用。保存操作通过短暂的跨进程锁保护。
+终端继续排他获取 `.tetr/client.lock`，图形客户端获取共享锁；旧终端与图形客户端不同时
+写入该目录。操作系统在退出后释放锁，锁文件保留。`--data-dir DIR` 仍可隔离全部数据。
 
 ## 原生验收状态与发行门槛
 
@@ -84,8 +92,9 @@ MinGW 使用对应的 `*-windows-mingw`。`both` 生成两个独立压缩包。
 | 跨端数据与互斥 | 两平台终端录像进入图形版通过；同目录图形/终端互斥、强制结束后重新获取锁通过 |
 | 原生 Windows / 人工体验 / 远程 CI | 未执行，继续待验 |
 
-本地候选包放在 Git 忽略的 `dist/phase4-local/`，校验报告为该目录下
-`validation.json`；同目录提供四包各自的 SHA256。包版本使用 `local-<源码提交前12位>`，
+当时的本地候选包放在 Git 忽略的 `dist/phase4-local/`，校验报告为该目录下
+`validation.json`；同目录提供四包各自的 SHA256。该批旧产物已于 2026-10-22 清理，
+本节保留历史验证结论，下列检查命令需先重新打包。包版本使用 `local-<源码提交前12位>`，
 每包 `PACKAGE.json` 记录构建平台、编译器、来源、逐文件哈希和实际运行库依赖。
 Linux 包在当前机器构建，不作为 Ubuntu 24.04 正式兼容基线的已验证产物。
 Windows 便携包静态链接 SDL/FreeType 与 C++ 运行库，仍需操作系统 OpenGL 3.3 驱动。
@@ -113,3 +122,14 @@ python tools/check_frontend_acceptance.py docs/acceptance/native.json --commit <
 发行 workflow 只有显式 `workflow_dispatch` 且 `publish=true` 才进入发布步骤，
 还需四包同一干净提交和原生记录通过。版本标签推送仅构建候选包。
 本轮不推送标签，不运行该 workflow，不发布 GitHub Release。
+
+## 2026-10-20 测试程序归并
+
+139 个历史独立测试目标归入 8 个模块套件；CTest 的 168 个名称、参数、超时、环境和资源锁均保留，每项仍单独启动进程。测试程序统一放在 `build/tests`，普通测试构建生成 19 个程序，另有两个图形工具按需构建；本地已清除 `build` 根目录的 155 个旧测试可执行文件。所有检查工具在客户端安装组件之外，构建与单项运行方法见 [维护规则](../CONTRIBUTING.md)。
+
+统一启用 Release 测试断言，修正此前未启用断言的撤销测试中过时的竞速/限时目标夹具；自动播放终端时序回归继续单独链接。没有更改游戏实现、终端功能或数据格式。
+
+- Linux 双端构建和最终完整 CTest：168/168 通过；独立无界面构建：5/5 通过，未引入图形依赖。
+- Linux offscreen/EGL、X11/GLX、Wayland 隐藏绘制线程检查通过；17 项 Python 分发回归及新生成合包的解包/运行审计通过，测试程序未进入客户端包。
+- Windows MinGW 在隔离 Wine 环境中编译公共驱动及两个核心模块，列表和分派运行通过；本轮未完成全量 Windows 或原生设备验证，原生验收状态继续保持待验。
+- 本地 `.tetr` 的 214 个文件大小与 SHA256 一致。独立回退补丁和验证日志保存在忽略目录 `build-migration-backups/test-suites-20261020/`；回退代码后重新构建即可恢复旧测试程序，无须改动个人数据。

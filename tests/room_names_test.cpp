@@ -10,6 +10,7 @@
 #include <memory>
 #include <thread>
 
+namespace TetrTests::room_names_test {
 struct NameClient {
     std::unique_ptr<Runtime::SessionState> session=std::make_unique<Runtime::SessionState>();
     Runtime::RuntimeServices services;Runtime::GameContext context{*session,services};
@@ -17,7 +18,7 @@ struct NameClient {
     NameClient(){context.attach_network(network);context.attach_user_settings(user);}
     ~NameClient(){Network::disconnect_online(network);}
 };
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     using namespace Network;using namespace std::chrono_literals;
     const auto history=std::filesystem::temp_directory_path()/std::filesystem::u8path("termino-房间编码-test-"+
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".txt");
@@ -63,4 +64,6 @@ int main(int argc,char** argv) {
         assert(contents.find(first+'\n')!=std::string::npos && contents.find(second+'\n')!=std::string::npos);
     }
     std::cout<<"room_names_test: four uppercase letters, distinct reservations, private rooms, reuse prevention, explicit defaults and retries passed; restart persistence "<<(server?"passed locally":"verified locally only")<<"\n";
+    return 0;
 }
+} // namespace TetrTests::room_names_test

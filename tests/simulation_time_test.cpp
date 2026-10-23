@@ -33,6 +33,7 @@
 #include <thread>
 #include <vector>
 
+namespace TetrTests::simulation_time_test {
 namespace {
 using Runtime::Duration;
 using Runtime::TimePoint;
@@ -153,6 +154,19 @@ void timer_catchup_and_buffer_age() {
     assert(quick.session.quickPlay.altitude > 0.0);
     assert(quick.session.player.timing.qpGravity.seconds() == 2.0);
     assert(Runtime::current_gravity_interval(quick.context).interval() < Duration::from_seconds(0.6));
+
+    for(bool reverseAllSpin:{false,true}) {
+        Fixture staticGravity(0.4);
+        staticGravity.context.config.garbage.mode=Runtime::GarbageMode::QuickPlay;
+        auto& mods=staticGravity.context.config.quickPlay;
+        if(reverseAllSpin)mods.allSpin=Runtime::AllSpinMode::Reverse;
+        else mods.doubleHole=Runtime::ModifierMode::Reverse;
+        const auto initial=Runtime::current_gravity_interval(staticGravity.context).interval();
+        staticGravity.advance();
+        assert(staticGravity.session.player.timing.qpGravity==TimePoint{});
+        assert(Runtime::current_gravity_interval(staticGravity.context).interval()==initial);
+        assert(staticGravity.session.quickPlay.altitude>0); // Only the gravity ramp is disabled.
+    }
 
     Fixture survival(0.1);
     survival.context.config.garbage.mode = Runtime::GarbageMode::Survival;
@@ -484,7 +498,7 @@ void subject_only_piece_limit() {
 }
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     Render::begin_output_suppression();
     clocks_and_configuration();
     timer_catchup_and_buffer_age();
@@ -504,4 +518,6 @@ int main() {
     actual_piece_loop_alternation(0.0, 0.0, 1.0, 1.0, 3, {1,2,1,2,1});
     actual_piece_loop_alternation(0.0, 1.5, 2.5, 1.5, 6, {1,1,1,2,2,1,1,2,1});
     std::cerr << "simulation_time_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::simulation_time_test

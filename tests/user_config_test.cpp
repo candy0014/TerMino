@@ -13,7 +13,17 @@
 #include <string>
 #include <type_traits>
 
-int main(){
+namespace TetrTests::user_config_test {
+int run(int argc,char** argv){
+    {
+        UserConfig::Settings fx;fx.persistencePath=(std::filesystem::temp_directory_path()/"tetr_effects_settings_test.ini").u8string();
+        fx.effectsIntensity=150;fx.fieldShake=0;fx.particleIntensity=200;fx.landingEffect=123;fx.lineClearEffect=87;fx.hardDropTrail=12;fx.boardBounciness=175;
+        assert(UserConfig::save(fx));
+        UserConfig::Settings restored;UserConfig::load(restored,fx.persistencePath);
+        assert(restored.effectsIntensity==150 && restored.fieldShake==0 && restored.particleIntensity==200);
+        assert(restored.landingEffect==123 && restored.lineClearEffect==87 && restored.hardDropTrail==12 && restored.boardBounciness==175);
+        std::filesystem::remove(std::filesystem::u8path(fx.persistencePath));
+    }
     const auto temporary_path = [](const char* name) {
         return (std::filesystem::temp_directory_path() / std::filesystem::u8path(name)).u8string();
     };
@@ -461,4 +471,6 @@ int main(){
     std::filesystem::remove(std::filesystem::u8path(unicode.keybindingPath));
 
     std::cout<<"user_config_test: OK\n";
+    return 0;
 }
+} // namespace TetrTests::user_config_test

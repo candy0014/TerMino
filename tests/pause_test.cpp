@@ -21,6 +21,7 @@
 #include <thread>
 #include "support/terminal_screen.h"
 
+namespace TetrTests::pause_test {
 namespace {
 struct Fixture {
     App::ApplicationState app;
@@ -209,7 +210,7 @@ void event_timestamps_exclude_only_prior_pause_time() {
     assert(std::abs((f.context.real_time_at(native+std::chrono::seconds(9))-origin).seconds()-4)<1e-9);
 }
 }
-int main() {
+int run(int argc,char** argv) {
     std::ostringstream output;
     auto* previous=std::cout.rdbuf(output.rdbuf());
     paused_undo_and_resume();
@@ -217,4 +218,6 @@ int main() {
     migration_display_and_short_press();
     event_timestamps_exclude_only_prior_pause_time();
     std::cout.rdbuf(previous);
+    return 0;
 }
+} // namespace TetrTests::pause_test

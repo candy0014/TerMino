@@ -11,6 +11,8 @@
 #include "tetr/render/piece_renderer.h"
 #include "tetr/runtime/game_context.h"
 #include "tetr/util/terminal_text.h"
+#include "tetr/rules/spike.h"
+#include "tetr/presentation/context_view.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -100,7 +102,8 @@ void paint_remote(Runtime::GameContext& c,Runtime::PlayerSessionState& current,
     Runtime::PlayerSessionState& previous) {
     using namespace Render;
     auto& field=current.gameplay.playfield;
-    const bool visibilityChanged=synchronize_field_visibility(c,current);
+    const bool visibilityChanged=synchronize_field_visibility(c,current) ||
+        current.timing.completedGameTime.has_value()!=previous.timing.completedGameTime.has_value();
     bool cellsChanged=visibilityChanged;
     for(int row=-Runtime::kDisplayHiddenRows;row<field.visibleHeight;++row)
         for(int col=0;col<field.width;++col)
@@ -145,6 +148,7 @@ void paint_remote(Runtime::GameContext& c,Runtime::PlayerSessionState& current,
     current.presentation.messageObscured=previous.presentation.messageObscured;
     current.presentation.lastMessagePaint=previous.presentation.lastMessagePaint;
     print_message(c,current);
+    if(current.presentation.spike.attack!=previous.presentation.spike.attack)print_spike(c,current);
     if(current.gameplay.scoring.b2b!=previous.gameplay.scoring.b2b) print_b2b(c,current);
     if(current.gameplay.scoring.combo!=previous.gameplay.scoring.combo) print_combo(c,current);
     if(current.presentation.remotePlacementRevision!=previous.presentation.remotePlacementRevision) {
@@ -169,15 +173,19 @@ std::string compact_player_name(std::string_view name,int columns) {
 void initialize_multiplayer_scene(Runtime::GameContext& c) {
     auto& n=Network::network_services(c);auto& s=c.session.roomScene;s={};
     s.enabled=n.multiplayerRoom;s.ownSlot=n.roomPlayerIndex;s.epoch=n.matchEpoch;
+    s.roomInstance=n.roomInstance;
     update_multiplayer_scene(c);
 }
 void update_multiplayer_scene(Runtime::GameContext& c) {
     auto& n=Network::network_services(c);auto& s=c.session.roomScene;
     if(!s.enabled || n.matchEpoch!=s.epoch) return;
     s.finished=n.matchPhase==Network::RoomMatchPhase::Finished;
+    s.started=s.started || n.matchPhase==Network::RoomMatchPhase::Playing || s.finished;
+    s.winnerSlot=n.winnerSlot;s.participants.clear();s.alive.clear();
     std::vector<int> survivors;
     bool spectator=s.spectator,alive=s.selfAlive;
     for(const auto& m:n.roomMembers) {
+        if(m.participating){s.participants.push_back(m.slot);s.alive[m.slot]=m.alive;}
         s.usernames[m.slot]=m.username;s.killers[m.slot]=m.killer;
         if(m.slot==s.ownSlot) {spectator=!m.participating;alive=m.alive;}
         if(!(s.localForfeit && m.slot==s.ownSlot) &&
@@ -188,6 +196,8 @@ void update_multiplayer_scene(Runtime::GameContext& c) {
         auto [it,created]=s.players.try_emplace(slot);
         if(created) {
             auto& p=it->second;p.gameplay.playfield.width=setup.width;p.gameplay.playfield.visibleHeight=setup.visibleHeight;
+            p.presentation.remoteFieldVisibility=n.roomPolicy.forceRules?
+                Presentation::field_visibility(c.config,c.session.player):Runtime::FieldVisibility{};
             p.gameplay.playfield.activeHeight=setup.visibleHeight;p.gameplay.playfield.nextCount=setup.nextCount;
             p.gameplay.playfield.holdEnabled=setup.holdEnabled;p.presentation.blockMaxWidth=setup.blockMaxWidth;
             p.gameplay.scoring.wins=setup.wins;
@@ -195,6 +205,11 @@ void update_multiplayer_scene(Runtime::GameContext& c) {
             p.gameplay.playfield.field.initialize(setup.width,setup.visibleHeight);
         }
         auto& p=it->second;
+        if(const auto v=n.peerFieldVisibility.find(slot);v!=n.peerFieldVisibility.end() &&
+            p.presentation.remoteFieldVisibility!=v->second) {
+            p.presentation.remoteFieldVisibility=v->second;++s.revision;s.lastPaint={};
+        }
+        Rules::expire_spike(p.presentation.spike,c.now());
         if(p.gameplay.playfield.width!=setup.width || p.gameplay.playfield.visibleHeight!=setup.visibleHeight) {
             p.gameplay.playfield.width=setup.width;p.gameplay.playfield.visibleHeight=p.gameplay.playfield.activeHeight=setup.visibleHeight;
             p.gameplay.playfield.field.initialize(setup.width,setup.visibleHeight);++s.revision;s.lastPaint={};
@@ -255,6 +270,17 @@ void cycle_multiplayer_focus(Runtime::GameContext& c) {
         if(s.finalistLayout.back()==s.focusSlot)std::swap(s.finalistLayout.front(),s.finalistLayout.back());
     }
     ++s.revision;s.lastPaint={};draw_multiplayer_scene(c,true);
+}
+void finish_multiplayer_scene(Runtime::GameContext& c,bool aborted) {
+    auto& s=c.session.roomScene;s.finished=true;s.aborted=aborted;if(aborted)s.winnerSlot=-1;
+    const auto freeze=[&](Runtime::PlayerSessionState& p) {
+        if(!p.timing.completedGameTime)p.timing.completedGameTime=p.timing.remoteGameTime?
+            p.timing.remote_elapsed(c.services.clock.now()):Runtime::elapsed_game_time(c.session,c.now())*c.config.timeMultiplier;
+        if(!p.timing.completedRealTime)p.timing.completedRealTime=p.timing.realGameStart?c.real_now()-*p.timing.realGameStart:*p.timing.completedGameTime;
+        p.presentation.activePose.reset();p.presentation.activePieceType.reset();
+    };
+    if(!s.spectator)freeze(c.session.player);for(auto& entry:s.players)freeze(entry.second);
+    ++s.revision;s.lastPaint={};
 }
 void position_multiplayer_scene(Runtime::GameContext& c,Render::TerminalSize size) {
     auto& s=c.session.roomScene;
@@ -367,6 +393,9 @@ void draw_multiplayer_scene(Runtime::GameContext& c,bool force,std::optional<Ren
     Network::BoardViews views;views.remaining=int(s.survivors.size());views.highRate=true;int pixels=0;
     for(int slot:full)if(slot!=s.ownSlot)views.players.push_back({slot,true,0,0,120});
     for(int slot:s.miniSlots) {
+        if(const auto* p=board(c,slot);p && p->presentation.remoteFieldVisibility && p->presentation.remoteFieldVisibility->invisible) {
+            views.players.push_back({slot,true,0,0,30});continue;
+        }
         const auto& g=s.miniLayouts.at(slot);const int rows=std::clamp(g.top+g.height+1-g.ceiling,1,160);
         views.players.push_back({slot,false,g.width,rows,1});pixels+=g.width*rows;
     }
@@ -391,9 +420,9 @@ void draw_multiplayer_scene(Runtime::GameContext& c,bool force,std::optional<Ren
             paint_remote(c,*p,s.paintedPlayers.at(slot));
         }
         std::string result;
-        for(const auto& member:Network::network_services(c).roomMembers) if(member.slot==slot && member.participating) {
-            if(s.finished) result=slot==Network::network_services(c).winnerSlot?"WIN":"LOSE";
-            else if(!member.alive) result="LOSE";
+        if(const auto member=s.alive.find(slot);member!=s.alive.end()) {
+            if(s.finished) result=s.aborted?"STOPPED":slot==s.winnerSlot?"WIN":"LOSE";
+            else if(!member->second) result="LOSE";
         }
         if(force || !s.paintedNames.count(slot) || s.paintedNames[slot]!=s.usernames[slot] || s.paintedResults[slot]!=result) {
             name_under(c,*p,slot,result);s.paintedNames[slot]=s.usernames[slot];
@@ -430,7 +459,8 @@ void draw_multiplayer_scene(Runtime::GameContext& c,bool force,std::optional<Ren
                 return p->gameplay.playfield.visibleHeight+int(std::floor((row-h)*scale));
             };
             std::optional<Network::MiniBoardFrame> miniature;
-            const auto cached=Network::network_services(c).peerMiniBoards.find(small[index]);
+            const bool invisible=p->presentation.remoteFieldVisibility && p->presentation.remoteFieldVisibility->invisible;
+            const auto cached=invisible?Network::network_services(c).peerMiniBoards.end():Network::network_services(c).peerMiniBoards.find(small[index]);
             const bool nameChanged=!s.paintedNames.count(small[index]) || s.paintedNames.at(small[index])!=s.usernames[small[index]];
             if(cached!=Network::network_services(c).peerMiniBoards.end() && !force && !nameChanged &&
                 s.paintedMiniSequences.count(small[index]) && s.paintedMiniSequences.at(small[index])==cached->second.sequence)continue;
@@ -466,7 +496,8 @@ void draw_multiplayer_scene(Runtime::GameContext& c,bool force,std::optional<Ren
                     const int c0=x*p->gameplay.playfield.width/w,c1=std::max(c0+1,(x+1)*p->gameplay.playfield.width/w);
                     if(miniature)cell=miniature->at(miniature->rows+y-h,x);
                     else for(int row=r0;row<r1;++row) for(int col=c0;col<c1;++col) {
-                            const auto candidate=p->gameplay.playfield.field.cell(row,col);if(candidate.occupied()) cell=candidate;
+                            const auto candidate=p->gameplay.playfield.field.cell(row,col);
+                            if(Presentation::board_cell_visible(c.config,*p,row,col,candidate,Presentation::board_elapsed(c,*p)))cell=candidate;
                         }
                     auto& old=previous[(y-first)*w+x];if(!initial && old==cell){flushRun();continue;}old=cell;
                     if(runStart>=0 && runCell!=cell)flushRun();

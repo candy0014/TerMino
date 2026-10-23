@@ -9,6 +9,7 @@
 #include <random>
 #include <tuple>
 
+namespace TetrTests::bot_chatgpt_reachable_holes_test {
 namespace B = Bot_chatgpt;
 using Map = m_tetris::TetrisMap;
 static Map board(const std::vector<unsigned>& rows) {
@@ -25,7 +26,7 @@ static auto physical(const B::Evaluation::Status& s) {
     return std::make_tuple(s.combo, s.b2b, s.garbageHeight, s.incoming, s.readyIncoming, s.risen,
         s.dead, s.previousCleared, s.openerDoubleCancelEnabled, s.placedPieces, s.attack, s.reward, s.pathRisk);
 }
-int main() {
+int run(int argc,char** argv) {
     using Engine = m_tetris::TetrisEngine<rule_tetr_srs_plus::TetrisRule, B::Evaluation, B::Search>;
     Engine owner; assert(owner.prepare(10, 40)); auto* context = owner.context().get();
     B::KeyPieceGeometry paths; paths.init(context);
@@ -231,4 +232,6 @@ int main() {
     assert(newWeakChecked);
     std::cout << "hole cells=" << checked << " fillable=" << reachable << " multi-family=" << multiple
               << " host spin witnesses=" << witnesses << "; side pocket, supply, cache, new keys and residual lids verified\n";
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_reachable_holes_test

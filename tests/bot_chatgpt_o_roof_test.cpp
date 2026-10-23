@@ -11,6 +11,7 @@
 #include <set>
 #include <type_traits>
 
+namespace TetrTests::bot_chatgpt_o_roof_test {
 namespace B = Bot_chatgpt;
 using NativeEngine = m_tetris::TetrisEngine<rule_tetr_srs_plus::TetrisRule, B::Evaluation, B::ORoofSearch>;
 static_assert(std::is_same_v<B::Search::Config,B::ORoofSearch::Config>);
@@ -66,12 +67,13 @@ std::array<int, 4> occupied(const m_tetris::TetrisNode* node) {
     return result;
 }
 
-int main() {
+int run(int argc,char** argv) {
     NativeEngine engine;
     assert(engine.prepare(10, 40));
     const auto* context = engine.context().get();
     B::Search original;
     B::Search::Config originalConfig;
+    originalConfig.legacySourceDescent=true; // Keep this frozen experiment's historical control.
     B::ORoofSearch candidate;
     B::ORoofSearch::Config candidateConfig;
     original.init(context, &originalConfig);
@@ -218,4 +220,6 @@ int main() {
     }
     std::cout << "recovered_O_teacher=" << recovered << " non_O_exact_comparisons=" << nonOComparisons
               << " host_certified_O_landings=" << certified << " added_O_geometry=" << added << '\n';
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_o_roof_test

@@ -57,6 +57,8 @@ public:
 
     virtual const Info& bot_info() const noexcept = 0;
     virtual const std::shared_ptr<m_tetris::TetrisContext>& context() const noexcept = 0;
+    // Terrain only: Quick Play supplies its own exact placement/attack rules.
+    virtual double terrain(const m_tetris::TetrisMap& map) = 0;
     virtual Decision choose(const m_tetris::TetrisMap& map,
                             char current,
                             char hold,

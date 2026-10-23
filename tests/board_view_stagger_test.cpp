@@ -12,6 +12,7 @@
 #include <iostream>
 #include <memory>
 #include <thread>
+namespace TetrTests::board_view_stagger_test {
 using namespace Network;
 using namespace std::chrono_literals;
 struct Player {
@@ -25,7 +26,7 @@ struct Player {
     }
     ~Player(){disconnect_online(network);}
 };
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     const int playerCount=argc>1?std::stoi(argv[1]):10;assert(playerCount>=4 && playerCount<=32);
     const bool steady=argc>2 && std::string(argv[2])=="--steady";
     const int fps=steady?30:6;
@@ -139,4 +140,6 @@ int main(int argc,char** argv) {
         };
         capture(false);capture(true);
     }
+    return 0;
 }
+} // namespace TetrTests::board_view_stagger_test

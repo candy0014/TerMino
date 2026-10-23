@@ -1,0 +1,45 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'io.github.candy0014.termino'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+    ndkVersion '28.2.13676358'
+    defaultConfig {
+        applicationId 'io.github.candy0014.termino'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '0.1-android-preview'
+        ndk { abiFilters 'arm64-v8a', 'x86_64' }
+        externalNativeBuild {
+            cmake {
+                targets 'main'
+                // Keep Bot searches usable in installable debug previews too.
+                cFlags '-O2'
+                cppFlags '-O2'
+                arguments '-DANDROID_STL=c++_shared', '-DBUILD_TESTING=OFF',
+                    '-DTETR_BUILD_TERMINAL=OFF', '-DTETR_BUILD_SERVER=OFF', '-DTETR_BUILD_OPENGL=ON',
+                    '-DTETR_BUNDLED_CURL=ON', '-DTETR_GRAPHICS_BUNDLED_DEPS=ON',
+                    "-DFETCHCONTENT_SOURCE_DIR_TETR_SDL=${rootDir}/../build/android-deps/SDL3-3.4.18",
+                    "-DFETCHCONTENT_SOURCE_DIR_TETR_FREETYPE=${rootDir}/../build/android-deps/freetype-2.14.1"
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path '../../CMakeLists.txt'
+            version '3.22.1'
+            buildStagingDirectory file('../../build/android-gradle-native')
+        }
+    }
+    sourceSets.main {
+        java.srcDirs += '../../build/android-deps/SDL3-3.4.18/android-project/app/src/main/java'
+        assets.srcDirs += '../../resources'
+    }
+    buildTypes {
+        debug { debuggable true }
+        release { minifyEnabled false }
+    }
+    packaging { jniLibs { useLegacyPackaging false } }
+}

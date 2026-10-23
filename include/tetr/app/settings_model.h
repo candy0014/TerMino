@@ -43,12 +43,14 @@ struct SettingItem {
     bool bothReadOnly = false;
     bool allowEmptyText = false;
     bool readOnly = false;
+    bool filePath = false;
 };
 
 enum class NodeKind { Group, Setting, Player, ResetSection, ResetSubtree, ResetGame, Connect, Disconnect, RoomAction, Separator,
+    VirtualControls,
     PresetApply, PresetUndo, PresetClear, PresetCommit, PresetRemove, CopyOtherPlayer,
     MapNew, MapUse, MapEdit, MapDelete, MapDisable, PresetNew, PresetRename, PresetSave, PresetEdit, PresetDelete,
-    ChallengeChange, ChallengeReplay, ChallengeRestore, RecentReplay, ChallengeStart };
+    ChallengeChange, ChallengeReplay, ChallengeRestore, RecentReplay, ChallengeStart, RecentReplayDelete, RecentReplaysClear };
 struct SettingNode {
     std::string key;
     std::string title;

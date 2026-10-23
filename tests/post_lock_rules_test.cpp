@@ -11,6 +11,7 @@
 #include <set>
 #include <vector>
 
+namespace TetrTests::post_lock_rules_test {
 namespace {
 
 
@@ -309,7 +310,7 @@ void test_timed_solid_decay_equivalence() {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     test_qp_equivalence();
     test_history_equivalence();
     test_collapse_equivalence();
@@ -317,3 +318,4 @@ int main() {
     test_timed_solid_decay_equivalence();
     return 0;
 }
+} // namespace TetrTests::post_lock_rules_test

@@ -137,6 +137,8 @@ void apply_map_config(RuntimeConfig& config,const MapDefinition& map) {
         return;
     }
     auto stored=std::make_shared<MapDefinition>(map);
+    if(!config.legacyEventGeometry)
+        for(auto& type:stored->sequence)type=Piece::canonical_event_piece(type);
     if(stored->generator==MapGenerator::CustomSequence && config.mapRotationSystem>=0) {
         const auto system=rotation_system_from_index(config.mapRotationSystem);
         const auto candidates=Piece::types_for_rotation_system(system);

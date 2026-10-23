@@ -6,6 +6,7 @@
 #include "tetr/runtime/game_context.h"
 #include <algorithm>
 #include <set>
+#include <tuple>
 #include <fstream>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -97,11 +98,14 @@ bool delete_map(Runtime::GameContext& context,int id,bool& settingsSaved,const s
     UserConfig::Maps::IdChanges changes;
     const auto mapPath=UserConfig::Maps::default_path();
     if(!UserConfig::Maps::remove(id,mapPath,&changes)) return false;
+    const auto config=mapPath.parent_path()/"config.json";
+    settingsSaved=UserConfig::Maps::remap_saved_profiles(config,changes) && settingsSaved;
     if(remapped) *remapped=changes;
     settingsSaved=UserConfig::Presets::remap_maps(changes) && settingsSaved;
     auto* app=context.app_component();
     std::set<UserConfig::Settings*> owners;
     std::set<std::filesystem::path> savedPaths;
+    std::set<std::tuple<std::filesystem::path,int,std::string>> savedProfiles;
     const auto update=[&](UserConfig::Settings* settings) {
         if(!settings || !owners.insert(settings).second) return;
         const auto before=settings->mapId;
@@ -109,7 +113,9 @@ bool delete_map(Runtime::GameContext& context,int id,bool& settingsSaved,const s
         UserConfig::Maps::remap_selection(*settings,changes);
         if(!settings->presetDefined && !settings->persistencePath.empty()) {
             const auto path=std::filesystem::path(settings->persistencePath).lexically_normal();
-            if(savedPaths.insert(path).second && (before!=settings->mapId || previousPresets!=UserConfig::Presets::encode(settings->presets))) settingsSaved=UserConfig::save(*settings) && settingsSaved;
+            savedPaths.insert(path);
+            if(savedProfiles.emplace(path,settings->persistencePlayer,settings->persistencePlatform).second &&
+                (before!=settings->mapId || previousPresets!=UserConfig::Presets::encode(settings->presets)))settingsSaved=UserConfig::save(*settings) && settingsSaved;
         }
     };
     update(&context.user_settings());

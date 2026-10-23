@@ -4,6 +4,7 @@
 #include <cassert>
 #include <limits>
 
+namespace TetrTests::spike_test {
 namespace {
 
 Runtime::TimePoint at(double seconds) {
@@ -12,7 +13,7 @@ Runtime::TimePoint at(double seconds) {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     Runtime::SpikeDisplayState state;
 
     Rules::add_spike_attack(state, 4, at(10.0));
@@ -49,3 +50,4 @@ int main() {
 
     return 0;
 }
+} // namespace TetrTests::spike_test

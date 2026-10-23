@@ -3,6 +3,7 @@
 
 #include <random>
 #include <vector>
+#include <functional>
 
 #include "tetr/runtime/board_cell.h"
 #include "tetr/runtime/game_modes.h"
@@ -26,7 +27,13 @@ struct GarbageGenerationConfig {
     bool avoidSameColumn = false;
     bool legacyShapeRules = false;
     bool reverseNoHold = false;
+    bool legacyQuickPlayRules = false;
 };
+
+// QP hole ranking, shared by the host and bot forecasts. The callback reads
+// the playable field, excluding the permanent floor.
+std::vector<double> qp_garbage_dig_scores(int width,int firstRow,int bottom,
+    const std::function<Runtime::BoardCell(int,int)>& cell,bool legacyRules=false);
 
 struct GarbageGenerationState {
     std::vector<int> holeOrder;

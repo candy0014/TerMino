@@ -22,6 +22,7 @@
 namespace Runtime { class GameContext; }
 
 namespace Network {
+struct RoomReplayClient;
 inline constexpr auto kConnectedTimeout=std::chrono::seconds(15);
 
 enum class ConnectionState { Disconnected, Connecting, Connected, Full, Failed };
@@ -35,6 +36,7 @@ struct LocalDuplexTransport {
 };
 
 struct NetworkServices {
+    std::shared_ptr<RoomReplayClient> replays;
     // Created only when online multiplayer is selected. Local-versus uses the
     // in-memory transport and therefore needs neither a socket nor a server.
     std::unique_ptr<UdpSocket> socket;
@@ -100,6 +102,9 @@ struct NetworkServices {
     std::size_t pendingResultCursor=0;
     std::chrono::steady_clock::time_point lastResultSend{};
     std::map<int,LobbyPlayerSetup> playerSetups;
+    std::map<int,Runtime::FieldVisibility> peerFieldVisibility;
+    std::string lastFieldVisibility;
+    Runtime::TimePoint lastFieldVisibilitySend{};
     std::deque<PlayerWirePacket> playerInbox;
     std::map<int,RemoteBoardTimeline> peerTimelines;
     std::map<int,BoardStateSnapshot> peerSnapshots;

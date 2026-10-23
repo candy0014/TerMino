@@ -23,6 +23,22 @@ Runtime::BoardCell from_code(int code) {
     return code==8?Runtime::BoardCell::garbage():code==9?Runtime::BoardCell::solid_garbage():
         code==11?Runtime::BoardCell::timed_release():Runtime::BoardCell::timed_solid();
 }
+template<class Sample,class GarbageRow> Runtime::BoardCell sample_region(int r0,int r1,int c0,int c1,Sample sample,GarbageRow garbage_row) {
+    Runtime::BoardCell result;
+    for(int row=r0;row<r1;++row) {
+        const bool garbageRow=garbage_row(row);bool hole=false;Runtime::BoardCell cell,piece;
+        for(int col=c0;col<c1;++col) {
+            const auto next=sample(row,col);
+            if(next.occupied()) {cell=next;if(next.is_piece())piece=next;}
+            else hole=true;
+        }
+        // Preserve a one-cell garbage hole even when several source columns
+        // share one output pixel. Apply this at both sender and relay scales.
+        if(garbageRow && hole && !piece.occupied())result={};
+        else if(cell.occupied())result=cell;
+    }
+    return result;
+}
 template<class Sample> MiniBoardFrame project(int width,int height,int columns,int rows,std::uint64_t sequence,Sample sample) {
     MiniBoardFrame result;result.sequence=sequence;result.logicalWidth=width;result.logicalHeight=height;
     result.columns=std::clamp(columns,1,width*2);
@@ -75,24 +91,26 @@ std::optional<BoardBudget> decode_board_budget(std::string_view wire) {
 }
 MiniBoardFrame capture_mini_board(const Runtime::PlayerSessionState& p,int columns,int rows,std::uint64_t sequence) {
     const auto& f=p.gameplay.playfield;
+    std::vector<bool> garbageRows(f.visibleHeight+Runtime::kDisplayHiddenRows);
+    for(int row=-Runtime::kDisplayHiddenRows;row<f.visibleHeight;++row)for(int col=0;col<f.width;++col)
+        if(f.field.cell(row,col).is_garbage_like()){garbageRows[row+Runtime::kDisplayHiddenRows]=true;break;}
     return project(f.width,f.visibleHeight,columns,rows,sequence,[&](int r0,int r1,int c0,int c1) {
-        Runtime::BoardCell cell;
-        for(int row=std::max(-Runtime::kDisplayHiddenRows,r0);row<std::min(f.visibleHeight,std::max(r0+1,r1));++row)
-            for(int col=c0;col<c1;++col) {const auto next=f.field.cell(row,col);if(next.occupied())cell=next;}
-        return cell;
+        return sample_region(std::max(-Runtime::kDisplayHiddenRows,r0),std::min(f.visibleHeight,std::max(r0+1,r1)),c0,c1,
+            [&](int row,int col){return f.field.cell(row,col);},
+            [&](int row){return garbageRows[row+Runtime::kDisplayHiddenRows];});
     });
 }
 MiniBoardFrame project_mini_board(const MiniBoardFrame& f,int columns,int rows) {
     const double scale=std::max(1.,double(f.logicalWidth*2)/f.columns);
+    std::vector<bool> garbageRows(f.rows);
+    for(int row=0;row<f.rows;++row)for(int col=0;col<f.columns;++col)
+        if(f.at(row,col).is_garbage_like()){garbageRows[row]=true;break;}
     auto result=project(f.logicalWidth,f.logicalHeight,columns,rows,f.sequence,[&](int r0,int r1,int c0,int c1) {
         const int first=f.rows+int(std::floor((r0-f.logicalHeight)/scale));
         const int end=f.rows+int(std::ceil((r1-f.logicalHeight)/scale));
-        Runtime::BoardCell cell;
-        for(int row=std::max(0,first);row<std::min(f.rows,std::max(first+1,end));++row)
-            for(int col=c0*f.columns/f.logicalWidth;col<std::min(f.columns,std::max(c0*f.columns/f.logicalWidth+1,(c1*f.columns+f.logicalWidth-1)/f.logicalWidth));++col) {
-                const auto next=f.at(row,col);if(next.occupied())cell=next;
-            }
-        return cell;
+        return sample_region(std::max(0,first),std::min(f.rows,std::max(first+1,end)),
+            c0*f.columns/f.logicalWidth,std::min(f.columns,std::max(c0*f.columns/f.logicalWidth+1,(c1*f.columns+f.logicalWidth-1)/f.logicalWidth)),
+            [&](int row,int col){return f.at(row,col);},[&](int row){return garbageRows[row];});
     });
     result.clock=f.clock;return result;
 }
@@ -119,7 +137,7 @@ std::optional<std::pair<MiniBoardFrame,bool>> read_mini_header(std::string_view&
     for(auto& field:fields){const auto end=wire.find(';');if(end==std::string_view::npos)return {};field=wire.substr(0,end);wire.remove_prefix(end+1);}
     const auto seq=Util::Text::parse_integer<std::uint64_t>(fields[0]);if(!seq || !*seq)return {};
     int v[5];for(int i=0;i<5;++i){const auto n=Util::Text::parse_integer<int>(fields[i+1]);if(!n)return {};v[i]=*n;}
-    if(v[0]<1 || v[0]>100 || v[1]<1 || v[1]>100 || v[2]<1 || v[2]>v[0]*2 || v[3]<1 || v[3]>160 || v[4]<0 || v[4]>3)return {};
+    if(v[0]<1 || v[0]>100 || v[1]<0 || v[1]>100 || v[2]<1 || v[2]>v[0]*2 || v[3]<1 || v[3]>160 || v[4]<0 || v[4]>3)return {};
     MiniBoardFrame frame{*seq,v[0],v[1],v[2],v[3],{}};
     if(v[4]&2) {
         if(wire.size()<16)return {};double values[2];
@@ -176,6 +194,11 @@ void publish_board_views(Runtime::GameContext& c,const BoardViews& views) {
             const int next=mode(views,slot);
             return !next || (!n.lastBoardViews.empty() && mode(n.boardViews,slot)!=next) || (next==1 && n.peerMiniBoards.count(slot));
         };
+        for(auto& [slot,player]:c.session.roomScene.players)
+            if(mode(n.boardViews,slot)!=mode(views,slot)) {
+                player.presentation.remoteAttackBaselineKnown=false;
+                player.presentation.spike={};
+            }
         // A re-entered full scope needs a fresh anchor, rather than queued
         // motions from before it was hidden or reduced to a thumbnail.
         for(auto it=n.peerTimelines.begin();it!=n.peerTimelines.end();) {
@@ -217,7 +240,7 @@ void send_mini_board_frame(Runtime::GameContext& c,const Runtime::PlayerSessionS
 }
 void send_board_visual_tick(Runtime::GameContext& c) {
     flush_piece_motion_frame(c);
-    auto& n=network_services(c);if(!n.boardBudget || !n.boardSync.enabled || !c.session.roomScene.selfAlive)return;
+    auto& n=network_services(c);if(!n.boardBudget || !n.boardSync.enabled || !c.session.roomScene.selfAlive){send_field_visibility(c);return;}
     const auto now=c.real_now();const auto& p=c.session.player;
     const bool miniDue=n.boardBudget->fps>0 && now-n.lastMiniSample>=Runtime::Duration::from_seconds(1./n.boardBudget->fps);
     if(n.boardBudget->full && (n.forceFullCheckpoint || now-n.boardSync.lastSnapshot>=Runtime::Duration::from_seconds(.5))) {
@@ -226,5 +249,6 @@ void send_board_visual_tick(Runtime::GameContext& c) {
             n.boardSync.lastPlacement?ActivePieceState::locked():ActivePieceState::spawn(),active?std::nullopt:n.boardSync.lastPlacement,true);
         n.forceFullCheckpoint=false;
     } else if(miniDue)send_mini_board_frame(c,p);
+    send_field_visibility(c);
 }
 }

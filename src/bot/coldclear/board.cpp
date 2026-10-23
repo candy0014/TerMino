@@ -98,6 +98,7 @@ std::vector<Move> find_moves(const Input& input, const State& state, int piece,
     const auto& env = input.environment;
     const auto& definition = input.pieces[piece];
     const auto canPlace = [&](Piece::Pose p) { return state.board.can_place(definition, p); };
+    if(!canPlace(start))return {};
     const auto tryRotate = [&](Piece::Pose& p, Runtime::Rotation r, Piece::KickIndex& k) {
         return state.board.try_rotate(definition, p, r, k);
     };
@@ -121,7 +122,9 @@ std::vector<Move> find_moves(const Input& input, const State& state, int piece,
         visited[index] = true;
         queue.push_back(entry);
     };
-    enqueue({{start, Runtime::RotationRecord::none()}, hold ? 1 : 0});
+    Engine::MovementState initial;initial.pose=start;
+    if(instantGravity)Engine::apply_presentation_instant_gravity(initial,canPlace);
+    enqueue({initial, hold ? 1 : 0});
     std::vector<std::pair<char, Engine::MovementScriptCommand>> commands;
     for (char code : Engine::kMovementSearchCommands) {
         const auto command = Engine::decode_movement_script_command(code);

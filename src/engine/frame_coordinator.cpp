@@ -13,6 +13,7 @@
 #include "tetr/network/board_state_codec.h"
 #include "tetr/network/multiplayer_channel.h"
 #include "tetr/network/network_services.h"
+#include "tetr/network/room_replay.h"
 #include "tetr/rules/frame_update.h"
 #include "tetr/replay/playback_clock.h"
 #include "tetr/runtime/game_context.h"
@@ -29,21 +30,21 @@ namespace Engine {
 
 bool synchronize_field_visibility(Runtime::GameContext& context, Runtime::PlayerSessionState& player) {
     const auto elapsed=Presentation::board_elapsed(context,player);
-    const auto& config=context.config.field;
-    const bool flash=config.invisible && config.periodicInvisible && Runtime::periodic_invisible_flash(
-        elapsed,config.invisibilityInterval,config.invisibilityDuration);
+    const auto config=Presentation::field_visibility(context.config,player);
+    const bool flash=config.invisible && config.periodic && Runtime::periodic_invisible_flash(
+        elapsed,config.interval,config.duration);
     bool changed=flash!=player.presentation.invisibleFlash;
     const bool shown=Presentation::active_piece_visible(context.config,player,elapsed);
     changed=changed || shown!=player.presentation.activePieceShown;
     player.presentation.activePieceShown=shown;
-    if(config.invisible && !config.periodicInvisible && config.invisibilityDelay>Runtime::Duration{}) {
+    if(config.invisible && !config.periodic && config.delay>Runtime::Duration{}) {
         const auto previous=player.presentation.visibilityTime;
         const auto& field=player.gameplay.playfield.field;
         changed=changed || elapsed<previous;
         for(int row=-Runtime::kDisplayHiddenRows;row<field.height() && !changed;++row)
             for(int column=0;column<field.width();++column) {
                 if(!field.cell(row,column).is_piece()) continue;
-                const auto deadline=field.cell_lock_time(row,column)+config.invisibilityDelay;
+                const auto deadline=field.cell_lock_time(row,column)+config.delay;
                 if(previous<deadline && deadline<=elapsed) {changed=true;break;}
             }
     }
@@ -156,6 +157,8 @@ Rules::PlayResult run_frame(Runtime::GameContext& context,Runtime::Playfield& fi
     Rules::advance_frame_after_presentation(frameState,frameConfig,dtime);
     store_frame_rule_state(player,frameState,context);
     player.timing.frameUpdate=context.now();
+    Network::record_room_replay_board(context,player,player.presentation.activePose?
+        Network::ActivePieceState::active(*player.presentation.activePose):Network::ActivePieceState::locked());
     const auto pollNow=context.real_now();
     const auto pollInterval=Network::multiplayer_frame_poll_interval(context);
     if(pollNetwork && context.session.roomScene.enabled && Network::hybrid_board_sync_enabled(context) &&

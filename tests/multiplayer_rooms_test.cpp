@@ -25,6 +25,7 @@
 #include <atomic>
 #include <mutex>
 
+namespace TetrTests::multiplayer_rooms_test {
 namespace {std::recursive_mutex roomRenderMutex;}
 
 struct Member {
@@ -52,7 +53,7 @@ struct RoomOutputCapture : std::streambuf {
     }
 };
 }
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     using namespace Network;using namespace std::chrono_literals;
     std::unique_ptr<RelayServer> server;
     if(argc<2) {server=std::make_unique<RelayServer>(903);server->bind(3005);}
@@ -403,4 +404,6 @@ int main(int argc,char** argv) {
     assert(a.network.roomMembers[3].role==PlayerRole::Offline && !a.network.roomMembers[3].participating);
     request(a,RoomOperation::CancelMatch);
     std::cout<<"multiplayer rooms passed\n";
+    return 0;
 }
+} // namespace TetrTests::multiplayer_rooms_test

@@ -6,7 +6,8 @@
 #include <chrono>
 #include <string>
 
-int main() {
+namespace TetrTests::network_wait_test {
+int run(int argc,char** argv) {
     assert(Network::UdpSocket::resolve_ipv4("127.0.0.1")=="127.0.0.1");
     assert(Network::UdpSocket::resolve_ipv4("localhost")=="127.0.0.1");
     const auto defaultAddress=Network::UdpSocket::resolve_address("127.0.0.1",3000);
@@ -85,4 +86,6 @@ int main() {
     const auto datagram=receiver.receive_for(std::chrono::milliseconds(500));
     assert(datagram);
     assert(datagram->data==payload);
+    return 0;
 }
+} // namespace TetrTests::network_wait_test

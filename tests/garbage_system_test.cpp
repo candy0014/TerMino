@@ -15,6 +15,7 @@
 #include <random>
 #include <vector>
 
+namespace TetrTests::garbage_system_test {
 namespace {
 
 std::vector<int> legacy_cells(const std::vector<Runtime::BoardCell>& cells) {
@@ -465,7 +466,7 @@ void test_oversized_buffer_display() {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     test_oversized_buffer_display();
     assert(Rules::make_garbage_packet(std::numeric_limits<int>::max(),1000,
         Runtime::TimePoint{},false,Runtime::Duration{}).line_count()==std::numeric_limits<int>::max());
@@ -480,3 +481,4 @@ int main() {
     std::cout << "garbage system tests passed\n";
     return 0;
 }
+} // namespace TetrTests::garbage_system_test

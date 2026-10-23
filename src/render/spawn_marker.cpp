@@ -61,7 +61,9 @@ void refresh_spawn_marker(const Runtime::GameContext& context,Runtime::PlayerSes
                 pose=Piece::fit_spawn_inside_walls(pose,entry.shapes[pose.rotation.index()],field.width);
             for (const auto& offset:entry.shapes[pose.rotation.index()]) {
                 const int row=pose.position.row+offset[0],column=pose.position.col+offset[1];
-                if (row < -Runtime::kDisplayHiddenRows || row>=field.visibleHeight || column<0 || column>=field.width)
+                // Retain the actual semantic pose for all frontend views;
+                // terminal repaint clipping is applied in the loop below.
+                if (row < -Runtime::kHiddenRowCapacity || row>=field.visibleHeight || column<0 || column>=field.width)
                     continue;
                 p.spawnMarkerCells.push_back({row,column});
                 if (!contains(affected,row,column)) affected.push_back({row,column});

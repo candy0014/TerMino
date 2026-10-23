@@ -29,6 +29,7 @@
 #include <string_view>
 #include <utility>
 
+namespace TetrTests::snowball_test {
 namespace {
 using Runtime::ModifierMode;
 
@@ -860,7 +861,7 @@ void snowball_altitude_stays_relative_to_layout() {
 }
 }
 
-int main() {
+int run(int argc,char** argv) {
     Capture output;
     combinations_start_empty(); growth_preserves_state_and_stops();
     solid_and_countdown_rows_remain_barriers(); wide_pieces_and_clutch();
@@ -873,4 +874,6 @@ int main() {
     altitude_preserves_small_board_panels();
     snowball_altitude_stays_relative_to_layout();
     std::cerr << "snowball: OK\n";
+    return 0;
 }
+} // namespace TetrTests::snowball_test

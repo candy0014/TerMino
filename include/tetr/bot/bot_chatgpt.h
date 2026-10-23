@@ -4,9 +4,11 @@
 #include "tetr/bot/environment.h"
 #include "tetr/runtime/player_session_state.h"
 #include "tetr/runtime/playfield.h"
+#include "tetr/runtime/gravity.h"
 #include <vector>
 #include <array>
 #include <utility>
+#include <optional>
 #include "tetr/autoplay/strategy.h"
 
 namespace Bot_chatgpt {
@@ -17,6 +19,7 @@ struct Diagnostics {
     int projectedAttack = 0;
     double value = 0;
     double searchMilliseconds = 0;
+    int searchWidth = 0, peakFrontier = 0, evaluated = 0;
     double digPressure = 0; // Visible-state blend: 0 firepower, 1 fast downstack.
     double forecastStepSeconds = 0;
     bool openerDoubleCancelEnabled = false;
@@ -36,6 +39,11 @@ struct Diagnostics {
 };
 Diagnostics last_diagnostics();
 std::vector<Autoplay::PlacementCandidate> last_candidates();
+// Exact optional geometry used by rule search; unsupported capabilities ask
+// the caller to use the complete shared movement graph.
+std::optional<std::vector<Autoplay::PlacementCandidate>> enumerate_placements(
+    const Bot::Environment& environment,const Runtime::Playfield& field,int activeHeight,
+    Piece::Type type,Piece::Pose start,Runtime::GravityInterval gravity);
 bool init(const Bot::Environment& environment);
 Autoplay::Availability availability(const Bot::Environment& environment);
 int getpos(const Bot::Environment& environment, const Runtime::PlayerSessionState& player,

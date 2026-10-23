@@ -31,12 +31,83 @@ void MapEditorState::remember() {
 void MapEditorState::resize(int width,int height) {
     width=std::clamp(width,4,100);height=std::clamp(height,2,100);
     if(width==map.width && height==map.height) return;
+    fieldViewport.reset();
     remember();const int bottom=map.height-1-row;Runtime::resize_map(map,width,height);
     row=std::clamp(height-1-bottom,0,height-1);column=std::min(column,width-1);
 }
 void MapEditorState::paint(char symbol) {
+    end_stroke();
     if(std::string(" GIJLOSTZ").find(symbol)==std::string::npos) return;
     brush=symbol;if(map.rows[row][column]==symbol) return;remember();map.rows[row][column]=symbol;
+}
+void MapEditorState::end_stroke(){strokeLast_.reset();strokeRemembered_=false;}
+void MapEditorState::paint_to(int targetRow,int targetColumn,bool continuation) {
+    if(targetRow<0 || targetRow>=map.height || targetColumn<0 || targetColumn>=map.width)return;
+    if(!continuation)end_stroke();
+    auto from=strokeLast_.value_or(std::pair{targetRow,targetColumn});
+    int y=from.first,x=from.second;
+    const int dx=std::abs(targetColumn-x),sx=x<targetColumn?1:-1;
+    const int dy=-std::abs(targetRow-y),sy=y<targetRow?1:-1;int error=dx+dy;
+    for(;;) {
+        if(map.rows[y][x]!=brush) {
+            if(!strokeRemembered_){remember();strokeRemembered_=true;}
+            map.rows[y][x]=brush;
+        }
+        if(x==targetColumn && y==targetRow)break;
+        const int twice=2*error;
+        if(twice>=dy){error+=dy;x+=sx;}
+        if(twice<=dx){error+=dx;y+=sy;}
+    }
+    row=targetRow;column=targetColumn;strokeLast_=std::pair{row,column};
+}
+bool apply_map_editor_command(MapEditorState& state,const Frontend::UiCommand& command,int columns,int rows) {
+    using Kind=Frontend::UiCommandKind;
+    if(state.optionsOpen || state.exitPrompt)return false;
+    if(command.kind!=Kind::MapPaint)state.end_stroke();
+    switch(command.kind) {
+    case Kind::MapBrush:
+        if(state.sequenceFocus || command.index>=9)return false;
+        state.brush=" GIJLOSTZ"[command.index];return true;
+    case Kind::MapPaint:
+        if(state.sequenceFocus)return false;
+        if(!state.fieldViewport) {
+            const int rows=std::min(22,state.map.height),columns=std::min(26,state.map.width);
+            state.fieldViewport=std::pair{std::clamp(state.row-rows/2,0,state.map.height-rows),std::clamp(state.column-columns/2,0,state.map.width-columns)};
+        }
+        state.paint_to(command.row,command.column,command.alternate);return true;
+    case Kind::MapEndStroke:return true;
+    case Kind::MapTab:
+        if(command.index>=2)return false;
+        state.sequenceFocus=command.index!=0;return true;
+    case Kind::MapCaret:
+        if(!state.sequenceFocus || command.index>state.map.sequence.size())return false;
+        state.caret=command.index;
+        state.detailPiece=state.map.sequence.empty()?std::optional<Piece::Type>{}:state.map.sequence[std::min(state.caret,state.map.sequence.size()-1)];return true;
+    case Kind::MapCandidate: {
+        if(!state.sequenceFocus || state.map.generator!=Runtime::MapGenerator::CustomSequence)return false;
+        const auto candidates=map_browser_pieces(state.map.rotationSystem,state.query);
+        if(command.index>=candidates.size())return false;
+        state.candidate=command.index;state.detailPiece.reset();
+        state.insert(candidates[state.candidate]);state.sequenceScroll.reset();
+        return true;
+    }
+    case Kind::MapScroll: {
+        if(!state.sequenceFocus || state.map.generator!=Runtime::MapGenerator::CustomSequence || command.index>1)return false;
+        const auto scroll=[&](std::optional<std::size_t>& offset,std::size_t current,std::size_t count,std::size_t page,int step) {
+            const auto maximum=count>page?((count-page+step-1)/step)*step:0;
+            offset=static_cast<std::size_t>(std::clamp(static_cast<long long>(std::min(offset.value_or(current),maximum))+static_cast<long long>(command.delta)*step,0LL,static_cast<long long>(maximum)));
+        };
+        if(command.index==0) {
+            const auto first=state.caret>12?(state.caret-12)/2*2:0;
+            scroll(state.sequenceScroll,first,state.map.sequence.size()+1,Frontend::kMapSequenceColumns*Frontend::kMapSequenceRows,Frontend::kMapSequenceColumns);
+        } else {
+            const auto page=std::max(1,columns*rows);
+            scroll(state.candidateScroll,state.candidate/page*page,map_browser_pieces(state.map.rotationSystem,state.query).size(),page,std::max(1,columns));
+        }
+        return true;
+    }
+    default:return false;
+    }
 }
 void MapEditorState::move(int rowDelta,int columnDelta,std::optional<char> heldColor) {
     if(heldColor) paint(*heldColor);
@@ -51,10 +122,12 @@ void MapEditorState::move(int rowDelta,int columnDelta,std::optional<char> heldC
     step(row,rowDelta,map.height);step(column,columnDelta,map.width);
 }
 void MapEditorState::insert(Piece::Type piece) {
+    sequenceScroll.reset();
     if(!piece.valid() || static_cast<std::size_t>(piece.index())>=Piece::catalog().size() || map.sequence.size()>=100000) return;
     remember();map.sequence.insert(map.sequence.begin()+static_cast<std::ptrdiff_t>(caret),piece);++caret;detailPiece=piece;
 }
 void MapEditorState::erase(bool backwards) {
+    sequenceScroll.reset();
     if((backwards && caret==0) || (!backwards && caret>=map.sequence.size())) return;
     remember();if(backwards) --caret;map.sequence.erase(map.sequence.begin()+static_cast<std::ptrdiff_t>(caret));
     detailPiece=map.sequence.empty() ? std::optional<Piece::Type>{} : map.sequence[std::min(caret,map.sequence.size()-1)];
@@ -66,11 +139,13 @@ void MapEditorState::change_rotation(Runtime::RotationSystem system) {if(map.rot
 void MapEditorState::change_floor(int floor) {floor=std::clamp(floor,1,10);if(map.foolFloor!=floor) {remember();map.foolFloor=floor;}}
 void MapEditorState::change_goal(Runtime::MapGoal goal) {if(map.goal!=goal) {remember();map.goal=goal;}}
 bool MapEditorState::undo() {
+    end_stroke();sequenceScroll.reset();candidateScroll.reset();
     if(undoHistory.empty()) return false;
     redoHistory.push_back(map);const auto id=map.id;const auto name=map.name;map=std::move(undoHistory.back());undoHistory.pop_back();map.id=id;map.name=name;
     row=std::min(row,map.height-1);column=std::min(column,map.width-1);caret=std::min(caret,map.sequence.size());detailPiece.reset();return true;
 }
 bool MapEditorState::redo() {
+    end_stroke();sequenceScroll.reset();candidateScroll.reset();
     if(redoHistory.empty()) return false;
     undoHistory.push_back(map);const auto id=map.id;const auto name=map.name;map=std::move(redoHistory.back());redoHistory.pop_back();map.id=id;map.name=name;
     row=std::min(row,map.height-1);column=std::min(column,map.width-1);caret=std::min(caret,map.sequence.size());detailPiece.reset();return true;
@@ -341,6 +416,12 @@ struct EditorView {
             canvas.box(top,2,width,height,text("Unsaved changes","尚未保存的修改"),orange,plain.foreground,plain.background);
             if(height) canvas.write(top+1,4,text("Save before exiting?","退出前是否保存？"),width,orange,plain.background);
             const std::array<std::string,3> choices={text("Save and exit","保存退出"),text("Discard and exit","不保存退出"),text("Keep editing","不退出")};
+            canvas.metadata={Frontend::UiKind::Choices,"map-editor-exit",text("Unsaved changes","尚未保存的修改")};
+            canvas.metadata.chinese=UiText::language()!=UiText::Language::English;
+            canvas.metadata.hint=text("Save before exiting?","退出前是否保存？");
+            canvas.metadata.notice=message;canvas.metadata.selected=state.exitChoice;
+            for(int i=0;i<3;++i)canvas.metadata.entries.push_back({"exit-"+std::to_string(i),choices[i]});
+            canvas.metadata.shortcuts={text("Arrows Select   Enter Apply   Esc Keep editing","方向键选择  Enter 确认  Esc 不退出")};
             const int slots=std::max(0,height-2),first=std::clamp(state.exitChoice-slots+1,0,std::max(0,3-slots));
             for(int i=first;i<3 && i<first+slots;++i) line(top+3+i-first,4,(i==state.exitChoice ? "> " : "  ")+choices[i],width,i==state.exitChoice);
             if(!message.empty()) canvas.write(rows-insets.bottom-2,2,message,columns-insets.left-insets.right,orange,plain.background);
@@ -360,6 +441,48 @@ struct EditorView {
         const auto& map=state.map;
         begin(text("MAP EDITOR","地图编辑")+std::string(" / ")+(state.sequenceFocus ? text("SEQUENCE","块序") : text("FIELD","版面"))+" / "+
             (map.name.empty() ? text("New map","新建地图") : map.name)+(map.id ? " #"+std::to_string(map.id) : "")+(map!=baseline ? " *" : ""));
+        if(Frontend::ui_surface_active()) {
+            auto& metadata=canvas.metadata;
+            metadata.chinese=UiText::language()!=UiText::Language::English;
+            metadata.notice=message;
+            metadata.shortcuts={state.sequenceFocus ? text("Arrows Select   Shift+Left/Right Position   Enter Insert","方向键选块  Shift+左右定位  Enter 插入") : text("Arrows Move   Hold 0–8 + arrows to paint   Enter Brush","方向键移动  按住 0～8 + 方向键涂色  Enter 使用当前颜色"),
+                text("S Save   P Options   Tab Field / Sequence   Ctrl+Z / Ctrl+Y Undo / Redo","S 保存  P 设置  Tab 版面 / 块序  Ctrl+Z / Ctrl+Y 撤销 / 重做"),
+                state.sequenceFocus ? text("Del/Backspace Remove   / Search   Esc Exit","Del/退格删除  / 检索  Esc 退出") : text("Esc Exit","Esc 退出")};
+            if(state.sequenceFocus)metadata.shortcuts[0]+=text("   Click Insert   Wheel Scroll","   单击插入  滚轮滚动");
+            metadata.editor.emplace();auto& model=*metadata.editor;
+            model.field.width=map.width;model.field.height=map.height;model.field.squareStyle=context.config.display.squareStyle;
+            for(const auto& row:map.rows)for(const char symbol:row) {
+                const auto cell=Runtime::map_cell(symbol);model.field.colors.push_back(cell.empty_cell()?-1:cell.color_id());
+            }
+            model.row=state.row;model.column=state.column;
+            model.fieldRows=std::min(22,map.height);model.fieldColumns=std::min(26,map.width);
+            model.fieldFirstRow=std::clamp(state.fieldViewport?state.fieldViewport->first:state.row-model.fieldRows/2,0,map.height-model.fieldRows);
+            model.fieldFirstColumn=std::clamp(state.fieldViewport?state.fieldViewport->second:state.column-model.fieldColumns/2,0,map.width-model.fieldColumns);
+            model.brush=state.brush==' '?-1:Runtime::map_cell(state.brush).color_id();
+            model.sequenceFocus=state.sequenceFocus;model.generated=map.generator==Runtime::MapGenerator::RotationSystem;
+            model.dirty=map!=baseline;model.caret=state.caret;model.name=map.name;model.goal=goal_name(map.goal);
+            model.system=system_name(map.rotationSystem);model.floor=map.foolFloor;model.query=state.query;
+            const auto project=[](Piece::Type type) {
+                Frontend::UiPiecePreview piece;const auto info=Piece::metadata(type);
+                piece.name=std::string(info.name);piece.system=system_name(info.rotationSystem);piece.color=info.colorId;
+                for(const auto& cell:Piece::preview_cells(type))piece.cells.push_back({cell[0],cell[1]});
+                return piece;
+            };
+            constexpr auto sequencePage=Frontend::kMapSequenceColumns*Frontend::kMapSequenceRows;
+            model.sequenceSize=map.sequence.size();
+            const auto first=state.caret>sequencePage/2?(state.caret-sequencePage/2)/Frontend::kMapSequenceColumns*Frontend::kMapSequenceColumns:0;
+            const auto last=map.sequence.size()+1>sequencePage?(map.sequence.size()+1-sequencePage+1)/2*2:0;
+            model.sequenceFirst=std::min(state.sequenceScroll.value_or(first),last);
+            for(auto i=model.sequenceFirst;i<map.sequence.size() && i<model.sequenceFirst+sequencePage;++i)model.sequence.push_back(project(map.sequence[i]));
+            const auto candidates=map_browser_pieces(map.rotationSystem,state.query);
+            for(const auto type:candidates)model.candidates.push_back(project(type));
+            model.candidate=candidates.empty()?0:std::min(state.candidate,candidates.size()-1);
+            const auto layout=candidates_layout(state);model.candidateColumns=layout.columns;model.candidateRows=layout.lines;
+            const auto page=std::max(1,layout.columns*layout.lines);
+            const auto maximum=candidates.size()>static_cast<std::size_t>(page)?(candidates.size()-page+layout.columns-1)/layout.columns*layout.columns:0;
+            model.candidateFirst=std::min(state.candidateScroll.value_or(model.candidate/page*page),maximum);
+            if(const auto piece=selected_piece(state))model.detail=project(*piece);
+        }
         // For very small terminals reserve the footer and clip all content.
         if(rows>=10) {
             if(!state.sequenceFocus)line(2,2,text("Hold 0–8 + arrows to paint","按住 0～8 + 方向键连续涂色"));
@@ -381,6 +504,8 @@ std::vector<Piece::Type> map_browser_pieces(Runtime::RotationSystem system,const
     std::vector<Piece::Type> result;
     for(const auto& entry:Piece::catalog()) {
         if(Runtime::standard_rotation_system(entry.metadata.rotationSystem) && !entry.metadata.tetrioRotation) continue;
+        if(Piece::event_rotation_system(entry.metadata.rotationSystem) && !entry.metadata.tetrioRotation &&
+            std::find(words.begin(),words.end(),"#"+std::to_string(entry.type.index()))==words.end())continue;
         const auto haystack=lower(system_name(entry.metadata.rotationSystem)+" "+std::string(entry.metadata.name)+" #"+std::to_string(entry.type.index()));
         if(std::all_of(words.begin(),words.end(),[&](const auto& token){
             if(token.size()==1 && std::string("ijlostz").find(token.front())!=std::string::npos) {
@@ -399,6 +524,11 @@ std::string read_text(Runtime::GameContext& context,EditorView& view,const std::
         const int width=std::max(1,view.columns-4);
         const auto scroll=caretColumns>=static_cast<std::size_t>(width) ? caretColumns-width+1 : 0;
         view.canvas.begin_update();view.line(view.rows-3,2,title);
+        view.canvas.metadata={Frontend::UiKind::Text,"map-editor-search",title};
+        view.canvas.metadata.chinese=UiText::language()!=UiText::Language::English;
+        view.canvas.metadata.input=draft;view.canvas.metadata.inputCaret=caret;
+        view.canvas.metadata.hint=text("Search by piece name or rotation system. Leave blank to show the current library.","按方块名称或旋转系统检索；留空显示当前方块库。");
+        view.canvas.metadata.shortcuts={text("Enter Confirm   Esc Cancel   Blank Use default","Enter 确认  Esc 取消  留空使用默认值")};
         view.line(view.rows-2,2,Util::TerminalText::slice(draft,scroll,width),width);
         view.line(view.rows-1,2,text("Enter Confirm   Esc Cancel   Blank Use default","Enter 确认  Esc 取消  留空使用默认值"));
         view.canvas.present({{view.rows-2,2+static_cast<int>(caretColumns-scroll)}},false);
@@ -416,6 +546,10 @@ bool edit_editor_option(Runtime::GameContext& context,MapEditorState& state,Edit
         auto selected=Model::selected_choice(item);view.print_choices(item,selected,"EDITOR OPTIONS");NavigationInput input(context);
         bool saveWasDown=context.input_services().key_down(letter('S'));
         for(;;) {
+            const auto command=Frontend::poll_ui_command();
+            if(command && command->ancestor) {state.option=static_cast<int>(command->index);return true;}
+            if(command && command->kind==Frontend::UiCommandKind::Back)return true;
+            if(command)selected=command->index;
             const bool saveDown=context.input_services().key_down(letter('S'));
             if(save && saveDown && !saveWasDown) {
                 const bool saved=save();view.print_choices(item,selected,"EDITOR OPTIONS");
@@ -429,7 +563,7 @@ bool edit_editor_option(Runtime::GameContext& context,MapEditorState& state,Edit
             if(input.update(NavigationKey::PageUp,true)) selected=0;
             if(input.update(NavigationKey::PageDown,true)) selected=item.choice.values.size()-1;
             if(previous!=selected || view.terminal_size_changed()) view.print_choices(item,selected,"EDITOR OPTIONS");
-            if(input.update(NavigationKey::Confirm,false) || input.update(NavigationKey::Right,false)) {
+            if(command || input.update(NavigationKey::Confirm,false) || input.update(NavigationKey::Right,false)) {
                 state.change_rotation(Runtime::rotation_system_from_index(item.choice.values[selected]));state.query.clear();state.candidate=0;state.detailPiece.reset();return true;
             }
             context.services.clock.sleep_for(Runtime::Duration::from_seconds(.001));
@@ -438,7 +572,12 @@ bool edit_editor_option(Runtime::GameContext& context,MapEditorState& state,Edit
     std::string value;std::size_t caret=0;
     const auto redraw=[&](const std::string& next,std::size_t at) {value=next;caret=at;view.print_scalar_input(item,"EDITOR OPTIONS",next,at);};
     redraw({},0);bool cancelled=false;
-    const auto entered=read_scalar_text(context,[&] {if(view.terminal_size_changed()) redraw(value,caret);},redraw,&cancelled);
+    std::string entered;
+    try {
+        entered=read_scalar_text(context,[&] {
+            if(view.terminal_size_changed())redraw(value,caret);
+        },redraw,&cancelled);
+    } catch(MenuJump jump) {state.option=static_cast<int>(jump.index);return true;}
     const bool failed=std::cin.fail();if(failed) std::cin.clear();
     if(cancelled || failed || entered.empty()) return true;
     if(option==RenameMap) {
@@ -496,10 +635,25 @@ bool run_map_editor(Runtime::GameContext& context,Runtime::MapDefinition definit
     view.draw(state,baseline,message);
     for(;;) {
         edges.update();
+        const auto command=Frontend::poll_ui_command();
         bool redraw=false;
+        if(command) {
+            const auto layout=view.candidates_layout(state);
+            if(apply_map_editor_command(state,*command,layout.columns,layout.lines)) {
+                heldDigit=-1;message.clear();redraw=true;
+            }
+        }
+        if(command && command->kind==Frontend::UiCommandKind::Activate) {
+            if(state.exitPrompt)state.exitChoice=static_cast<int>(command->index);
+            else if(state.optionsOpen)state.option=static_cast<int>(command->index);
+        }
         const bool up=input.update(K::Up,true),down=input.update(K::Down,true),left=input.update(K::Left,true),right=input.update(K::Right,true);
-        const bool back=input.update(K::Back,false),enter=input.update(K::Confirm,false),tab=input.update(K::Tab,false);
+        const bool back=input.update(K::Back,false) || (command && command->kind==Frontend::UiCommandKind::Back),
+            enter=input.update(K::Confirm,false) || (command && command->kind==Frontend::UiCommandKind::Activate),tab=input.update(K::Tab,false);
         const bool pageUp=input.update(K::PageUp,true),pageDown=input.update(K::PageDown,true);
+        if(up || down || left || right || tab || pageUp || pageDown) {
+            state.end_stroke();state.sequenceScroll.reset();state.candidateScroll.reset();state.fieldViewport.reset();
+        }
         const bool shift=context.input_services().key_down(special(10)) || context.input_services().key_down(special(11));
         const bool ctrl=context.input_services().key_down(special(12)) || context.input_services().key_down(special(13));
         bool savePressed=edges.pressed(letter('S'));

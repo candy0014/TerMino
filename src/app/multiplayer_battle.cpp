@@ -1,4 +1,5 @@
 #include "multiplayer_battle.h"
+#include "online_replay.h"
 #include "settings_navigation.h"
 #include "terminal_canvas.h"
 #include "post_game_statistics.h"
@@ -106,6 +107,21 @@ void paint_room_waiting(Runtime::GameContext& c,TerminalCanvas& surface,Render::
     for(const auto& m:n.roomMembers) if(m.role==Network::PlayerRole::Battle) {++battles;if(n.matchPhase==Network::RoomMatchPhase::Preparing && m.ready)++ready;}
     surface.columnsLimit=std::max(0,size.columns-insets.right);surface.rowsLimit=size.rows;surface.begin_frame();
     surface.metadata={Frontend::UiKind::Lobby,"room-waiting",n.room.name};
+    if(Frontend::ui_surface_active()) {
+        auto& metadata=surface.metadata;
+        metadata.chinese=UiText::language()!=UiText::Language::English;
+        metadata.hint=tr(configuring?"Preparing player configuration...":"Waiting for the host to start the match...");
+        metadata.notice=tr(ready<2?"Need two ready players":"Waiting for host confirmation.");
+        metadata.shortcuts={"PgUp/PgDn "+tr("Room users"),
+            UiText::binding_label(c.user_settings(),9)+" "+tr("Settings")+"   "+UiText::binding_label(c.user_settings(),8)+" "+tr("Restart")};
+        if(controls)metadata.shortcuts[0]+="   "+tr("Enter: Start match   Ctrl+Shift+F12: End current match");
+        metadata.lobby.emplace();auto& model=*metadata.lobby;
+        model.offset=offset;model.pageSize=page;model.ready=ready;model.battles=battles;
+        model.players=n.room.players;model.capacity=n.room.capacity;model.canStart=controls;model.startEnabled=ready>=2;
+        for(const auto& member:n.roomMembers)model.members.push_back({member.username,
+            tr(member.role==Network::PlayerRole::Offline?"Offline":member.role==Network::PlayerRole::Spectator?"Spectator":"Battle"),
+            member.host,member.role==Network::PlayerRole::Battle && n.matchPhase==Network::RoomMatchPhase::Preparing && member.ready});
+    }
     const auto line=[&](int row,const std::string& label,TerminalCanvas::Color color) {
         surface.write(row,left,label,std::max(1,size.columns-left-insets.right),color,text.background);
     };
@@ -249,7 +265,10 @@ void watch_room_match(Runtime::GameContext& c,bool localLost) {
             } else Engine::poll_multiplayer_scene(c,false);
         }
         const bool nextMatch=n.matchEpoch!=epoch;
-        if(nextMatch && !c.session.roomScene.finished) return;
+        if(nextMatch && !c.session.roomScene.finished) {
+            if(!c.session.roomScene.started)return;
+            Engine::finish_multiplayer_scene(c,true);
+        }
         if(n.connection!=Network::ConnectionState::Connected) throw Network::ConnectionError(n.connectionMessage);
         if(n.matchCanceled || n.matchPhase==Network::RoomMatchPhase::Idle) throw RoomSettingsRequested{};
         const auto now=std::chrono::steady_clock::now();
@@ -257,9 +276,14 @@ void watch_room_match(Runtime::GameContext& c,bool localLost) {
         if(!nextMatch && localLost && own!=n.roomMembers.end() && own->alive && n.matchPhase==Network::RoomMatchPhase::Playing && now-lastLoss>=std::chrono::milliseconds(250)) {
             Network::send_round_signal(c,Network::OutgoingRoundSignal::LocalLoss);lastLoss=now;
         }
+        if(action(c,Input::Action::SaveReplay,held) && (c.session.roomScene.finished || c.session.player.timing.completedGameTime)) {
+            save_finished_online_replay(c,results.get());
+            if(results)results->invalidate();else Engine::draw_multiplayer_scene(c,true);
+            shownStatus.clear();input.suppress_held_keys();
+        }
         if(results) {
             refresh_results();results->poll(input);
-            if(input.update(NavigationKey::Back,false) || input.update(NavigationKey::Backspace,false)) {
+            if(results->page()==PostGamePage::Board || input.update(NavigationKey::Back,false) || input.update(NavigationKey::Backspace,false)) {
                 c.input_services().discard_control_events();
                 c.input_services().suppress_control_key_until_release(NavigationInput::key_code(NavigationKey::Back));
                 results.reset();Engine::draw_multiplayer_scene(c,true);shownStatus.clear();input.suppress_held_keys();continue;
@@ -268,7 +292,7 @@ void watch_room_match(Runtime::GameContext& c,bool localLost) {
             if(!n.roundResultWires[epoch].count(slot) && now-lastRequest>=std::chrono::milliseconds(250)) {
                 Network::request_round_statistics(n,epoch,slot);lastRequest=now;
             }
-            results->render(c,UiText::tr("Left/Right: Player  Tab: Summary/Clears  Up/Down: Scroll  PgUp/PgDn: Page  Esc: Board"),
+            results->render(c,UiText::tr("Left/Right: Player  Tab: Summary/Clears  Up/Down: Scroll  PgUp/PgDn: Page  Esc: Board")+"  "+UiText::binding_label(c.user_settings(),10)+" "+UiText::tr("Save Replay"),
                 Render::terminal_size().value_or(Render::TerminalSize{120,40}));
             c.services.clock.sleep_for(Runtime::Duration::from_seconds(0.01));continue;
         }
@@ -282,9 +306,6 @@ void watch_room_match(Runtime::GameContext& c,bool localLost) {
         if(action(c,Input::Action::OpenSettings,held)) {
             Network::handle_room_game_control(c,false);Settings::run_menu(c);return;
         }
-        if(action(c,Input::Action::SaveReplay,held) && c.session.player.timing.completedGameTime) {
-            save_finished_online_replay(c);Engine::draw_multiplayer_scene(c,true);shownStatus.clear();input.suppress_held_keys();
-        }
         const auto dimensions=Render::terminal_size().value_or(Render::TerminalSize{80,35});
         std::string status="Tab "+UiText::tr(c.session.roomScene.finished?"Result details":"Player")+"   "+
             UiText::binding_label(c.user_settings(),8)+" "+UiText::tr("Restart")+"   "+
@@ -292,6 +313,7 @@ void watch_room_match(Runtime::GameContext& c,bool localLost) {
         if(nextMatch) {
             status=UiText::tr("The host has started the match.")+" / "+UiText::tr("Retry: Prepare match.");
         }
+        if(c.session.roomScene.finished || c.session.player.timing.completedGameTime)status+="   "+UiText::binding_label(c.user_settings(),10)+" "+UiText::tr("Save Replay");
         if(status!=shownStatus || shownRevision!=c.session.roomScene.revision || dimensions!=shownSize) {
             Render::set_ui_color(Render::ColorRole::Text,c.config.display.obscuredColors);Render::move_cursor(dimensions.rows-1,0);
             const auto clipped=Util::TerminalText::clip(status,dimensions.columns);

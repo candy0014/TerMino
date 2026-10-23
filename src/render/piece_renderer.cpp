@@ -36,6 +36,9 @@ void draw_block(const Runtime::GameContext& context,const Piece::Definition& pie
     else set_ui_color(ColorRole::Ghost,context.config.display.obscuredColors);
     for(const auto& det:piece.cells(pose.rotation)){
         const int row=pose.position.row+det[0],column=pose.position.col+det[1];
+        // A cached/blocked pose can extend beyond a very short field during
+        // redraw or visibility changes. Never restore cells outside storage.
+        if(mode==PieceDrawMode::Erase && !player.gameplay.playfield.field.contains(row,column))continue;
         if(mode==PieceDrawMode::Erase)draw_board_cell(context,player,row,column,player.gameplay.playfield.field.cell(row,column));
         else {
             move_to(context,player,row,column);
@@ -107,6 +110,7 @@ void draw_piece_transition(const Runtime::GameContext& context, const Piece::Def
     const auto newCells = cellsAt(after,activeMode);
     for (const auto& cell : oldCells) {
         if (find(newCells, cell.row, cell.col) != newCells.end()) continue;
+        if(!field.contains(cell.row,cell.col))continue;
         draw_board_cell(context,player,cell.row,cell.col,field.cell(cell.row,cell.col));
     }
     PieceDrawMode color = PieceDrawMode::Erase;

@@ -19,14 +19,45 @@
 #include <cmath>
 #include <limits>
 #include <iostream>
+#include <future>
 #include <sstream>
 
+namespace TetrTests::gameplay_input_buffer_test {
 namespace {
 using Clock = std::chrono::steady_clock;
 Runtime::TimePoint tp(double t) { return Runtime::TimePoint::from_seconds(t); }
 Runtime::Duration dur(double t) { return Runtime::Duration::from_seconds(t); }
 Clock::time_point wall(double t) { return Clock::time_point{} + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(t)); }
 Runtime::TimePoint gameTime(Clock::time_point t) { return tp(std::chrono::duration<double>(t.time_since_epoch()).count()); }
+
+void sampled_batches_are_atomic() {
+    Input::KeyEventBuffer events;
+    Input::KeyEventBuffer::SampleTime sampled;
+    std::uint64_t first=0,second=0;
+    events.complete_sample(wall(0));
+    events.update(10,true,wall(.01));
+    auto snapshot=events.snapshot(first,nullptr,&sampled);
+    assert(!snapshot.count(10) && sampled==wall(0));
+    assert(events.read(second,&sampled).empty() && sampled==wall(0));
+    events.complete_sample(wall(.02));
+    auto a=events.read(first,&sampled),b=events.read(second);
+    assert(a.size()==1 && b.size()==1 && a[0].down && a[0].sequence==b[0].sequence);
+    assert(sampled==wall(.02));
+    events.update(10,false,wall(.03));
+    assert(events.read(first,&sampled).empty() && sampled==wall(.02));
+    snapshot=events.snapshot(second);
+    assert(snapshot.at(10)); // An incomplete batch cannot change a new player's held state.
+    events.complete_sample(wall(.04));
+    a=events.read(first,&sampled);b=events.read(second);
+    assert(a.size()==1 && b.size()==1 && !a[0].down && sampled==wall(.04));
+    const auto cursor=first;
+    auto waiting=std::async(std::launch::async,[&] {events.wait(cursor,std::chrono::seconds(2));});
+    assert(waiting.wait_for(std::chrono::milliseconds(5))==std::future_status::timeout);
+    events.complete_sample(wall(.05)); // No transition, but timers must wake for this progress.
+    assert(waiting.wait_for(std::chrono::milliseconds(500))==std::future_status::ready);
+    waiting.get();
+    assert(events.read(first,&sampled).empty() && sampled==wall(.05) && first!=cursor);
+}
 
 struct Fixture {
     Input::KeyEventBuffer events;
@@ -84,6 +115,64 @@ void release_and_direction_order() {
     reversed.frame(0.03);
     assert(reversed.input.mostRecentActive({10,11})==10); // Physical order, not key-code order.
     assert(reversed.state.pose.position.col==50);
+}
+
+void sampled_release_does_not_repeat_a_short_tap() {
+    for(double held:{.084,.088,.089,.091,.095}) {
+        Fixture f;
+        f.config.das=dur(.09);f.config.arr=dur(.004);
+        f.events.complete_sample(wall(0));
+        f.key(10,true,0);f.events.complete_sample(wall(0));f.frame(0);
+        f.events.complete_sample(wall(.08));f.frame(.08);
+        for(int tick=81;tick<=103;++tick)f.frame(tick/1000.);
+        assert(f.state.pose.position.col==49); // The render thread has not sampled this time yet.
+        f.key(10,false,held);
+        f.services.poll_gameplay_events();
+        assert(f.services.gameplay_sample_time()==wall(.08));
+        f.events.complete_sample(wall(.104));
+        assert(f.services.gameplay_sample_time()==wall(.08)); // Cannot read ahead of queued events.
+        f.frame(.104);
+        const int expected=held<.09?1:held<.094?2:3;
+        assert(f.state.pose.position.col==50-expected);
+        f.frame(1);assert(f.state.pose.position.col==50-expected);
+    }
+}
+
+void input_arriving_after_frame_time_keeps_its_das() {
+    for (bool sampled : {false,true}) for (double arr : {0.,.004,.02}) {
+        Fixture f;
+        f.config.das=dur(.09); f.config.arr=dur(arr);
+        if (sampled) f.events.complete_sample(wall(0));
+        // The game thread records .02, is descheduled, and then reads a
+        // press from .12. It must not count that suspension as held time.
+        f.key(10,true,.12);
+        if (sampled) f.events.complete_sample(wall(.13));
+        f.frame(.02);
+        f.frame(.13);
+        assert(f.state.pose.position.col==49);
+        assert(f.input.timestamp(10)==tp(.12));
+        f.key(10,false,.20); // 80 ms held, below the 90 ms DAS.
+        if (sampled) f.events.complete_sample(wall(.30));
+        f.frame(.30);
+        assert(f.state.pose.position.col==49);
+    }
+}
+
+void spawning_during_a_poll_stall_does_not_fill_das() {
+    for (double arr : {0.,.004,.02}) {
+        Fixture f;
+        f.config.das=dur(.09); f.config.arr=dur(arr);
+        f.events.complete_sample(wall(0));
+        f.key(10,true,0); f.events.complete_sample(wall(.08)); f.frame(.08);
+        assert(f.state.pose.position.col==49);
+        // A new piece exists after the last known input sample. Its spawn
+        // time must not promote 80 ms of sampled holding into a full DAS.
+        f.prepare(.20); f.frame(.20);
+        assert(f.state.pose.position.col==49);
+        f.key(10,false,.088); f.events.complete_sample(wall(.30)); f.frame(.30);
+        // Releasing before the spawn must not first repeat at spawn time.
+        assert(f.state.pose.position.col==49);
+    }
 }
 
 void commands_preserve_next_piece_events() {
@@ -416,7 +505,10 @@ void full_redraw_followed_by_input_clears_old_piece() {
 }
 }
 
-int main() {
+int run(int argc,char** argv) {
+    spawning_during_a_poll_stall_does_not_fill_das();
+    input_arriving_after_frame_time_keeps_its_das();
+    sampled_batches_are_atomic();sampled_release_does_not_repeat_a_short_tap();
     short_presses_survive_stall(); release_and_direction_order();
     commands_preserve_next_piece_events(); elapsed_repeats_match_fast_frames();
     independent_local_players_and_lifecycle();
@@ -424,4 +516,6 @@ int main() {
     instant_gravity_initial_frame_is_complete();
     timed_garbage_keeps_queued_keys_and_das();
     full_redraw_followed_by_input_clears_old_piece();
+    return 0;
 }
+} // namespace TetrTests::gameplay_input_buffer_test

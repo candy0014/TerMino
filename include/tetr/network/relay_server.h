@@ -7,6 +7,8 @@
 #include "tetr/network/room_config_protocol.h"
 #include "tetr/network/frame_packet.h"
 #include "tetr/network/board_view.h"
+#include "tetr/replay/multiplayer_codec.h"
+#include <memory>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -17,6 +19,7 @@
 #include <set>
 
 namespace Network {
+struct RoomReplayArchiveState;
 class RelayServer {
 public:
     explicit RelayServer(std::uint32_t randomSeed,const std::string& roomCodeHistory = {});
@@ -43,6 +46,8 @@ private:
         bool roomConfigCapable = false;
         bool multiplayerCapable = false;
         bool relayBatchCapable = false;
+        bool roomReplayCapable = false;
+        std::string replayViewerIdentity;
     };
     struct Room {
         struct AttackDelivery { int source=-1, sourceSequence=0, sequence=0, amount=0; };
@@ -55,6 +60,7 @@ private:
         int capacity = 2;
         int memberLimit = 2, battleLimit = 2;
         std::uint64_t matchEpoch = 0;
+        std::map<std::uint64_t,std::shared_ptr<RoomReplayArchiveState>> replays;
         int winner = -1;
         std::array<std::string, kMultiplayerRoomCapacity> players{};
         Phase phase = Phase::Waiting;
@@ -116,6 +122,11 @@ private:
     void publish_multiplayer_phase(Room& room);
     void handle_multiplayer_gameplay(Room& room,Client& client,int slot,std::string_view wire);
     void eliminate_player(Room& room,int slot);
+    void start_room_replay(Room& room,std::optional<Clock::time_point> started={});
+    void finish_room_replay(Room& room,Replay::RoundEndReason reason=Replay::RoundEndReason::Normal);
+    void record_room_replay_elimination(Room& room,int slot);
+    void record_room_replay_targets(Room& room);
+    bool handle_room_replay(Client& client,std::string_view wire);
     void update_board_budgets(Room& room,int resendSlot=-1);
     void flush_mini_boards(Room& room,Clock::time_point now);
     void acknowledge_delivery(Room& room,int source,int sequence);

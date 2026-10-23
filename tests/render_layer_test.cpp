@@ -35,6 +35,7 @@
 #include <unistd.h>
 #endif
 
+namespace TetrTests::render_layer_test {
 namespace {
 struct Capture {
     std::ostringstream stream;
@@ -283,6 +284,22 @@ void test_short_next_preview() {
     assert(draw(5).empty());
     player.pieces.nextPreview={Piece::Type::none()};
     assert(draw(0).empty());
+}
+
+void test_short_field_piece_restore() {
+    auto session=std::make_unique<Runtime::SessionState>();Runtime::RuntimeServices services;
+    Runtime::GameContext context(*session,services);auto& player=session->player;
+    auto& board=player.gameplay.playfield;auto piece=Piece::get_definition(Piece::Type::from_index(5));
+    Capture capture;
+    for(int height:{0,1,2,3}) {
+        board.width=10;board.visibleHeight=board.activeHeight=height;board.field.initialize(10,height);
+        const Piece::Pose outside{{height,4},Runtime::Rotation{}};
+        // Redraw/visibility changes may restore a cached pose that now extends
+        // below a short well. Presentation must clip it before reading cells.
+        Render::draw_piece(context,piece,player,outside,board.field,Render::PieceDrawMode::Erase);
+        Render::draw_piece_transition(context,piece,player,outside,Piece::spawn_pose(10,piece.type()),board.field);
+        assert(board.field.remaining_initial_cells()==0);
+    }
 }
 
 void test_viewport_clips_without_wrapping() {
@@ -600,8 +617,11 @@ void test_map_progress_stays_outside_field() {
         Test::TerminalScreen actual=expected;
         for(const auto goal:{Runtime::MapGoal::ClearInitial,Runtime::MapGoal::AllClear,Runtime::MapGoal::Disabled}) {
             context.config.mode.mapGoal=goal;Capture stats;Render::print_message(context,player);actual.feed(stats.str());
-            for(int row=1;row<=expected.rows();++row) for(int col=player.presentation.margin;col<=player.presentation.margin+field.width*2+1;++col)
+            for(int row=1;row<=expected.rows();++row) for(int col=player.presentation.margin;col<=player.presentation.margin+field.width*2+1;++col) {
                 assert(actual.at(row,col).glyph==expected.at(row,col).glyph);
+            }
+            assert(player.presentation.racingGoalRows==0);
+            assert(!actual.position_of("1PC").first);
             if(goal==Runtime::MapGoal::AllClear) assert(!actual.position_of("MAP CELLS").first);
             if(goal==Runtime::MapGoal::Disabled) assert(!actual.position_of("ALLCLEAR").first);
         }
@@ -703,7 +723,8 @@ void test_time_below_statistics() {
         }
     }
 }
-int main(){
+int run(int argc,char** argv){
+    test_short_field_piece_restore();
     test_goal_marker_units_and_time();
     test_information_region();
     test_time_below_statistics();
@@ -897,3 +918,4 @@ int main(){
     test_racing_markers();
     return 0;
 }
+} // namespace TetrTests::render_layer_test

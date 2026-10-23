@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+namespace TetrTests::line_clear_presentation_test {
 namespace {
 
 constexpr Runtime::TimePoint tpnt(double value){ return Runtime::TimePoint::from_seconds(value); }
@@ -229,7 +230,7 @@ void test_backlogged_replay_animation_at_end_of_recording() {
 
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     test_column_order();
     test_random_timeline_equivalence();
     test_replay_marker_pump();
@@ -238,4 +239,6 @@ int main() {
     test_coordinator_replay_marker_reservation_and_interrupt();
     test_backlogged_replay_animation_at_end_of_recording();
     std::cout << "line clear presentation tests passed\n";
+    return 0;
 }
+} // namespace TetrTests::line_clear_presentation_test

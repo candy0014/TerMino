@@ -4,6 +4,7 @@
 #include "tetr/engine/autoplay_adapter.h"
 #include "tetr/engine/live_piece_periodic_events.h"
 #include "tetr/rules/game_completion.h"
+#include "tetr/rules/spin.h"
 #include "tetr/engine/movement_controller.h"
 #include "live_piece_controls.h"
 #include "tetr/engine/player_input.h"
@@ -55,7 +56,36 @@ Rules::PlayResult run_live_piece_movement(
         return player.presentation.terminalLayoutRevision;
     };
     Runtime::TimePoint& lockTimer = movementState.lockTimer;
-    MovementController movement(movementState, canPlace, tryRotate);
+    MovementController movement(movementState, canPlace, tryRotate,[&](MovementContact contact,int direction,Runtime::TimePoint at) {
+        auto& feedback=player.presentation.boardMotion;
+        if(contact==MovementContact::Wall) {
+            // ARR=0 may probe the wall on every input poll. Presentation
+            // impulses have a fixed rate, independent of the poll/render rate.
+            auto& last=player.presentation.lastWallContact;
+            if(last && at>=*last && direction==feedback.wallDirection && at-*last<Runtime::Duration::from_seconds(1./60))return;
+            last=at;++feedback.wallSequence;feedback.wallDirection=direction;
+        }
+        else {
+            // The reference tilts on a recognized Spin. Consume the shared
+            // predicate here; presentation never reconstructs a spin rule.
+            const auto metadata=Piece::metadata(piece.type());
+            Rules::SpinInput input;
+            input.spinChecker=metadata.spinCheck;input.pose=movementState.pose;
+            input.lastRotation=movementState.lastRotation;
+            input.mapWidth=context.config.field.width;input.mapHeight=player.gameplay.playfield.activeHeight;
+            input.grounded=!canPlace(movementState.pose.translated(1,0));input.immobile=true;
+            for(const auto& shift:std::array<std::array<int,2>,4>{{{{1,0}},{{0,1}},{{-1,0}},{{0,-1}}}})
+                if(canPlace(movementState.pose.translated(shift[0],shift[1]))){input.immobile=false;break;}
+            input.allSpinEnabled=Runtime::enabled(context.config.quickPlay.allSpin);
+            input.noHoldReverse=Runtime::reverse(context.config.quickPlay.noHold);
+            input.bonuses=context.config.spinBonuses;input.rotationSystem=metadata.rotationSystem;
+            input.canonicalGeometry=metadata.tetrioRotation;
+            if(Runtime::reverse(context.config.quickPlay.doubleHole) && !Piece::t_spin_check(metadata.spinCheck))input.lastRotation={};
+            if(Rules::detect_spin(input,[&](int row,int col){return field.cell(row,col).occupied();}).spin) {
+                ++feedback.rotationSequence;feedback.rotationDirection=direction;
+            }
+        }
+    });
     bool autoplayContinuation=heldPieceContinuation;
 
     Replay::add_replay(context, Replay::OperationKind::StartPlace);
@@ -137,10 +167,7 @@ Rules::PlayResult run_live_piece_movement(
                 pumpFrame,pieceDrawn,&bufferRisen)) {
             return *signal;
         }
-        if (bufferRisen) {
-            autoplayCarry={};
-            autoplayContinuation=false;
-        }
+        if (bufferRisen && !autoplayCarry.selectedPieceType.valid())autoplayContinuation=false;
         if (bufferRisen || poseBeforePeriodic!=movementState.pose || garbageTimeBefore!=player.timing.timedGarbage) {
             renderedPose=movementState.pose;
             pieceDrawn=true;
@@ -207,6 +234,7 @@ Rules::PlayResult run_live_piece_movement(
             if (!pieceDrawn || renderedPose!=movementState.pose) presentPiece();
         }
         if (locking) {
+            if(hardDrop)movementState.hardDropFromRow=poseBeforeInput.position.row;
             Replay::add_replay(context, Replay::OperationKind::EndMove);
             break;
         }
@@ -221,12 +249,17 @@ Rules::PlayResult run_live_piece_movement(
             if (player.garbage.rising.remainingLines>0 && player.garbage.rising.nextRow)
                 consider(now+(*player.garbage.rising.nextRow-context.now()));
             if (renderedPose!=movementState.pose) consider(lastRender+renderInterval);
-            const int moveKey=inputState.mostRecentActive(moveKeys);
-            if (const auto due=inputState.nextHorizontalRepeat(moveKey,context.config.handling.das,context.config.handling.arr,now)) consider(*due);
-            for (const auto& [key,action]:services.bindings.entries()) {
-                if (action!=Input::Action::SoftDrop || context.config.movement.disableSoftDrop || !services.gameplay_key_down(key)) continue;
-                const auto interval=soft_drop_interval(gravity,context.config.handling.softDropFactor,context.config.handling.softDropFixed);
-                if (interval>Runtime::Duration{}) consider(inputState.timestamp(key)+interval);
+            // Sampled sources wake this wait when their next complete batch
+            // is published. Waking for an unobserved repeat deadline would
+            // only spin while the input clock is intentionally bounded.
+            if (!services.gameplay_sample_time()) {
+                const int moveKey=inputState.mostRecentActive(moveKeys);
+                if (const auto due=inputState.nextHorizontalRepeat(moveKey,context.config.handling.das,context.config.handling.arr,now)) consider(*due);
+                for (const auto& [key,action]:services.bindings.entries()) {
+                    if (action!=Input::Action::SoftDrop || context.config.movement.disableSoftDrop || !services.gameplay_key_down(key)) continue;
+                    const auto interval=soft_drop_interval(gravity,context.config.handling.softDropFactor,context.config.handling.softDropFixed);
+                    if (interval>Runtime::Duration{}) consider(inputState.timestamp(key)+interval);
+                }
             }
             if (gravity.enabled()) {
                 if (movement.grounded()) consider(lockTimer+Runtime::current_epld(context));

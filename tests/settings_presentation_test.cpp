@@ -3,6 +3,7 @@
 #include "tetr/app/post_game_interaction.h"
 #include "tetr/config/normalization.h"
 #include "tetr/config/settings_schema.h"
+#include "tetr/frontend/ui_surface.h"
 #include "tetr/config/presets.h"
 #include "tetr/input/services.h"
 #include "tetr/network/network_services.h"
@@ -33,6 +34,7 @@
 #include <linux/input.h>
 #endif
 
+namespace TetrTests::settings_presentation_test {
 namespace {
 const App::Settings::TerminalSettingsView::TerminalSizeQuery unknownTerminalSize=[] {
     return std::optional<Render::TerminalSize>{};
@@ -761,13 +763,74 @@ void map_editor_setting_viewport() {
     }
     std::cout.rdbuf(previous);
 }
-int main() {
+void graphical_effect_controls_visibility() {
+    using namespace App::Settings::Model;
+    UserConfig::Settings first,second;
+    // Loaded graphical preferences must not add controls to terminal menus.
+    first.effectsIntensity=150;first.particleIntensity=200;
+    const std::vector<SettingId> effectFields{SettingId::EffectsIntensity,SettingId::BoardBounciness,
+        SettingId::FieldShake,SettingId::ParticleIntensity,SettingId::LandingEffect,
+        SettingId::LineClearEffect,SettingId::HardDropTrail};
+    const auto check=[&](const SettingNode& tree,bool visible) {
+        const auto appearance=std::find_if(tree.children.begin(),tree.children.end(),
+            [](const auto& node){return node.key=="OTHERS";});
+        assert(appearance!=tree.children.end());
+        const auto effects=std::find_if(appearance->children.begin(),appearance->children.end(),
+            [](const auto& node){return node.key=="effects";});
+        assert((effects!=appearance->children.end())==visible);
+        for(const auto id:effectFields)
+            assert(std::none_of(appearance->children.begin(),appearance->children.end(),
+                [&](const auto& node){return node.item && node.item->id==id;}));
+        if(!visible) return;
+        assert(effects->kind==NodeKind::Group && effects->children.size()==effectFields.size()+1);
+        for(std::size_t i=0;i<effectFields.size();++i)
+            assert(effects->children[i].item && effects->children[i].item->id==effectFields[i]);
+        const auto& reset=effects->children.back();
+        assert(reset.key=="reset" && reset.kind==NodeKind::ResetSubtree);
+        auto expected=effectFields,actual=reset_fields(reset);
+        std::sort(expected.begin(),expected.end());std::sort(actual.begin(),actual.end());
+        assert(actual==expected);
+        translated_tree(*effects);
+    };
+    assert(!Frontend::ui_surface_active());
+    check(make_tree(first,false,0),false);
+    check(make_both_tree(first,second),false);
+    check(make_host_tree(first,{}),false);
+    {
+        Frontend::UiSurfaceScope graphical([](Frontend::UiFrame){});
+        check(make_tree(first,false,0),true);
+        check(make_both_tree(first,second),true);
+        check(make_host_tree(first,{}),true);
+        auto changed=first;
+        changed.boardBounciness=175;changed.fieldShake=0;changed.landingEffect=120;
+        changed.lineClearEffect=150;changed.hardDropTrail=200;
+        changed.squareStyle=1;changed.obscuredColors=1;changed.uiLanguage=1;
+        changed.showSpawnPosition=0;changed.continueInputUnfocused=1;changed.fieldWidth=12;
+        const auto before=changed;
+        const auto tree=make_tree(changed,false,0);
+        const auto& appearance=*std::find_if(tree.children.begin(),tree.children.end(),
+            [](const auto& node){return node.key=="OTHERS";});
+        const auto& effects=*std::find_if(appearance.children.begin(),appearance.children.end(),
+            [](const auto& node){return node.key=="effects";});
+        reset_subtree(changed,effects.children.back(),false);
+        const UserConfig::Settings defaults;
+        for(const auto& descriptor:UserConfig::setting_schema()) {
+            const bool effect=std::find(effectFields.begin(),effectFields.end(),descriptor.id)!=effectFields.end();
+            assert(UserConfig::Presets::read_value(changed,descriptor.id)==
+                UserConfig::Presets::read_value(effect ? defaults : before,descriptor.id));
+        }
+    }
+    check(make_tree(first,false,0),false);
+    assert(first.effectsIntensity==150 && first.particleIntensity==200);
+}
+int run(int argc,char** argv) {
     using namespace Util::TerminalText;
     using namespace App::Settings;
     static_assert(kVisibleSettingsRows==15);
     static_assert(kVisibleSettingsColumns==3);
     static_assert(first_visible_row(14)==0 && first_visible_row(15)==15);
     App::UiText::set_language(App::UiText::Language::Chinese);
+    graphical_effect_controls_visibility();
     preset_library_rendering();
     windows_key_names();
     platform_defaults_use_the_same_physical_keys();
@@ -915,6 +978,11 @@ int main() {
         view.print_menu(appearance,0,"SETTINGS > OTHERS");
         assert(output.str().find(style<=0 ? "> 方块样式 = 实心" : "> 方块样式 = 间隔")!=std::string::npos);
         assert(output.str().find("自定义")==std::string::npos);
+        assert(output.str().find(App::UiText::tr("Effects"))==std::string::npos);
+        for(const auto id:{Model::SettingId::EffectsIntensity,Model::SettingId::FieldShake,
+                           Model::SettingId::ParticleIntensity,Model::SettingId::LandingEffect,
+                           Model::SettingId::LineClearEffect,Model::SettingId::HardDropTrail,Model::SettingId::BoardBounciness})
+            assert(output.str().find(App::UiText::tr(UserConfig::setting_descriptor(id).label))==std::string::npos);
         assert(Model::choice_value(*appearance.children[0].item)==
             Runtime::normalize_user_config(user,Runtime::GameMode::Zen).display.squareStyle);
     }
@@ -1168,4 +1236,6 @@ int main() {
 #endif
     App::UiText::set_language(App::UiText::Language::English);
     assert(App::UiText::tr("SETTINGS") == "SETTINGS");
+    return 0;
 }
+} // namespace TetrTests::settings_presentation_test

@@ -4,6 +4,7 @@
 #include <iostream>
 #include <tuple>
 
+namespace TetrTests::bot_chatgpt_rise_horizon_test {
 namespace B = Bot_chatgpt;
 static auto fields(const B::Evaluation::Status& s) {
     return std::make_tuple(s.combo,s.b2b,s.garbageHeight,s.incoming,s.readyIncoming,
@@ -14,7 +15,7 @@ static void row(m_tetris::TetrisMap& m, int y, unsigned bits) {
     m.row[y]=bits;
     for(int x=0;x<10;++x) if(bits&(1u<<x)) {m.top[x]=y+1; m.roof=y+1; ++m.count;}
 }
-int main() {
+int run(int argc,char** argv) {
     using Engine=m_tetris::TetrisEngine<rule_tetr_srs_plus::TetrisRule,B::Evaluation,B::Search>;
     Engine engine; assert(engine.prepare(10,40));
     const auto* c=engine.context().get();
@@ -63,4 +64,6 @@ int main() {
     assert(matched>100 && stopped>100 && rising && clearing && dying);
     std::cout<<"rise horizon matched="<<matched<<" stopped="<<stopped
         <<" rises="<<rising<<" clears="<<clearing<<" dead="<<dying<<'\n';
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_rise_horizon_test

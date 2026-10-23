@@ -3,8 +3,9 @@
 #include <cassert>
 #include <random>
 
+namespace TetrTests::bot_chatgpt_spin_test {
 namespace A = Bot_chatgpt::Analysis;
-int main() {
+int run(int argc,char** argv) {
     using Engine = m_tetris::TetrisEngine<rule_tetr_srs_plus::TetrisRule, Bot_chatgpt::Evaluation, Bot_chatgpt::Search>;
     Engine geometry; assert(geometry.prepare(10, 40));
     const auto* context = geometry.context().get();
@@ -101,4 +102,6 @@ int main() {
     assert(alternative.status.pathRisk < original.status.pathRisk);
     assert(alternative.path.front().value < original.path.front().value);
     for (const auto& step : alternative.path) assert(step.productionGeometry && step.productionSpin);
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_spin_test

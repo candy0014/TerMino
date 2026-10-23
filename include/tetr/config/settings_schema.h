@@ -59,7 +59,8 @@ enum class SettingId {
     ForceDcd, ForcedDcd, ForcePreMove, ForcedPreMove, ForceDasPrecharge, ForcedDasPrecharge,
     AttackMultiplier,
     Goal, GarbageTarget, PieceTarget, AttackTarget, AllClearTarget,
-    InvisibilityDelay, InvisibilityInterval, InvisibilityDuration, ChallengeRules
+    InvisibilityDelay, InvisibilityInterval, InvisibilityDuration, ChallengeRules,
+    EffectsIntensity, FieldShake, ParticleIntensity, LandingEffect, LineClearEffect, HardDropTrail, BoardBounciness
 };
 
 enum class ChoiceKind {

@@ -1,0 +1,233 @@
+{
+  "version": 1,
+  "orientation": "landscape",
+  "active_layout": "landscape-default",
+  "layouts": [
+    {
+      "id": "landscape-default",
+      "name": "横屏默认布局（左旋转与暂存，右移动与降落）",
+      "buttons": [
+        {
+          "id": "left",
+          "action": "MoveLeft",
+          "player": 0,
+          "center": {
+            "x": 0.69,
+            "y": 0.72
+          },
+          "size": {
+            "width": 0.21,
+            "height": 0.21
+          },
+          "shape": {
+            "kind": "ellipse"
+          },
+          "rotation_degrees": 0,
+          "opacity": 0.4,
+          "enabled": true,
+          "z_order": 0
+        },
+        {
+          "id": "right",
+          "action": "MoveRight",
+          "player": 0,
+          "center": {
+            "x": 0.86,
+            "y": 0.72
+          },
+          "size": {
+            "width": 0.21,
+            "height": 0.21
+          },
+          "shape": {
+            "kind": "ellipse"
+          },
+          "rotation_degrees": 0,
+          "opacity": 0.4,
+          "enabled": true,
+          "z_order": 0
+        },
+        {
+          "id": "soft-drop",
+          "action": "SoftDrop",
+          "player": 0,
+          "center": {
+            "x": 0.775,
+            "y": 0.885
+          },
+          "size": {
+            "width": 0.21,
+            "height": 0.21
+          },
+          "shape": {
+            "kind": "ellipse"
+          },
+          "rotation_degrees": 0,
+          "opacity": 0.4,
+          "enabled": true,
+          "z_order": 0
+        },
+        {
+          "id": "hard-drop",
+          "action": "HardDrop",
+          "player": 0,
+          "center": {
+            "x": 0.775,
+            "y": 0.555
+          },
+          "size": {
+            "width": 0.21,
+            "height": 0.21
+          },
+          "shape": {
+            "kind": "ellipse"
+          },
+          "rotation_degrees": 0,
+          "opacity": 0.4,
+          "enabled": true,
+          "z_order": 0
+        },
+        {
+          "id": "clockwise",
+          "action": "RotateClockwise",
+          "player": 0,
+          "center": {
+            "x": 0.23,
+            "y": 0.555
+          },
+          "size": {
+            "width": 0.21,
+            "height": 0.21
+          },
+          "shape": {
+            "kind": "ellipse"
+          },
+          "rotation_degrees": 0,
+          "opacity": 0.4,
+          "enabled": true,
+          "z_order": 0
+        },
+        {
+          "id": "counterclockwise",
+          "action": "RotateCounterclockwise",
+          "player": 0,
+          "center": {
+            "x": 0.145,
+            "y": 0.72
+          },
+          "size": {
+            "width": 0.21,
+            "height": 0.21
+          },
+          "shape": {
+            "kind": "ellipse"
+          },
+          "rotation_degrees": 0,
+          "opacity": 0.4,
+          "enabled": true,
+          "z_order": 0
+        },
+        {
+          "id": "rotate-180",
+          "action": "Rotate180",
+          "player": 0,
+          "center": {
+            "x": 0.23,
+            "y": 0.885
+          },
+          "size": {
+            "width": 0.21,
+            "height": 0.21
+          },
+          "shape": {
+            "kind": "ellipse"
+          },
+          "rotation_degrees": 0,
+          "opacity": 0.4,
+          "enabled": true,
+          "z_order": 0
+        },
+        {
+          "id": "hold",
+          "action": "Hold",
+          "player": 0,
+          "center": {
+            "x": 0.315,
+            "y": 0.72
+          },
+          "size": {
+            "width": 0.21,
+            "height": 0.21
+          },
+          "shape": {
+            "kind": "ellipse"
+          },
+          "rotation_degrees": 0,
+          "opacity": 0.4,
+          "enabled": true,
+          "z_order": 0
+        },
+        {
+          "id": "pause",
+          "action": "Pause",
+          "player": 0,
+          "center": {
+            "x": 0.145,
+            "y": 0.38
+          },
+          "size": {
+            "width": 0.21,
+            "height": 0.21
+          },
+          "shape": {
+            "kind": "ellipse"
+          },
+          "rotation_degrees": 0,
+          "opacity": 0.4,
+          "enabled": true,
+          "z_order": 0
+        },
+        {
+          "id": "retry",
+          "action": "Retry",
+          "player": 0,
+          "center": {
+            "x": 0.86,
+            "y": 0.38
+          },
+          "size": {
+            "width": 0.21,
+            "height": 0.21
+          },
+          "shape": {
+            "kind": "ellipse"
+          },
+          "rotation_degrees": 0,
+          "opacity": 0.4,
+          "enabled": true,
+          "z_order": 0
+        },
+        {
+          "id": "undo",
+          "action": "Undo",
+          "player": 0,
+          "center": {
+            "x": 0.315,
+            "y": 0.38
+          },
+          "size": {
+            "width": 0.21,
+            "height": 0.21
+          },
+          "shape": {
+            "kind": "ellipse"
+          },
+          "rotation_degrees": 0,
+          "opacity": 0.4,
+          "enabled": true,
+          "z_order": 0
+        }
+      ]
+    }
+  ]
+}

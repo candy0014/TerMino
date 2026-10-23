@@ -1,4 +1,5 @@
 #include "tetr/bot/bot_candy0014.h"
+#include "tetr/bot/quick_play_search.h"
 
 #include <algorithm>
 #include <cassert>
@@ -9,41 +10,9 @@
 
 namespace Bot_candy0014{
 
-void evaluate(const Bot::Environment& environment,Runtime::Playfield mp,const Piece::Definition& B,int x,int y,int type,double &score){
-	/* A Naive Example
-		score=x;
-		return;
-	*/
-	for(int i=0;i<4;i++) mp.set_cell(x+B.cells(Runtime::Rotation::from_index(type))[i][0],y+B.cells(Runtime::Rotation::from_index(type))[i][1],Runtime::BoardCell::piece(B.color_id()));
-	int tag[205],cnt_clear=0,pc_flag=1;
-	int mapHeightU=std::min(Runtime::kHiddenRowCapacity,8);
-	for(int i=-mapHeightU;i<environment.fieldHeight;i++){
-		tag[i+mapHeightU]=1;
-		for(int j=0;j<environment.fieldWidth;j++){
-			if(!mp.cell(i,j).occupied()){tag[i+mapHeightU]=0;break;}
-		}
-		for(int j=1;j<environment.fieldWidth&&pc_flag;j++) if(mp.cell(i,j).occupied()!=mp.cell(i,0).occupied()) pc_flag=0;
-		cnt_clear+=tag[i+mapHeightU];
-	}
-	int now=environment.fieldHeight;
-	if(environment.antiGravity){
-		for(int i=environment.fieldHeight-1;i>=-mapHeightU;i--) if(tag[i+mapHeightU]){
-			for(int j=0;j<environment.fieldWidth;j++) mp.set_cell(i,j,Runtime::BoardCell::empty());
-		}
-	}
-	else{
-		for(int i=environment.fieldHeight-1;i>=-mapHeightU;i--){
-			now--;
-			while(now+mapHeightU>=1&&tag[now+mapHeightU]) now--;
-			now=std::max(now,1-mapHeightU);
-			mp.copy_row(i,now);
-		}
-	}
-	if(cnt_clear==1) score-=1.5;
-	if(cnt_clear==2) score-=3;
-	if(cnt_clear==3) score-=4;
-	if(cnt_clear==4) score+=4.0;
-	if(pc_flag) score+=1e9;
+double terrain(const Bot::Environment& environment,const Runtime::Playfield& mp) {
+	double score=0;
+	const int mapHeightU=std::min(Runtime::kHiddenRowCapacity,8);
 	int h[105],max_hole=0,cntstair[4]={0,0,0,0},max_h=0,min_h=environment.fieldHeight+mapHeightU;
 	for(int i=0;i<environment.fieldWidth;i++){
 		h[i]=0;
@@ -100,6 +69,45 @@ void evaluate(const Bot::Environment& environment,Runtime::Playfield mp,const Pi
 	if(cntstair[2]==0) score-=0.05;
 	std::sort(h,h+environment.fieldWidth);
 	score-=std::pow(1.2,max_h-h[environment.fieldWidth-4]);
+	return score;
+}
+
+void evaluate(const Bot::Environment& environment,Runtime::Playfield mp,const Piece::Definition& B,int x,int y,int type,double &score){
+	/* A Naive Example
+		score=x;
+		return;
+	*/
+	for(int i=0;i<4;i++) mp.set_cell(x+B.cells(Runtime::Rotation::from_index(type))[i][0],y+B.cells(Runtime::Rotation::from_index(type))[i][1],Runtime::BoardCell::piece(B.color_id()));
+	int tag[205],cnt_clear=0,pc_flag=1;
+	int mapHeightU=std::min(Runtime::kHiddenRowCapacity,8);
+	for(int i=-mapHeightU;i<environment.fieldHeight;i++){
+		tag[i+mapHeightU]=1;
+		for(int j=0;j<environment.fieldWidth;j++){
+			if(!mp.cell(i,j).occupied()){tag[i+mapHeightU]=0;break;}
+		}
+		for(int j=1;j<environment.fieldWidth&&pc_flag;j++) if(mp.cell(i,j).occupied()!=mp.cell(i,0).occupied()) pc_flag=0;
+		cnt_clear+=tag[i+mapHeightU];
+	}
+	int now=environment.fieldHeight;
+	if(environment.antiGravity){
+		for(int i=environment.fieldHeight-1;i>=-mapHeightU;i--) if(tag[i+mapHeightU]){
+			for(int j=0;j<environment.fieldWidth;j++) mp.set_cell(i,j,Runtime::BoardCell::empty());
+		}
+	}
+	else{
+		for(int i=environment.fieldHeight-1;i>=-mapHeightU;i--){
+			now--;
+			while(now+mapHeightU>=1&&tag[now+mapHeightU]) now--;
+			now=std::max(now,1-mapHeightU);
+			mp.copy_row(i,now);
+		}
+	}
+	if(cnt_clear==1) score-=1.5;
+	if(cnt_clear==2) score-=3;
+	if(cnt_clear==3) score-=4;
+	if(cnt_clear==4) score+=4.0;
+	if(pc_flag) score+=1e9;
+	score+=terrain(environment,mp);
 }
 
 double ansscore;
@@ -152,6 +160,29 @@ bool init(const Bot::Environment& environment){
 	return bool(availability(environment));
 }
 int getpos(const Bot::Environment& environment,const Runtime::PlayerSessionState& player,Runtime::Playfield mp,std::vector<int>nex,const std::vector<int>& unseenBagPieces,int sx,int sy,int stype,int hold,int &ans_x,int &ans_y,int &ans_type,int &ans_rot){
+    if(Bot::QuickPlaySearch::enabled(environment)) {
+        using namespace Bot::QuickPlaySearch;
+        const auto shape=[&](const std::vector<std::uint32_t>& rows,int width,int height,int,int) {
+            Runtime::Playfield field;field.initialize(width,height);
+            for(int y=-Runtime::kHiddenRowCapacity;y<height;++y)for(int x=0;x<width;++x)
+                if(rows[height-1-y]&(std::uint32_t{1}<<x))field.set_cell(y,x,Runtime::BoardCell::piece(1));
+            auto geometry=environment;geometry.fieldWidth=width;geometry.fieldHeight=height;
+            return 512*terrain(geometry,field);
+        };
+        const auto native=[&](const NativeBaseline& baseline) {
+            Decision result;if(!availability(baseline.environment))return result;
+            int row=sx+baseline.rowOffset,col=sy,r=stype,k=0;
+            result.selected=getpos(baseline.environment,*baseline.player,*baseline.field,nex,unseenBagPieces,
+                row,col,r,hold,row,col,r,k);
+            result.pose={{row-baseline.rowOffset,col},Runtime::Rotation::from_index(r)};
+            result.rotation=k>0?Runtime::RotationRecord::from_kick(Piece::KickIndex::from_index(k-1)):Runtime::RotationRecord{};
+            return result;
+        };
+        const auto result=adapt(Profile::Candy,environment,player,mp,nex,unseenBagPieces,
+            {{sx,sy},Runtime::Rotation::from_index(stype)},hold,native,shape);
+        ans_x=result.pose.position.row;ans_y=result.pose.position.col;ans_type=result.pose.rotation.index();
+        ans_rot=result.rotation.rotated()?result.rotation.kick().index()+1:0;return result.selected;
+    }
 	(void)unseenBagPieces; // Interface-only metadata; strategy intentionally unchanged.
 	(void)player;
 	bfs(environment,mp,BotPiece::definition(nex[0],environment),sx,sy,stype);

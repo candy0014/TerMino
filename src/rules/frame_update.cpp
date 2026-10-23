@@ -28,46 +28,64 @@ void generate_qp_packets(
     FrameRuleState& state,
     const FrameRuleConfig& config,
     std::mt19937& rng) {
-    // Public QP2 score samples calibrate opponent APM and clear-type mix.
-    // Server targeting and exact Surge timing are not published; the local
-    // opponents use a frame-independent stochastic approximation.
+    // The public endpoint reports received lines, not opponents' gross APM.
+    // Generate a line budget with the fitted mean AND variance, then group it
+    // into attacks. Independent Poisson packets would multiply the fitted
+    // variance by packet size and recreate the excessive burstiness.
     constexpr double weights[][5] = {
         {.8162,.0655,.0064,.1101,.0018}, {.8028,.0663,.0034,.1265,.0011},
         {.7528,.0683,.0081,.1698,.0011}, {.6059,.0873,.0389,.2649,.0030},
         {.4603,.1160,.0750,.3452,.0035}, {.3772,.1352,.0943,.3891,.0043}
     };
-    constexpr int sizes[] = {1,2,3,5,7};
+    constexpr int sizes[]={1,2,3,5,7};
     const double altitude=std::max(0.0,state.qpAltitude);
-    const int band=altitude<150 ? 0:altitude<450 ? 1:altitude<850 ? 2:
-        altitude<1650 ? 3:altitude<3500 ? 4:5;
-    const int surgeExtra=static_cast<int>(std::min(80.0,altitude*.015));
-    const double surgeChance=std::clamp(altitude/40000.0,.01,.08);
-    double sum=0,mean=0;
-    for (int i=0;i<5;++i) { sum+=weights[band][i]; mean+=weights[band][i]*sizes[i]; }
-    mean=(1-surgeChance)*mean/sum+surgeChance*(8+surgeExtra*.5);
-    auto& progress=state.qpProgress;
-    progress.opponentTickRemainder+=std::max(0.0,deltaTime.seconds());
+    const int band=altitude<150?0:altitude<450?1:altitude<850?2:altitude<1650?3:altitude<3500?4:5;
+    const auto pressure=qp_pressure(altitude,config.ownAttackApm);
+    const double sigma=std::sqrt(std::log1p(pressure.relativeVariance));
+    auto& p=state.qpProgress;
+    p.opponentTickRemainder+=std::max(0.0,deltaTime.seconds());
+    const auto unit=[&]{return (double(rng())+.5)/(double(std::mt19937::max())+1);};
+    const auto next_attack=[&] {
+        // Packet mix is an approximation; public score stubs have no events.
+        if(unit()<std::clamp(altitude/40000.,.01,.08))return 8+int(rng()%9);
+        double sum=0;for(double weight:weights[band])sum+=weight;
+        double draw=unit()*sum;
+        for(int i=0;i<5;++i){draw-=weights[band][i];if(draw<0)return sizes[i];}
+        return sizes[4];
+    };
     constexpr double tick=1.0/60;
-    while (progress.opponentTickRemainder+1e-10>=tick) {
-        progress.opponentTickRemainder=std::max(0.0,progress.opponentTickRemainder-tick);
-        const double elapsed=config.elapsedGameTime.seconds()-progress.opponentTickRemainder;
-        double weight=3+(elapsed>=180)+(elapsed>=300)+(elapsed>=420);
-        if (!qp_hard_mode(config.qpMods) && config.inDanger) weight-=1.5;
-        if (Runtime::reverse(config.qpMods.messy) || Runtime::reverse(config.qpMods.doubleHole) ||
+    while(p.opponentTickRemainder+1e-10>=tick) {
+        p.opponentTickRemainder=std::max(0.0,p.opponentTickRemainder-tick);
+        if(!p.opponentPressureInitialized) {
+            const double u=unit(),v=unit();
+            p.opponentPressureNormal=std::sqrt(-2*std::log(u))*std::cos(6.283185307179586*v);
+            p.opponentPressureInitialized=true;
+        }
+        if(!p.opponentNextAttack)p.opponentNextAttack=next_attack();
+        const double elapsed=config.elapsedGameTime.seconds()-p.opponentTickRemainder;
+        const double fatigue=1+(elapsed>=540?.25:0)+(elapsed>=660?.25:0);
+        double rate=pressure.mean*fatigue*std::exp(sigma*p.opponentPressureNormal-.5*sigma*sigma);
+        if(!qp_hard_mode(config.qpMods) && config.inDanger)rate*=.5;
+        if(Runtime::reverse(config.qpMods.messy) || Runtime::reverse(config.qpMods.doubleHole) ||
             config.qpMods.allSpin==Runtime::AllSpinMode::Reverse)
-            weight-=std::min(2.5,config.garbageRows*.5);
-        weight-=progress.receiveProtection*(progress.receiveProtection+5)/50.0;
-        const double apm=qp_survival_apm(altitude)*std::max(0.0,weight)/3;
-        const double chance=-std::expm1(-apm/(mean*3600));
-        const auto unit=[&] { return double(rng())/(double(std::mt19937::max())+1); };
-        if (unit()>=chance) continue;
-        if (unit()<surgeChance) packets.push_back(8+static_cast<int>(rng()%(surgeExtra+1)));
-        else {
-            double draw=unit()*sum;
-            for (int i=0;i<5;++i) {
-                draw-=weights[band][i];
-                if (draw<0 || i==4) { packets.push_back(sizes[i]); break; }
-            }
+            rate*=std::max(0.,1-std::min(2.5,config.garbageRows*.5)/3);
+        // Quantum q and Bernoulli p give variance/mean q-rate/3600 = 0.93756,
+        // the independently fitted shot-noise term. The retained normal draw
+        // supplies the altitude/APM-dependent between-run variance.
+        const double quantum=0.9375553655037346+rate/3600;
+        if(unit()<rate/(quantum*3600))p.opponentLineCredits+=quantum;
+        // The fit already includes normal reception and Windup clipping.
+        // Account for that cost BEFORE applying real reception once below;
+        // Mod effects and transient receive protection remain in shared rules.
+        const double adjusted=qp_receive_attack(p.opponentNextAttack,altitude,altitude,
+            state.qpFloor,Runtime::QuickPlayConfig{},Runtime::QuickPlayProgress{},elapsed);
+        const int lo=int(std::floor(adjusted)),hi=int(std::ceil(adjusted));
+        const int capacity=16+int(std::max(0.,std::floor(altitude/500)-7));
+        const auto clipped=[&](int attack){return std::min(attack,capacity);};
+        const double cost=clipped(lo)*(1-(adjusted-lo))+clipped(hi)*(adjusted-lo);
+        if(cost>0 && p.opponentLineCredits+1e-10>=cost) {
+            p.opponentLineCredits=std::max(0.,p.opponentLineCredits-cost);
+            packets.push_back(p.opponentNextAttack);p.opponentNextAttack=next_attack();
         }
     }
 }
@@ -135,14 +153,7 @@ FramePrePresentationResult advance_frame_before_presentation(
         }
         const double elapsed = config.elapsedGameTime.seconds();
         const int stage = std::clamp(static_cast<int>(elapsed / 60), 0, 12);
-        int dueSolidLines=0;
-        for (int wave=0;wave<3;++wave) {
-            constexpr int normalLines[]={2,3,5},reverseLines[]={3,5,12};
-            const int count=Runtime::reverse(mods.expert) ? reverseLines[wave] : normalLines[wave];
-            const double since=elapsed-(480+120*wave);
-            if (since>=-1e-7)
-                dueSolidLines+=static_cast<int>(std::clamp(std::floor(since+1e-7)+1,0.0,double(count)));
-        }
+        const int dueSolidLines=qp_fatigue_garbage_due(mods,elapsed);
         result.permanentGarbageLines=std::max(0,dueSolidLines-p.fatigueGarbageLines);
         p.fatigueGarbageLines=std::max(p.fatigueGarbageLines,dueSolidLines);
         p.fatigueStage = std::max(p.fatigueStage, stage);
@@ -155,7 +166,7 @@ FramePrePresentationResult advance_frame_before_presentation(
         p.windupWarnings.erase(std::remove_if(p.windupWarnings.begin(),p.windupWarnings.end(),
             [elapsed](const auto& warning) { return warning.end<=elapsed; }),p.windupWarnings.end());
         if (config.replayMode) result.permanentGarbageLines = 0;
-        state.survivalApm = qp_survival_apm(state.qpAltitude);
+        state.survivalApm = qp_pressure(state.qpAltitude,config.ownAttackApm).mean;
     }
 
     return result;

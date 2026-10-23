@@ -40,6 +40,7 @@
 #include <unistd.h>
 #endif
 
+namespace TetrTests::settings_menu_test {
 namespace {
 #ifdef _WIN32
 constexpr int up=VK_UP, down=VK_DOWN, enter=VK_RETURN, left=VK_LEFT, right=VK_RIGHT;
@@ -848,7 +849,7 @@ void map_menu_interaction() {
     std::filesystem::remove_all(directory);
 }
 
-int main() try {
+int run(int argc,char** argv) try {
     App::UiText::set_language(App::UiText::Language::English);
     for(bool hidden:{false,true}) {
         Fixture f;f.first.context.config.display.obscuredColors=hidden;
@@ -870,13 +871,36 @@ int main() try {
         f.first.user.persistencePath=(dir/"player.ini").string();UserConfig::save(f.first.user);
         const auto diskBefore=[&]{std::ifstream file(f.first.user.persistencePath);return std::string(std::istreambuf_iterator<char>(file),{});}();
         f.select_category("MODEL");f.app.settingsMenu.path={"MODEL","recent-replays"};
-        assert(f.run({{enter,"Press Enter again to play this replay"},{right,"Confirmation cancelled."},{enter,"Press Enter again to play this replay"},{enter,{}}})==App::Settings::MenuResult::StartGame);
+        auto tree=App::Settings::Model::make_tree(f.first.user,false,0);
+        auto& recent=child(child(tree,"MODEL"),"recent-replays");
+        assert(recent.children.front().key=="clear-replays" && recent.children.front().confirmTwice);
+        auto& actions=child(recent,replay->generic_u8string());
+        assert(actions.kind==App::Settings::Model::NodeKind::Group && actions.literalTitle);
+        assert(actions.children.front().key=="play" && !actions.children.front().confirmTwice);
+        assert(child(actions,"delete").confirmTwice);
+        assert(f.run({{down,"> Recent game"},{enter,"> Play replay"},{enter,{}}})==App::Settings::MenuResult::StartGame);
         assert(f.app.replayPreview && f.app.replayPreview->path==replay->generic_u8string());
         assert(f.first.user.gameMode==5 && f.first.user.replayPath=="previous.txt");
         const auto diskAfter=[&]{std::ifstream file(f.first.user.persistencePath);return std::string(std::istreambuf_iterator<char>(file),{});}();assert(diskBefore==diskAfter);
-        std::filesystem::remove(*replay);
-        auto tree=App::Settings::Model::make_tree(f.first.user,false,0);
-        assert(child(child(tree,"MODEL"),"recent-replays").children.front().key=="empty");
+        f.run({{down,"> Delete replay"},{enter,"Press Enter again to delete this replay",std::chrono::milliseconds(350)},
+               {right,"Confirmation cancelled."},{retry,{}}});
+        assert(std::filesystem::exists(*replay));
+        f.run({{enter,"Press Enter again to delete this replay",std::chrono::milliseconds(350)},
+               {enter,"Replay deleted."},{retry,{}}});
+        assert(!std::filesystem::exists(*replay) && f.app.settingsMenu.path==std::vector<std::string>({"MODEL","recent-replays"}));
+        tree=App::Settings::Model::make_tree(f.first.user,false,0);
+        const auto& empty=child(child(tree,"MODEL"),"recent-replays");
+        assert(empty.children.front().key=="clear-replays" && empty.children.at(1).key=="empty");
+        const auto clearFirst=Replay::save_recent("{{Model,0}}{end_all,0}","First");assert(clearFirst);
+        const auto clearSecond=Replay::save_recent("{{Model,0}}{end_all,0}","Second");assert(clearSecond);
+        const auto extra=dir/"extra-copy.txt";std::filesystem::copy_file(*clearFirst,extra);
+        f.app.settingsMenu.selectedEntries["root/MODEL/recent-replays"]="clear-replays";
+        f.run({{enter,"Press Enter again to delete all recent",std::chrono::milliseconds(350)},
+               {right,"Confirmation cancelled."},{retry,{}}});
+        assert(std::filesystem::exists(*clearFirst) && std::filesystem::exists(*clearSecond));
+        f.run({{enter,"Press Enter again to delete all recent"},{enter,"Recent replays cleared."},{retry,{}}});
+        assert(Replay::recent_replays().empty() && !std::filesystem::exists(*clearFirst) && !std::filesystem::exists(*clearSecond));
+        assert(std::filesystem::exists(extra));
         std::filesystem::current_path(original);std::filesystem::remove_all(dir);
     }
     {
@@ -2217,7 +2241,8 @@ int main() try {
     }
     {
         Fixture f;
-        const auto directory=std::filesystem::temp_directory_path()/"tetr_settings_owner_test";
+        const auto directory=std::filesystem::temp_directory_path()/("tetr_settings_owner_test_"+
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         f.first.user.persistencePath=(directory/"player1.ini").string();
         f.second.user.persistencePath=(directory/"player2.ini").string();
         f.first.user.gameMode=6; f.first.user.fieldWidth=17;
@@ -2248,10 +2273,7 @@ int main() try {
         assert(f.first.user.fieldWidth==17 && f.second.user.fieldWidth==19);
         assert(f.first.user.holdEnabled==1 && f.second.user.holdEnabled==0);
         assert(f.first.user.squareStyle==f.second.user.squareStyle && f.first.user.obscuredColors==f.second.user.obscuredColors);
-        std::filesystem::remove(directory/"player1.ini");
-        std::filesystem::remove(directory/"player2.ini");
-        std::filesystem::remove(directory/"active_player");
-        std::filesystem::remove(directory);
+        std::filesystem::remove_all(directory); // Includes the save-lock sidecars.
         App::UiText::set_language(App::UiText::Language::English);
     }
     {
@@ -2939,7 +2961,9 @@ int main() try {
         std::filesystem::remove(path);
     }
     std::cerr<<"settings_menu_test: OK\n";
+    return 0;
 } catch (const std::exception& error) {
     std::cerr<<error.what()<<'\n';
     return 1;
 }
+} // namespace TetrTests::settings_menu_test

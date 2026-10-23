@@ -12,6 +12,7 @@
 #include <random>
 #include <string>
 
+namespace TetrTests::config_boundary_test {
 namespace {
 
 void normalization_is_deterministic() {
@@ -253,9 +254,24 @@ void malformed_replays_are_rejected() {
     assert(!Replay::decode_config_prefix("{{garbage_seed,99999999999999999999}}", config, result));
 }
 
+void short_field_dimensions_round_trip() {
+    for(int height:{0,1,2,3}) {
+        UserConfig::Settings user;user.fieldHeight=height;
+        const auto config=Runtime::normalize_user_config(user,Runtime::GameMode::Zen);
+        assert(config.field.height==height);
+        Runtime::RuntimeConfig restored;Replay::ConfigPrefixResult prefix;
+        assert(Replay::decode_config_prefix(Replay::encode_config_prefix(config)+"}",restored,prefix));
+        assert(restored.field.height==height);
+        Runtime::Playfield field;field.initialize(10,height);
+        field.set_cell(-1,4,Runtime::BoardCell::piece(3));
+        auto copy=field;assert(copy.initialized() && copy.height()==height && copy.cell(-1,4).occupied());
+        assert(!copy.contains(height,4));
+    }
+}
+
 } // namespace
 
-int main() {
+int run(int argc,char** argv) {
     normalization_is_deterministic();
     local_versus_uses_multiplayer_garbage_with_player_specific_settings();
     garbage_in_time_applies_outside_quick_play();
@@ -263,4 +279,7 @@ int main() {
     replay_config_round_trips();
     malformed_replays_are_rejected();
     cheese_probabilities_are_independent();
+    short_field_dimensions_round_trip();
+    return 0;
 }
+} // namespace TetrTests::config_boundary_test

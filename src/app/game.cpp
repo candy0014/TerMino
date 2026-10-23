@@ -1,5 +1,6 @@
 #include "single_player_challenges.h"
 #include "bot_battle_royale.h"
+#include "online_replay.h"
 #include "tetr/app/game.h"
 #include "tetr/app/place.h"
 #include "tetr/app/settings_menu.h"
@@ -20,6 +21,7 @@
 #include "tetr/network/lobby_channel.h"
 #include "tetr/network/network_services.h"
 #include "tetr/network/round_statistics.h"
+#include "tetr/network/room_replay.h"
 #include "tetr/replay/session_state.h"
 #include "tetr/replay/recorder.h"
 #include "tetr/replay/playback_clock.h"
@@ -38,6 +40,9 @@
 namespace App {
 
 void run(Runtime::GameContext& context){
+    if(context.replay_component() && Replay::session(context).multiplayerReplay) {
+        run_multiplayer_replay(context);return;
+    }
     if (context.config.mode.mode == Runtime::GameMode::LocalVersus) {
         if (!context.app_component() || !context.app_component()->localPlayerTwoContext) {
             throw std::logic_error("Local Versus requires a second player context");
@@ -132,6 +137,11 @@ void run(Runtime::GameContext& context){
         Replay::session(context).undoCount=0;
         Replay::session(context).pauseCount=0;
     }
+    if(roomBattle && roomParticipant)Network::begin_room_replay_recording(context);
+    struct OnlineRecordingScope {
+        Runtime::GameContext& context;
+        ~OnlineRecordingScope(){try{finish_online_replay(context);}catch(const std::exception& e){std::cerr<<"Replay finalization: "<<e.what()<<'\n';}}
+    } onlineRecordingScope{context};
 
     auto botRoyale=start_bot_battle_royale(context);
     struct RoyaleScope {ApplicationState* app;~RoyaleScope(){if(app){app->challengeFrame={};app->challengeSendAttack={};}}} royaleScope{context.app_component()};
@@ -151,8 +161,7 @@ void run(Runtime::GameContext& context){
             if(outcome==Engine::GameLoopExit::OpenSettings){
                 pauseScope.end();
                 if(roomBattle) {
-                    Replay::add_replay(context,Replay::OperationKind::EndAll);
-                    remember_finished_replay(context);
+                    finish_online_replay(context);
                     Network::send_round_statistics(context,first);
                     Network::handle_room_game_control(context,false);
                     first.presentation.activePose.reset();first.presentation.activePieceType.reset();
@@ -166,8 +175,7 @@ void run(Runtime::GameContext& context){
             }
             if(outcome==Engine::GameLoopExit::Retry){
                 if(roomBattle) {
-                    Replay::add_replay(context,Replay::OperationKind::EndAll);
-                    remember_finished_replay(context);
+                    finish_online_replay(context);
                     Network::send_round_statistics(context,first);
                     Network::handle_room_game_control(context,true);
                     pauseScope.end();inputScope.end();watch_room_match(context,true);
@@ -176,9 +184,8 @@ void run(Runtime::GameContext& context){
                 return;
             }
             if(roomBattle) {
-                Replay::add_replay(context,Replay::OperationKind::EndAll);
-                remember_finished_replay(context);
                 if(outcome==Engine::GameLoopExit::Won) ++first.gameplay.scoring.wins;
+                finish_online_replay(context);
                 Network::send_round_statistics(context,first);
                 if(outcome!=Engine::GameLoopExit::Won) {
                     // Send the final fixed field (including fatal garbage)

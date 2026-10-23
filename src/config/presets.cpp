@@ -1,3 +1,4 @@
+#include "tetr/util/runtime_directory_lock.h"
 #include "tetr/challenges/challenges.h"
 #include "tetr/config/presets.h"
 #include "tetr/runtime/game_modes.h"
@@ -419,6 +420,7 @@ static bool write_collection(const Collection& collection,const std::filesystem:
     return true;
 }
 bool save(SavedPreset& preset,const std::filesystem::path& path) {
+    Util::FileWriteLock writeLock(path);if(!writeLock.acquired())return false;
     if(preset.name.empty() || preset.name.size()>256 || preset.name.find_first_of("\r\n")!=std::string::npos) return false;
     Collection collection;if(!load(collection,path)) return false;
     auto saved=preset;
@@ -438,13 +440,16 @@ std::optional<SavedPreset> find(int id,const std::filesystem::path& path) {
     return found==collection.presets.end() ? std::nullopt : std::optional<SavedPreset>{*found};
 }
 bool remove_saved(int id,const std::filesystem::path& path) {
+    Util::FileWriteLock writeLock(path);if(!writeLock.acquired())return false;
     Collection collection;if(!load(collection,path)) return false;
     const auto found=std::find_if(collection.presets.begin(),collection.presets.end(),[&](const auto& preset){return preset.id==id;});
     if(found==collection.presets.end()) return false;
     collection.presets.erase(found);return write_collection(collection,path);
 }
 bool remap_maps(const std::vector<std::pair<int,int>>& changes,const std::filesystem::path& path) {
+    Util::FileWriteLock writeLock(path);if(!writeLock.acquired())return false;
     Collection collection;if(!load(collection,path)) return false;
+    bool updated=false;
     for(auto& preset:collection.presets) {
         bool changed=false;
         for(auto* fields:{&preset.fields,preset.playerTwoFields ? &*preset.playerTwoFields : nullptr}) {
@@ -462,9 +467,9 @@ bool remap_maps(const std::vector<std::pair<int,int>>& changes,const std::filesy
                 break;
             }
         }
-        if(changed && !save(preset,path)) return false;
+        updated=updated || changed;
     }
-    return true;
+    return !updated || write_collection(collection,path);
 }
 
 }

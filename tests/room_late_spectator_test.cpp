@@ -24,6 +24,7 @@
 #include <thread>
 #include <vector>
 
+namespace TetrTests::room_late_spectator_test {
 using namespace Network;
 using namespace std::chrono_literals;
 struct Player {
@@ -42,7 +43,7 @@ struct Player {
     }
     ~Player(){disconnect_online(network);}
 };
-int main(int argc,char** argv) {
+int run(int argc,char** argv) {
     std::unique_ptr<RelayServer> server;
     if(argc==1) {server=std::make_unique<RelayServer>(635);server->bind(3035);}
     std::atomic<bool> running=true;std::thread worker;
@@ -169,4 +170,6 @@ int main(int argc,char** argv) {
         }
     }
     std::cerr<<"room_late_spectator_test: live 3-player entry/re-entry and spectator Retry, host rules on/off OK\n";
+    return 0;
 }
+} // namespace TetrTests::room_late_spectator_test

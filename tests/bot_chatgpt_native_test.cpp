@@ -2,8 +2,9 @@
 #include <cassert>
 #include <cmath>
 
+namespace TetrTests::bot_chatgpt_native_test {
 namespace A = Bot_chatgpt::Analysis;
-int main() {
+int run(int argc,char** argv) {
     A::PlainEngine geometry; assert(geometry.prepare(10, 40));
     for (int held : {-2, -1, 4}) {
         Bot_chatgpt::RootSnapshot root;
@@ -37,4 +38,6 @@ int main() {
         }
         assert(traced.ai()->records.size() > 100);
     }
+    return 0;
 }
+} // namespace TetrTests::bot_chatgpt_native_test

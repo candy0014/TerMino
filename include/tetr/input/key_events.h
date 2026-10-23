@@ -8,6 +8,7 @@
 #include <deque>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 namespace Input {
@@ -23,6 +24,8 @@ struct KeyEvent {
 // Autorepeat is deliberately ignored: DAS/ARR belongs to the game engine.
 class KeyEventBuffer {
 public:
+    using SampleTime = std::optional<std::chrono::steady_clock::time_point>;
+
     void update(int key, bool down,
         std::chrono::steady_clock::time_point time = std::chrono::steady_clock::now()) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -36,21 +39,37 @@ public:
         changed_.notify_all();
     }
 
-    std::map<int, bool> snapshot(std::uint64_t& cursor,
-        std::map<int, std::chrono::steady_clock::time_point>* pressedAt = nullptr) const {
+    // A polled backend publishes a complete batch before the consumer may
+    // advance held-key timers through this time. Native asynchronous backends
+    // leave this unset and retain their existing wall-clock behavior.
+    void complete_sample(std::chrono::steady_clock::time_point time) {
         std::lock_guard<std::mutex> lock(mutex_);
-        cursor = sequence_;
-        if (pressedAt) *pressedAt = pressedAt_;
-        return down_;
+        sampledThrough_ = sampledThrough_ ? std::max(*sampledThrough_, time) : time;
+        sampledDown_ = down_;
+        sampledPressedAt_ = pressedAt_;
+        sampledSequence_ = ++sequence_;
+        changed_.notify_all(); // Held keys need progress even without transitions.
     }
 
-    std::vector<KeyEvent> read(std::uint64_t& cursor) const {
+    std::map<int, bool> snapshot(std::uint64_t& cursor,
+        std::map<int, std::chrono::steady_clock::time_point>* pressedAt = nullptr,
+        SampleTime* sampledThrough = nullptr) const {
         std::lock_guard<std::mutex> lock(mutex_);
+        cursor = visible_sequence();
+        if (sampledThrough) *sampledThrough = sampledThrough_;
+        if (pressedAt) *pressedAt = sampledThrough_ ? sampledPressedAt_ : pressedAt_;
+        return sampledThrough_ ? sampledDown_ : down_;
+    }
+
+    std::vector<KeyEvent> read(std::uint64_t& cursor, SampleTime* sampledThrough = nullptr) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto visible = visible_sequence();
+        if (sampledThrough) *sampledThrough = sampledThrough_;
         std::vector<KeyEvent> result;
         for (auto it = events_.rbegin(); it != events_.rend() && it->sequence > cursor; ++it)
-            result.push_back(*it);
+            if (it->sequence <= visible) result.push_back(*it);
         std::reverse(result.begin(), result.end());
-        cursor = sequence_;
+        cursor = visible;
         return result;
     }
 
@@ -58,6 +77,9 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         down_.clear();
         pressedAt_.clear();
+        sampledDown_.clear();
+        sampledPressedAt_.clear();
+        sampledSequence_ = sequence_;
         events_.clear();
         // Cursors must remain monotonic across backend restarts.
     }
@@ -76,16 +98,21 @@ public:
 
     void wait(std::uint64_t cursor, std::chrono::microseconds timeout) const {
         std::unique_lock<std::mutex> lock(mutex_);
-        changed_.wait_for(lock,timeout,[&] { return sequence_ != cursor; });
+        changed_.wait_for(lock,timeout,[&] { return visible_sequence() != cursor; });
     }
 
 private:
+    std::uint64_t visible_sequence() const { return sampledThrough_ ? sampledSequence_ : sequence_; }
     mutable std::mutex mutex_;
     mutable std::condition_variable changed_;
     std::map<int, bool> down_;
     std::map<int, std::chrono::steady_clock::time_point> pressedAt_;
     std::deque<KeyEvent> events_;
     std::uint64_t sequence_ = 0;
+    SampleTime sampledThrough_;
+    std::uint64_t sampledSequence_ = 0;
+    std::map<int, bool> sampledDown_;
+    std::map<int, std::chrono::steady_clock::time_point> sampledPressedAt_;
 };
 
 } // namespace Input

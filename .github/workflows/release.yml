@@ -65,8 +65,8 @@ jobs:
         run: cmake --build build-release --config Release --parallel 2
       - name: Full native CTest suite
         run: ctest --test-dir build-release -C Release --output-on-failure --parallel 2 --output-junit test-results.xml
-      - name: Package both clients from the tested build
-        run: python tools/package_frontends.py --build-dir build-release --frontend both --no-build --output-dir dist
+      - name: Package terminal, graphics and server together
+        run: python tools/package_frontends.py --build-dir build-release --frontend bundle --no-build --output-dir dist
       - name: Linux hidden packaged client checks
         if: runner.os == 'Linux'
         env:
@@ -115,7 +115,7 @@ jobs:
           pattern: release-*
           merge-multiple: true
           path: release-assets
-      - name: Verify all four candidates use the selected source
+      - name: Verify both platform bundles use the selected source
         run: python tools/check_frontend_distribution.py release-assets --matrix --structure-only
       - name: Require completed native acceptance
         run: python tools/check_frontend_acceptance.py docs/acceptance/native.json --commit $(git rev-parse HEAD)
