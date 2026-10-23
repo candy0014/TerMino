@@ -4,6 +4,7 @@
 #include <chrono>
 #include <fstream>
 #include <cmath>
+#include <string>
 namespace TetrTests::window_config_test {
 int run(int argc,char** argv) {
     const auto logical=Graphical::Viewport::fit(1200,800),pixels=Graphical::Viewport::fit(2400,1600);
