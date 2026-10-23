@@ -913,7 +913,10 @@ void attack_trajectories(int target,unsigned seed,double hit,int searchWidth,boo
         // its strength requirement. Both must still produce real attacks.
         const bool backfireSpins=user.qpBackfire && s.maxAttack>=2 && spins>=target/20 &&
             s.difficultClears>=target/20 && s.totalAttack>=target/5;
-        const bool snakeEyesSingles=user.qpSnakeEyes && s.maxAttack>=2 &&
+        // A valid Snake Eyes single may send exactly one line. Require
+        // sustained positive singles and their real total attack, rather
+        // than an incidental combo burst from a time-limited trajectory.
+        const bool snakeEyesSingles=user.qpSnakeEyes && s.maxAttack>=1 &&
             damagingSingles>=std::max(1,target/10) && s.totalAttack>=damagingSingles;
         assert(bursts || sustainedSpins || backfireSpins || snakeEyesSingles);
         assert((multiple>=std::max(2,target/50) || sustainedSpins || snakeEyesSingles) && quads+spins>0);

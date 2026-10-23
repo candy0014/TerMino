@@ -288,7 +288,9 @@ std::optional<Datagram> UdpSocket::receive_for(std::chrono::milliseconds timeout
             if(auto datagram=try_receive()) return datagram;
             continue;
         }
-        if(ready==0) return std::nullopt;
+        // Some socket providers can finish a timeout early. The monotonic
+        // deadline, rather than one select call, defines receive_for's wait.
+        if(ready==0) continue;
 #ifdef __linux__
         if(errno==EINTR) continue;
 #endif
