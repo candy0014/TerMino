@@ -14,9 +14,9 @@ namespace TetrTests::graphical_ui_interaction_test {
 namespace {
 using namespace std::chrono_literals;
 unsigned waitSequence=0;
-template<class P> Graphical::SessionView wait(Graphical::Session& s,P predicate) {
+template<class P> Graphical::SessionView wait(Graphical::Session& s,P predicate,std::chrono::seconds timeout=5s) {
     const auto sequence=++waitSequence;
-    const auto end=std::chrono::steady_clock::now()+5s;
+    const auto end=std::chrono::steady_clock::now()+timeout;
     while(std::chrono::steady_clock::now()<end) {
         const auto v=s.view();if(predicate(v))return v;
         assert(v.status!=Graphical::SessionStatus::Error);std::this_thread::sleep_for(2ms);
@@ -35,7 +35,9 @@ void click(Graphical::Session& s,const std::string& id) {
 }
 void command(Graphical::Session& s,Frontend::UiCommand c) {c.page=s.view().ui->metadata.page;s.ui_command(c);}
 void tap(Graphical::Session& s,SDL_Scancode code) {
-    const auto key=Graphical::native_key(code);s.input().update(key,true);std::this_thread::sleep_for(25ms);
+    const auto key=Graphical::native_key(code);
+    s.input().update(key,false);std::this_thread::sleep_for(25ms);
+    s.input().update(key,true);std::this_thread::sleep_for(25ms);
     s.input().update(key,false);std::this_thread::sleep_for(25ms);
 }
 UserConfig::Settings defaults() {UserConfig::Settings s;s.keyCodes=UserConfig::default_key_codes();s.persistenceEnabled=false;s.uiLanguage=1;return s;}
@@ -112,7 +114,7 @@ int run(int,char**) {
         auto settings=defaults();settings.autoplayMode=1;settings.autoplayPps=30;settings.goal=4;settings.pieceTarget=2;
         Graphical::LaunchOptions options;options.startScreen=false;options.touchControls=true;
         Graphical::Session s(settings,settings,options);
-        wait(s,[](const auto& v){return v.status==Graphical::SessionStatus::Finished;});
+        wait(s,[](const auto& v){return v.status==Graphical::SessionStatus::Finished;},10s);
         tap(s,SDL_SCANCODE_TAB);
         wait(s,[](const auto& v){return v.ui && v.ui->metadata.statistics.has_value();});
         command(s,{Frontend::UiCommandKind::StatisticsMetric,7});

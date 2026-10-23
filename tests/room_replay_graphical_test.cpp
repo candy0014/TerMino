@@ -34,7 +34,11 @@ template<class Predicate> Graphical::SessionView wait(Graphical::Session& s,Pred
     }
 }
 void tap(Graphical::Session& s,SDL_Scancode code) {
-    const auto key=Graphical::native_key(code);s.input().update(key,true);std::this_thread::sleep_for(25ms);
+    const auto key=Graphical::native_key(code);
+    // A published return page may precede its controller's held-key reset.
+    // Let it observe a released key before injecting the next fresh press.
+    s.input().update(key,false);std::this_thread::sleep_for(25ms);
+    s.input().update(key,true);std::this_thread::sleep_for(25ms);
     s.input().update(key,false);std::this_thread::sleep_for(25ms);
 }
 std::string read(const std::filesystem::path& path){std::ifstream in(path,std::ios::binary);return {std::istreambuf_iterator<char>(in),{}};}
@@ -81,7 +85,8 @@ int run(int,char**) {
         tap(session,SDL_SCANCODE_TAB);wait(session,[](const auto& v){return v.ui && v.ui->metadata.kind==Frontend::UiKind::Statistics;});
         tap(session,SDL_SCANCODE_S);wait(session,[&](const auto&){return session.text_input_active();});
         session.text_event({Frontend::TextEditKind::Insert,"多人录像副本.txt"});session.text_event({Frontend::TextEditKind::Confirm});
-        wait(session,[&](const auto&){return !session.text_input_active() && fs::exists(fs::u8path(".tetr/replay/多人录像副本.txt"));});
+        wait(session,[&](const auto& v){return !session.text_input_active() && v.ui && v.ui->metadata.id=="statistics" &&
+            fs::exists(fs::u8path(".tetr/replay/多人录像副本.txt"));});
         assert(read("fixture.txt")==file);
         auto copy=read(fs::u8path(".tetr/replay/多人录像副本.txt"));assert(copy.size()>17);copy.resize(copy.size()-17);
         const auto decoded=Replay::decode_multiplayer_replay(copy);assert(decoded && decoded->viewer==102 && decoded->tracks.size()==2 && decoded->complete());
