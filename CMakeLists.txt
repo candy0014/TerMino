@@ -927,6 +927,11 @@ if(BUILD_TESTING AND TETR_BUILD_TERMINAL)
     add_test(NAME bot_quick_play_mod_attack COMMAND tetr_bot_tests bot_quick_play_mods_test --mod-benchmark 100)
     set_tests_properties(bot_quick_play_attack bot_quick_play_attack_seed
         bot_quick_play_attack_pressure bot_quick_play_attack_small bot_quick_play_mod_attack PROPERTIES TIMEOUT 300)
+    # These strength checks use real wall-clock search budgets. Competing test
+    # processes change the explored trajectories on hosted runners, so retain
+    # every attack assertion while giving each benchmark its own CPU interval.
+    set_tests_properties(bot_quick_play_attack bot_quick_play_attack_seed
+        bot_quick_play_attack_pressure bot_quick_play_attack_small bot_quick_play_mod_attack PROPERTIES RUN_SERIAL TRUE)
     if(MSVC)
         # The unchanged 160-piece, width-300 trajectory exercises all bots;
         # the scalar MSVC build takes longer on hosted Windows runners.
@@ -1223,7 +1228,8 @@ if(BUILD_TESTING AND TETR_BUILD_TERMINAL)
     add_test(NAME board_view_stagger_32 COMMAND tetr_network_tests board_view_stagger_test 32)
     set_tests_properties(board_view_stagger_32 PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3027)
     add_test(NAME board_view_steady_8 COMMAND tetr_network_tests board_view_stagger_test 8 --steady)
-    set_tests_properties(board_view_steady_8 PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3027)
+    # Measure the relay's real 30 Hz cadence without competing Bot benchmarks.
+    set_tests_properties(board_view_steady_8 PROPERTIES TIMEOUT 40 RESOURCE_LOCK udp3027 RUN_SERIAL TRUE)
 
     tetr_test_program(multiplayer_round_lifecycle_test tests/multiplayer_round_lifecycle_test.cpp)
     target_link_libraries(multiplayer_round_lifecycle_test PRIVATE tetr_app tetr_network)

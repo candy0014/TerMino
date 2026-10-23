@@ -369,7 +369,7 @@ static ReplaySaveResult save_replay_interactively(
        Replay::rename_recent(std::filesystem::u8path(state.recentPath),*path))state.recentPath=path->generic_u8string();
     attach_challenge_replay(context,*path);
     if(second)attach_challenge_replay(*second,*path);
-    const std::string message=UiText::tr("Replay saved: ")+path->string();
+    const std::string message=UiText::tr("Replay saved: ")+path->generic_u8string();
     feedback(message);
     return ReplaySaveResult::Saved;
 }
@@ -439,7 +439,7 @@ void run_post_game_interaction(Runtime::GameContext& context, Runtime::PlayerSes
                 if(!context.config.mode.replayMode && !state.recentPath.empty() &&
                    Replay::rename_recent(std::filesystem::u8path(state.recentPath),*replayPath))state.recentPath=replayPath->generic_u8string();
                 attach_challenge_replay(context,*replayPath);
-                std::cerr << "TETR_TEST_REPLAY path=" << replayPath->string() << '\n';
+                std::cerr << "TETR_TEST_REPLAY path=" << replayPath->generic_u8string() << '\n';
             }
         }
         return;
@@ -539,7 +539,7 @@ void run_local_versus_post_game_interaction(
                 if(Replay::rename_recent(std::filesystem::u8path(state.recentPath),*replayPath))state.recentPath=replayPath->generic_u8string();
                 attach_challenge_replay(first,*replayPath);attach_challenge_replay(second,*replayPath);
                 std::cerr << "TETR_LOCAL_VERSUS_REPLAY path="
-                          << replayPath->string() << '\n';
+                          << replayPath->generic_u8string() << '\n';
             }
         }
     }

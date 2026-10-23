@@ -79,7 +79,13 @@ struct Press {
     std::chrono::milliseconds minimumHold{5};
     bool mustBeRead = true;
     std::vector<int> modifiers;
+    bool waitForRedrawOnRelease = false;
 };
+Press captured_key(int key) {
+    Press press{key,{}};
+    press.waitForRedrawOnRelease=true;
+    return press;
+}
 std::string compact_screen(const std::string& output) {
     Test::TerminalScreen screen;
     screen.feed(output);
@@ -96,7 +102,7 @@ struct Script {
     using Clock=std::chrono::steady_clock;
     std::vector<Press> presses;
     std::ostringstream& output;
-    std::size_t index=0, offset=0;
+    std::size_t index=0, offset=0, releaseOutput=0;
     std::size_t initialOutput=output.str().size();
     bool releasing=true, sampled=false, releaseFinal=false, releasedPrevious=false;
     Clock::time_point phaseStart=Clock::now();
@@ -127,7 +133,12 @@ struct Script {
             // held keys. Wait for this invocation's first rendered screen.
             const bool releaseObserved=index==0 ? output.str().size()>initialOutput :
                 !presses[index-1].mustBeRead || releasedPrevious;
-            if (releaseObserved && elapsed>std::chrono::milliseconds(index==0 ? 30 : 5)) {
+            // Binding persistence and held-key suppression finish before the
+            // menu redraws. Wait for that redraw before the next navigation
+            // press, including when Windows scans F9 after the arrow keys.
+            const bool redrawObserved=index==0 || !presses[index-1].waitForRedrawOnRelease ||
+                output.str().size()>releaseOutput;
+            if (releaseObserved && redrawObserved && elapsed>std::chrono::milliseconds(index==0 ? 30 : 5)) {
                 releasing=false;
                 phaseStart=Clock::now();
                 offset=output.str().size();
@@ -142,6 +153,7 @@ struct Script {
             releasing=true;
             releasedPrevious=false;
             sampled=false;
+            releaseOutput=output.str().size();
             phaseStart=Clock::now();
             return false;
         }
@@ -1876,9 +1888,9 @@ int run(int argc,char** argv) try {
         f.first.user.keybindingPath=file.string();
         UserConfig::set_control_keys(f.first.user,0,{left,secondRetry});
         Input::refresh_bindings(f.first.input,f.first.user.keyCodes,f.first.user.additionalKeyCodes);
-        f.run({{right,"> Move Piece Left ="},{right,"Edit Move Piece Left"},{secondRetry,{}},
-            {right,"Edit Move Piece Left"},{customSettings,{}},
-            {right,"Edit Move Piece Left"},{left,{}},{retry,{}}});
+        f.run({{right,"> Move Piece Left ="},{right,"Edit Move Piece Left"},captured_key(secondRetry),
+            {right,"Edit Move Piece Left"},captured_key(customSettings),
+            {right,"Edit Move Piece Left"},captured_key(left),{retry,{}}});
         assert(UserConfig::control_keys(f.first.user,0)==std::vector<int>({customSettings}));
         assert(f.first.input.bindings.action_for(customSettings)==Input::Action::MoveLeft);
         assert(f.first.input.bindings.action_for(left)==Input::Action::Unknown);

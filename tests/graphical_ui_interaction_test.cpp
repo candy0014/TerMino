@@ -38,9 +38,9 @@ UserConfig::Settings defaults() {UserConfig::Settings s;s.keyCodes=UserConfig::d
 int run(int,char**) {
     namespace fs=std::filesystem;
     const auto old=fs::current_path(),dir=fs::temp_directory_path()/("termino-ui-interaction-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(dir/".tetr/replay/中文 目录");fs::current_path(dir);
+    fs::create_directories(dir/fs::u8path(".tetr/replay/中文 目录"));fs::current_path(dir);
     struct Restore {fs::path old,dir;~Restore(){fs::current_path(old);fs::remove_all(dir);}} restore{old,dir};
-    const auto file=dir/".tetr/replay/中文 目录/回放 文件.txt";std::ofstream(file)<<"fixture";
+    const auto file=dir/fs::u8path(".tetr/replay/中文 目录/回放 文件.txt");std::ofstream(file)<<"fixture";
     {
         auto settings=defaults();settings.gameMode=5;settings.replayPath="original.txt";
         Graphical::Session s(settings,settings,{});page(s,"start");click(s,"settings");page(s,"root");click(s,"MODEL");page(s,"MODEL");

@@ -80,7 +80,7 @@ void persistence() {
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(dir);const auto file=dir/"config.json";
     const std::string other="{\"version\":1,\"graphics\":{\"theme\":\"unchanged\"},\"players\":{\"one\":{\"name\":\"TEST\"}}}";
-    std::ofstream(file)<<other;
+    std::ofstream(file,std::ios::binary)<<other;
     auto c=UserConfig::load_virtual_controls(file);c.layouts[0].buttons[0].opacity=0;
     auto b=c.layouts[0].buttons[0];b.id="polygon";b.shape=Shape::Polygon;b.player=1;
     b.vertices={{0,0},{1,0},{.4,.4},{0,1}};b.width=2.4;b.rotation=-57.5;c.layouts[0].buttons.push_back(b);
@@ -95,7 +95,7 @@ void persistence() {
         if(damage==1){auto p=text.find("\"orientation\": \"landscape\"");assert(p!=std::string::npos);text.replace(p,26,"\"orientation\": \"portrait\"");}
         if(damage==2){auto p=text.find("\"player\": 0");assert(p!=std::string::npos);text.replace(p,11,"\"player\": 0.5");}
         if(damage==3)text="{broken";
-        std::ofstream(file,std::ios::trunc)<<text;
+        std::ofstream(file,std::ios::binary|std::ios::trunc)<<text;
         bool threw=false;try{UserConfig::load_virtual_controls(file);}catch(const std::exception&){threw=true;}
         assert(threw && !UserConfig::save_virtual_controls(c,file) && contents(file)==text);
     }

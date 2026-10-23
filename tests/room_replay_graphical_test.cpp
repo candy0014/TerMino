@@ -76,9 +76,9 @@ int run(int,char**) {
         tap(session,SDL_SCANCODE_TAB);wait(session,[](const auto& v){return v.ui && v.ui->metadata.kind==Frontend::UiKind::Statistics;});
         tap(session,SDL_SCANCODE_S);wait(session,[&](const auto&){return session.text_input_active();});
         session.text_event({Frontend::TextEditKind::Insert,"多人录像副本.txt"});session.text_event({Frontend::TextEditKind::Confirm});
-        wait(session,[&](const auto&){return !session.text_input_active() && fs::exists(".tetr/replay/多人录像副本.txt");});
+        wait(session,[&](const auto&){return !session.text_input_active() && fs::exists(fs::u8path(".tetr/replay/多人录像副本.txt"));});
         assert(read("fixture.txt")==file);
-        auto copy=read(".tetr/replay/多人录像副本.txt");assert(copy.size()>17);copy.resize(copy.size()-17);
+        auto copy=read(fs::u8path(".tetr/replay/多人录像副本.txt"));assert(copy.size()>17);copy.resize(copy.size()-17);
         const auto decoded=Replay::decode_multiplayer_replay(copy);assert(decoded && decoded->viewer==102 && decoded->tracks.size()==2 && decoded->complete());
         tap(session,SDL_SCANCODE_ESCAPE);wait(session,[](const auto& v){return !v.ui && v.replay;});
         tap(session,SDL_SCANCODE_ESCAPE);wait(session,[](const auto& v){return v.ui && v.ui->metadata.id=="root";});
