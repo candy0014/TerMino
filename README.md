@@ -92,7 +92,8 @@ python tools/package_frontends.py --preset opengl-linux
 # Windows 使用 terminal-windows / opengl-windows；MinGW 使用 *-windows-mingw
 ```
 
-`both-linux` / `both-windows` 一次构建并输出两个独立包。当前不向 GitHub 发行，
+`both-linux` / `both-windows` 一次构建并输出两个独立包。预览发行见
+[GitHub Releases](https://github.com/candy0014/TerMino/releases)，
 包清单、完整性检查和实机待验项见 [双前端验收](docs/FRONTEND_ACCEPTANCE.md)。
 
 ## 默认操作
@@ -157,8 +158,10 @@ Linux 仍使用系统 libc、窗口库和 OpenGL 驱动。包内所有设置采�
 `.tetr/replay` 为空，不带配置、键位、地图、预设、成绩、录像或服务器历史。
 旧 `--data-dir`／`-DataDirectory` 参数仅为兼容保留，不再导入数据；本地 `.tetr` 不作修改。
 
-`.github/workflows/release.yml` 构建、测试和检查两平台合包；标签推送不会自动发行。
-发布仍需显式触发及原生体验验收通过。本地打包不会上传任何产物。
+`.github/workflows/release.yml` 构建、测试和检查两平台合包；推送
+`v日期-preview.序号` 标签时另行构建 Android APK，通过检查后自动发布预览版。
+预览发行说明保留原生设备待验项，Android CI APK 使用 debug 签名。
+正式最新版仍需显式触发及原生体验验收通过。本地打包不会上传任何产物。
 
 ## 文档与源码
 

@@ -1,0 +1,25 @@
+TerMino 桌面双前端及 Android 横屏预览版。
+
+本版本保存当前共享游戏、Bot、Quick Play、联网与房间录像、JSON 设置和存储更新，
+包含终端/OpenGL 界面与输入改进，以及 Android 多点触控和逐键虚拟按键编辑器。
+桌面两个前端继续共用规则、回放和网络实现，保留键盘操作。
+
+下载与运行：
+- Linux x64：下载 .tar.gz，完整解压；Play.sh 启动终端，PlayGL.sh 启动图形界面。
+- Windows x64：下载 .zip，完整解压；Play.bat 启动终端，PlayGL.bat 启动图形界面。
+- 桌面合包同时包含 tetr_ft7 与独立服务端（Server.sh / Server.bat）。
+- Android 8.0+：下载并安装 .apk，包含 arm64-v8a 和 x86_64，使用横屏界面。
+
+构建和验证：
+全部附件由本标签的同一源码提交在 GitHub Actions 构建。桌面执行 Linux/Windows
+Release 构建、完整 CTest、解压包和默认资源审计；Linux 图形冒烟使用隐藏窗口。
+Android 执行双 ABI 构建、APK 签名、16 KB 对齐和默认资源审计。
+附件的 .sha256 文件提供 SHA256 校验；测试日志保存在对应 Actions 运行中。
+源码和安装包不包含个人设置、地图/预设、成绩、录像或签名私钥；内置地图/预设来自
+resources/defaults 的发行默认资源。
+
+本次为预览发行。桌面物理键盘、中文输入法、DPI/显卡以及 Android 实机体验仍有
+待验收项目，详见 docs/acceptance/native.json 和 docs/android/acceptance.json。
+CI 自动化检查不代替这些人工和真实设备验收，既有正式版仍保留。
+Android APK 使用 CI 生成的 debug 证书，与此前本地预览证书不同，不能直接覆盖
+旧证书签名的安装；此版本不包含应用商店发布签名。
