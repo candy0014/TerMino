@@ -192,6 +192,7 @@ include("{script.as_posix()}")
             suffix = 'bat' if system == 'Windows' else 'sh'
             self.assertIn('tetr_gl', (destination / ('PlayGL.' + suffix)).read_text())
             self.assertNotIn('tetr_gl', (destination / ('Play.' + suffix)).read_text())
+            self.assertTrue((destination / ('Server.' + suffix)).is_file())
             self.assertTrue((destination / '.tetr/replay').is_dir())
             self.assertEqual(list((destination / '.tetr/replay').iterdir()), [])
             self.assertEqual({p.name for p in (destination / '.tetr').rglob('*') if p.is_file()},
